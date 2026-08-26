@@ -92,7 +92,7 @@ class Toolbox:
                  "status": lowest.get("status")}
                 if lowest else None
             ),
-            "faulted_ids": [r.get("id") for r in robots if r.get("status") == "fault"],
+            "faulted_ids": [r.get("id") for r in robots if r.get("status") in ("fault", "estop")],
             "unacked_alerts": len(unacked),
             "unacked_by_sev": by_sev,
             "throughput": meta.get("throughput"),

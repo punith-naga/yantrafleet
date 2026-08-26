@@ -32,7 +32,7 @@ Prereqs: Python 3.11+, a modern browser. From the repo root:
 
 ```bat
 :: 1) install
-pip install -e sim -e connector
+pip install -e core -e sim -e connector
 pip install -r copilot\requirements.txt
 
 :: 2) start the simulator (writes robots/alerts/fleet_meta to Supabase)
@@ -77,3 +77,22 @@ cd console & py -m pytest   :: needs Node for the inline-script syntax check
 ```
 
 See `TEST-REPORT.md` for the latest verification run.
+
+## v0.2 — command gate & canonical statuses
+
+Apply `supabase/0002_commands.sql` in the Supabase SQL Editor (after the v0.1
+schema). Then:
+
+1. In the console, robot actions (pause / send-to-charge / e-stop) no longer
+   act directly when a live backend is connected — they queue as `pending`
+   rows in the `commands` table.
+2. The **Pending approvals** card on Overview lets an operator approve or
+   reject each command (full audit: who asked, who decided, when, outcome).
+3. A running `py -m yantrasim --supabase` polls approved commands, executes
+   them in the world, and marks them `executed`/`failed` with a reason.
+4. Robot statuses everywhere use one vocabulary (`core/yantracore`):
+   `active · idle · charging · paused · estop · degraded · fault` — enforced
+   by a DB CHECK constraint.
+
+A live `yantrasim` feed outranks console tabs: consoles automatically become
+viewers while the simulator (or a future robot adapter) is publishing.

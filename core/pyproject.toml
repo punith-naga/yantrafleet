@@ -1,0 +1,12 @@
+[project]
+name = "yantracore"
+version = "0.2.0"
+description = "Shared contracts (status vocabulary) for YantraFleet components"
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["yantracore*"]

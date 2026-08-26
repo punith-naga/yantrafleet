@@ -19,23 +19,27 @@ from .sim import Event
 
 
 def derive_status(state: Mapping[str, Any]) -> str:
-    """Dashboard-style status from a VDA state message alone."""
+    """Canonical dashboard status from a VDA state message alone.
+
+    Returns only values from the shared vocabulary (yantracore.CANONICAL):
+    fault | estop | paused | degraded | charging | active | idle.
+    """
     errors = state.get("errors", [])
     if any(e.get("errorLevel") == "FATAL" for e in errors):
         return "fault"
     safety = state.get("safetyState", {})
     if safety.get("eStop", "NONE") != "NONE" or safety.get("fieldViolation"):
-        return "safety_stop"
+        return "estop"
+    if state.get("paused"):
+        return "paused"
     if errors:  # WARNING-level only
         return "degraded"
     if state.get("batteryState", {}).get("charging"):
         return "charging"
     if any(a.get("actionStatus") == "RUNNING" for a in state.get("actionStates", [])):
-        return "working"
+        return "active"
     if state.get("driving"):
-        return "moving"
-    if state.get("paused"):
-        return "paused"
+        return "active"
     return "idle"
 
 

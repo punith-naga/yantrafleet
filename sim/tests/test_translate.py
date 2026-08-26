@@ -38,13 +38,13 @@ def test_derive_status_priority_order():
     fatal = [{"errorType": "x", "errorLevel": "FATAL", "errorDescription": "boom"}]
     warn = [{"errorType": "x", "errorLevel": "WARNING", "errorDescription": "warm"}]
     assert derive_status(_state(errors=fatal, driving=True)) == "fault"
-    assert derive_status(_state(safetyState={"eStop": "MANUAL", "fieldViolation": False})) == "safety_stop"
+    assert derive_status(_state(safetyState={"eStop": "MANUAL", "fieldViolation": False})) == "estop"
+    assert derive_status(_state(paused=True)) == "paused"
     assert derive_status(_state(errors=warn)) == "degraded"
     assert derive_status(_state(batteryState={"batteryCharge": 50, "charging": True})) == "charging"
     assert derive_status(_state(actionStates=[{"actionId": "a", "actionType": "pick",
-                                               "actionStatus": "RUNNING"}])) == "working"
-    assert derive_status(_state(driving=True)) == "moving"
-    assert derive_status(_state(paused=True)) == "paused"
+                                               "actionStatus": "RUNNING"}])) == "active"
+    assert derive_status(_state(driving=True)) == "active"
     assert derive_status(_state()) == "idle"
 
 

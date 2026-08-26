@@ -325,7 +325,7 @@ robots.forEach(r=>{if(r.status==='active')assign(r);});
 
 /* ---------------- Telemetry / KPI store ---------------- */
 const store={
-  thrHist:[], alHist:[], alerts:[], incidents:[], missions:[], tickets:[],
+  thrHist:[], alHist:[], alerts:[], incidents:[], missions:[], tickets:[], commands:[],
   throughput:132, sla:98.2, alarmHr:6, ackedIds:new Set()
 };
 // seed 60 min of throughput history (dip 14:00-15:00 = incident narrative — dip already recovering)
@@ -473,10 +473,10 @@ function hbar(el,rows,{unit='',color='var(--s1)'}={}){ // horizontal bars, round
 }
 
 /* ================= Status helpers ================= */
-const STATUS={active:['●','var(--s3)','Active'],charging:['⚡','var(--s4)','Charging'],idle:['◌','var(--muted)','Idle'],fault:['✕','var(--crit)','Fault'],paused:['❚❚','var(--muted)','Paused']};
+const STATUS={active:['●','var(--s3)','Active'],charging:['⚡','var(--s4)','Charging'],idle:['◌','var(--muted)','Idle'],fault:['✕','var(--crit)','Fault'],paused:['❚❚','var(--muted)','Paused'],estop:['■','var(--crit)','E-Stop'],degraded:['◐','var(--serious)','Degraded']};
 /* Other writers (yantrasim / yantrabridge) publish a richer VDA-style status
    vocabulary; fold it into the console's five display states. */
-const ST_NORM={active:'active',working:'active',moving:'active',transit:'active',degraded:'active',charging:'charging',idle:'idle',fault:'fault',estop:'fault',safety_stop:'fault',paused:'paused'};
+const ST_NORM={active:'active',working:'active',moving:'active',transit:'active',to_charger:'active',degraded:'degraded',charging:'charging',idle:'idle',fault:'fault',estop:'estop',estopped:'estop',safety_stop:'estop',paused:'paused'};
 const normStatus=s=>ST_NORM[s]||'idle';
 /* yantrasim publishes pos in metres (grid ~28x16 m); the console map uses SVG px.
    Heuristic: small coordinates are metres — scale them into the map viewport. */
@@ -523,6 +523,7 @@ function rOverview(){
         <button class="btn sm" onclick="${i.go}">Open</button></div>`).join('')}
     </div>
   </div>
+  <div id="ov-approvals"></div>
   <div class="grid g2" style="margin-top:14px">
     <div class="card"><h3>Live alerts <span class="right">hover to acknowledge</span></h3><div id="ov-alerts"></div></div>
     <div class="card"><h3>Fleet at a glance</h3>
@@ -537,6 +538,7 @@ function rOverview(){
   </div>`;
   lineChart($('#ch-thr'),store.thrHist,{h:170,label:'throughput',unit:' t/hr'});
   renderAlerts($('#ov-alerts'),store.alerts.slice(0,6));
+  const ap=$('#ov-approvals'); if(ap)renderApprovals(ap);
 }
 function renderAlerts(el,list){
   el.innerHTML=list.map(a=>`<div class="al ${a.ack?'acked':'unack'}">
@@ -544,6 +546,25 @@ function renderAlerts(el,list){
     <div class="bd"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${sevBadge(a.sev)}<span class="pill">${a.src}</span></div>
     <div class="m" style="margin-top:3px">${a.msg}</div></div>
     ${a.ack?'':`<button class="btn sm ack" onclick="ackAlert('${a.id}')">Ack</button>`}</div>`).join('')||'<div class="empty">No alerts — all quiet</div>';
+}
+function renderApprovals(el){
+  const cmds=store.commands||[];
+  if(!cmds.length){el.innerHTML='';return;}
+  const CMD_IC={pause:'❚❚',resume:'▶',charge:'⚡',estop:'■'};
+  el.innerHTML=`<div class="card" style="margin-top:14px;border-color:#4a3d18">
+    <h3>Pending approvals <span class="right">human-in-the-loop command gate · executed by the live feed</span></h3>
+    ${cmds.map(c=>`<div class="al ${c.status==='pending'?'unack':''}">
+      <span class="tt">${(c.created_at||'').slice(11,16)}</span>
+      <div class="bd"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="sev ${c.cmd==='estop'?'crit':'warn'}">${CMD_IC[c.cmd]||''} ${c.cmd.toUpperCase()}</span>
+        <b>${c.robot_id}</b><span class="pill">${c.requested_by||'console'}</span>
+        <span class="pill">${c.status}</span></div>
+        ${c.note?`<div class="m" style="margin-top:3px;color:var(--muted)">${c.note}</div>`:''}</div>
+      ${c.status==='pending'?`<button class="btn sm primary ack" onclick="Sync.decideCommand('${c.id}','approved')">Approve</button>
+      <button class="btn sm danger ack" onclick="Sync.decideCommand('${c.id}','rejected')">Reject</button>`:''}
+    </div>`).join('')}
+    <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Approved commands are executed by the simulator/robot adapter and marked executed/failed with a reason — full audit trail in the commands table.</div>
+  </div>`;
 }
 function ackAlert(id){const a=store.alerts.find(x=>x.id===id);if(a){a.ack=true;if(typeof Sync!=='undefined')Sync.ackAlert(id);render();}}
 
@@ -639,6 +660,13 @@ function openRobot(id){
 }
 function closeDrawer(){$('#drawer').classList.remove('open');selRobot=null;}
 function cmdRobot(id,cmd){
+  // v0.2: when a live backend is connected, commands go through the
+  // human-approval gate (commands table) instead of acting locally.
+  if(typeof Sync!=='undefined'&&(Sync.mode==='leader'||Sync.mode==='follower')){
+    Sync.queueCommand(id,cmd==='stop'?'estop':cmd);
+    toast(id+' — '+cmd+' queued for approval (see Overview → Pending approvals)');
+    return;
+  }
   const r=robots.find(x=>x.id===id);
   if(cmd==='pause'){r.status='paused';r.log.unshift([clock(),'Paused by operator PN']);}
   if(cmd==='resume'){r.status='active';assign(r);r.log.unshift([clock(),'Resumed by operator PN']);}
@@ -1005,7 +1033,9 @@ const Sync={
       const rows=await this.q('fleet_meta?id=eq.1&select=writer_id,updated_at');
       const row=rows&&rows[0];
       const stale=!row||!row.writer_id||(Date.now()-new Date(row.updated_at).getTime()>8000);
-      if(row&&row.writer_id===this.me){this.mode='leader';}
+      const simWriter=row&&row.writer_id&&String(row.writer_id).startsWith('yantrasim');
+      if(simWriter&&!stale){this.mode='follower';}                 // v0.2: a live simulator/robot feed always outranks the console
+      else if(row&&row.writer_id===this.me){this.mode='leader';}
       else if(stale){ await this.q('fleet_meta?id=eq.1',{method:'PATCH',body:JSON.stringify({writer_id:this.me,updated_at:new Date().toISOString()})}); this.mode='leader'; }
       else this.mode='follower';
     }catch(e){ if(this.mode!=='local'){this.mode='local';} }
@@ -1013,6 +1043,26 @@ const Sync={
   },
   async cycle(){
     if(this.mode==='leader')await this.push(); else if(this.mode==='follower')await this.pull();
+    await this.pullCommands();
+  },
+  /* ---- v0.2 command queue (human-in-the-loop gate) ---- */
+  queueCommand(robotId,cmd){
+    this.q('commands',{method:'POST',headers:{'Prefer':'return=minimal'},
+      body:JSON.stringify({robot_id:robotId,cmd,requested_by:'console:PN'})})
+      .then(()=>this.pullCommands()).catch(()=>toast('⚠ Could not queue command (is 0002_commands.sql applied?)'));
+  },
+  async pullCommands(){
+    try{
+      const rows=await this.q('commands?select=*&status=in.(pending,approved)&order=created_at.asc&limit=12');
+      store.commands=rows||[];
+      const el=$('#ov-approvals'); if(el)renderApprovals(el);
+    }catch(e){/* table may not exist yet — silently skip */}
+  },
+  decideCommand(id,decision){
+    this.q('commands?id=eq.'+encodeURIComponent(id),{method:'PATCH',
+      body:JSON.stringify({status:decision,decided_by:'console:PN',decided_at:new Date().toISOString()})})
+      .then(()=>{toast('Command '+decision);this.pullCommands();})
+      .catch(()=>toast('⚠ Decision failed'));
   },
   async push(){
     const rows=robots.map(r=>({id:r.id,vendor:r.vendor,status:r.status,battery:+r.battery.toFixed(1),

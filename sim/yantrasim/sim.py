@@ -194,6 +194,13 @@ class FleetSim:
                 r.status = r.resume_status
             return
 
+        # Operator holds (v0.2 command gate): freeze in place until resumed.
+        if r.status in ("paused", "estopped"):
+            r.speed = 0.0
+            self._cool(r, dt)
+            r.battery = max(r.battery - IDLE_DRAIN * dt, 0.0)
+            return
+
         # Slow health recovery while running normally.
         r.health = min(r.health + 0.2, 100.0)
 

@@ -6,6 +6,7 @@ import logging
 import sys
 import time
 
+from .commands import apply_command
 from .sim import FleetSim
 from .transports.base import StdoutTransport, Transport
 from .transports.supabase import SupabaseTransport
@@ -65,6 +66,10 @@ def main(argv: list[str] | None = None) -> int:
         while args.ticks <= 0 or sim.tick_count < args.ticks:
             out = sim.tick(dt_s=dt)
             transport.publish(out)
+            # v0.2: execute human-approved operator commands (Supabase only).
+            if hasattr(transport, "poll_commands"):
+                transport.poll_commands(
+                    lambda rid, cmd: apply_command(sim, rid, cmd))
             for e in out.events:
                 logging.getLogger("yantrasim").info(
                     "event %s (%s): %s", e.kind, e.sev, e.msg)

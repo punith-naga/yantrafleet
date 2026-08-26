@@ -98,13 +98,20 @@ def _derive_status(msg: dict[str, Any]) -> str:
     if (safety.get("eStop") or "NONE") != "NONE" or safety.get("fieldViolation"):
         return "estop"
 
+    if msg.get("paused"):
+        return "paused"
+
+    if errors:  # non-fatal (WARNING) errors -> degraded, matching yantrasim
+        return "degraded"
+
     battery = msg.get("batteryState") or {}
     if battery.get("charging"):
         return "charging"
 
-    if msg.get("paused"):
-        return "paused"
     if msg.get("driving"):
+        return "active"
+    if any((a.get("actionStatus") or "") == "RUNNING"
+           for a in (msg.get("actionStates") or [])):
         return "active"
     return "idle"
 

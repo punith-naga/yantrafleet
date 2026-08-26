@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -63,6 +64,53 @@ class SupabaseTransport:
             self._post("alerts", alerts, on_conflict="id", merge=False)
         meta = fleet_meta_row(self.writer_id, out.sim_time_s, out.throughput_per_h, ts)
         self._post("fleet_meta", [meta], on_conflict="id", merge=True)
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "apikey": self.key,
+            "Authorization": f"Bearer {self.key}",
+            "Content-Type": "application/json",
+        }
+
+    def poll_commands(self, apply_fn) -> int:
+        """v0.2 human-in-the-loop gate, executor side.
+
+        Fetch ``approved`` commands, apply each via ``apply_fn(robot_id, cmd)
+        -> (ok, detail)``, and PATCH the row to ``executed`` / ``failed``
+        with the detail in ``note``. Returns how many were processed.
+        Network errors are logged and swallowed — the sim never dies
+        because the gate is unreachable.
+        """
+        try:
+            resp = self._client.get(
+                f"{self.rest}/commands",
+                params={"status": "eq.approved", "order": "created_at.asc",
+                        "limit": "20", "select": "id,robot_id,cmd"},
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            rows = resp.json() or []
+        except Exception as exc:  # noqa: BLE001 - availability over purity
+            log.warning("command poll failed: %s", exc)
+            return 0
+        done = 0
+        for row in rows:
+            ok, detail = apply_fn(row.get("robot_id", ""), row.get("cmd", ""))
+            body = {"status": "executed" if ok else "failed", "note": detail,
+                    "executed_at": datetime.now(timezone.utc).isoformat()}
+            try:
+                self._client.patch(
+                    f"{self.rest}/commands",
+                    params={"id": f"eq.{row['id']}"},
+                    json=body,
+                    headers=self._headers(),
+                ).raise_for_status()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("command ack failed for %s: %s", row.get("id"), exc)
+            done += 1
+            log.info("command %s %s -> %s: %s", row.get("cmd"),
+                     row.get("robot_id"), body["status"], detail)
+        return done
 
     def close(self) -> None:
         self._client.close()

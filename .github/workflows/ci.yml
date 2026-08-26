@@ -1,0 +1,31 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [core, sim, connector, copilot]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install
+        run: |
+          pip install -e core
+          if [ -f ${{ matrix.component }}/pyproject.toml ]; then pip install -e ${{ matrix.component }}; fi
+          if [ -f ${{ matrix.component }}/requirements.txt ]; then pip install -r ${{ matrix.component }}/requirements.txt; fi
+          pip install pytest httpx
+      - name: Test
+        run: cd ${{ matrix.component }} && python -m pytest tests -q
+  console:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: node scripts/check_console.mjs
+      - name: Console tests
+        run: if [ -d console/tests ]; then cd console && npm test --if-present; fi

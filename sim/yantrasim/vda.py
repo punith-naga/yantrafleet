@@ -158,7 +158,7 @@ def build_state(r: "Robot", header_id: int, timestamp: str) -> dict[str, Any]:
         "edgeStates": edge_states,
         # ---- motion ----
         "driving": driving,
-        "paused": False,
+        "paused": r.status == "paused",
         "newBaseRequest": False,
         "agvPosition": {
             "x": round(r.x, 3),
@@ -181,7 +181,7 @@ def build_state(r: "Robot", header_id: int, timestamp: str) -> dict[str, Any]:
         "operatingMode": "AUTOMATIC",
         "errors": build_errors(r.fault_kind, serial),
         "safetyState": {
-            "eStop": "MANUAL" if r.fault_kind == "estop" else "NONE",
+            "eStop": "MANUAL" if (r.fault_kind == "estop" or r.status == "estopped") else "NONE",
             "fieldViolation": r.fault_kind == "obstacle_blocked",
         },
         "actionStates": action_states,
