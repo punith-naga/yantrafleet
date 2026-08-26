@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<!-- ================================================================
+  YantraFleet CONSOLE — FleetMind ops console + Sarathi copilot bridge
+  =================================================================
+  CONFIG (all optional — the console degrades gracefully):
+
+  1. Sarathi live agent (Copilot backend)
+     - Endpoint : POST http://localhost:8001/ask   (see Copilot.SARATHI_URL)
+     - Request  : {"question": "<operator question>"}
+     - Response : {"answer": string,
+                   "evidence": [string | {label, ...}],   // rendered as chips
+                   "tier": "grounded" | "llm_only" | "offline"}
+       tier is shown as a pill: grounded/live_agent -> "live agent",
+       llm_only/model_only -> "model only", offline -> "offline".
+     - Timeout  : 4000 ms (Copilot.SARATHI_TIMEOUT_MS). On ANY failure
+       (down, non-2xx, timeout, bad JSON) the Copilot silently falls back
+       to the built-in local answer engine — the console never breaks
+       if the sarathi service is not running.
+     - To change host/port, edit Copilot.SARATHI_URL in the Copilot
+       module below. If the console is served from https, a plain-http
+       localhost endpoint may be blocked as mixed content — serve the
+       console over http (e.g. `python3 -m http.server`) for local dev.
+
+  2. Supabase sync (optional multi-tab live sync)
+     - SUPA_URL / SUPA_KEY constants near the bottom of the script.
+     - If unreachable, the console runs its local simulation.
+
+  No build step. Open index.html directly or serve statically.
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetMind — Fleet Operations (Live)</title>
+<style>
+/* ============ Design tokens (dark ops console — deliberate single-theme, ISA-101) ============ */
+:root{
+  --page:#0d0d0d; --surface:#1a1a19; --surface2:#222221; --surface3:#2a2a28;
+  --border:rgba(255,255,255,.08); --border2:rgba(255,255,255,.14);
+  --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;   /* categorical, dark-stepped */
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --accent:#3987e5;
+  --r:8px; --r-sm:6px;
+  --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--page);color:var(--ink);font-family:var(--font);font-size:13.5px;line-height:1.5;overflow:hidden}
+button{font-family:inherit;cursor:pointer}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#333;border-radius:6px;border:2px solid var(--page)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ============ App shell ============ */
+#app{display:grid;grid-template-columns:216px 1fr;grid-template-rows:52px 1fr;height:100vh}
+header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--border)}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:.01em;min-width:180px}
+.logo .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#3987e5,#199e70);display:grid;place-items:center;font-size:13px}
+.site-sel{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;color:var(--ink2);font-size:12.5px}
+.site-sel b{color:var(--ink)}
+.spacer{flex:1}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;color:var(--ink2);white-space:nowrap}
+.chip .dot{width:7px;height:7px;border-radius:50%}
+.kbd{background:var(--surface3);border:1px solid var(--border2);border-radius:4px;padding:0 5px;font-size:10.5px;color:var(--muted);font-family:inherit}
+.copilot-btn{display:flex;align-items:center;gap:8px;background:#12253f;border:1px solid #2a4a75;color:#9ec5f4;border-radius:var(--r-sm);padding:6px 13px;font-size:12.5px;font-weight:600}
+.copilot-btn:hover{background:#173050}
+.avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#d95926,#c98500);display:grid;place-items:center;font-size:11px;font-weight:700}
+
+/* ============ Sidebar ============ */
+nav{background:var(--surface);border-right:1px solid var(--border);padding:12px 8px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+nav .sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:12px 12px 5px}
+nav button{display:flex;align-items:center;gap:10px;width:100%;background:none;border:none;color:var(--ink2);padding:8px 12px;border-radius:var(--r-sm);font-size:13px;text-align:left}
+nav button:hover{background:var(--surface2);color:var(--ink)}
+nav button.on{background:var(--surface3);color:var(--ink);font-weight:600}
+nav button .ic{width:17px;text-align:center;opacity:.85;font-style:normal}
+nav button .badge{margin-left:auto;background:var(--crit);color:#fff;font-size:10.5px;font-weight:700;border-radius:9px;padding:0 6px;min-width:17px;text-align:center}
+nav button .badge.z{background:var(--surface3);color:var(--muted)}
+.nav-foot{margin-top:auto;padding:10px 12px;font-size:11px;color:var(--muted);border-top:1px solid var(--border)}
+
+/* ============ Main ============ */
+main{overflow:hidden;position:relative;display:flex}
+.view{display:none;flex:1;overflow-y:auto;padding:20px 22px}
+.view.on{display:block}
+.vhead{display:flex;align-items:baseline;gap:12px;margin-bottom:16px}
+.vhead h1{font-size:17px;font-weight:700}
+.vhead .sub{color:var(--muted);font-size:12.5px}
+.vhead .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+/* ============ Components ============ */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px}
+.card h3{font-size:12px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.card h3 .right{margin-left:auto;font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11.5px}
+.grid{display:grid;gap:14px}
+.g4{grid-template-columns:repeat(4,1fr)}
+.g2{grid-template-columns:1fr 1fr}
+.g31{grid-template-columns:2.2fr 1fr}
+.g13{grid-template-columns:1fr 2.2fr}
+.stat .val{font-size:26px;font-weight:700;letter-spacing:-.01em}
+.stat .val small{font-size:13px;color:var(--muted);font-weight:500}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:2px}
+.stat .delta{font-size:11.5px;margin-top:6px;display:flex;align-items:center;gap:5px}
+.up{color:#0ca30c}.down{color:var(--crit)}.flat{color:var(--muted)}
+.btn{background:var(--surface2);border:1px solid var(--border2);color:var(--ink);border-radius:var(--r-sm);padding:6px 13px;font-size:12.5px;font-weight:600}
+.btn:hover{background:var(--surface3)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{filter:brightness(1.1)}
+.btn.ghost{background:none;border-color:transparent;color:var(--ink2)}
+.btn.ghost:hover{background:var(--surface2)}
+.btn.sm{padding:3px 9px;font-size:11.5px}
+.btn.danger{border-color:#5c2a2a;color:#e66767}
+table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+table.t th{color:var(--muted);font-weight:600;text-align:left;padding:7px 10px;border-bottom:1px solid var(--border2);font-size:11px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+table.t td{padding:8px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+table.t tr.click{cursor:pointer}
+table.t tr.click:hover td{background:var(--surface2)}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.st .ic{font-size:11px;font-style:normal}
+.sev{display:inline-flex;align-items:center;gap:5px;border-radius:4px;padding:1px 8px;font-size:11px;font-weight:700;white-space:nowrap}
+.sev.crit{background:#3a1616;color:#e66767}
+.sev.serious{background:#33200f;color:var(--serious)}
+.sev.warn{background:#332a10;color:var(--warn)}
+.sev.info{background:var(--surface3);color:var(--ink2)}
+.bar-track{background:var(--surface3);border-radius:4px;height:6px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px}
+.pill{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 7px}
+.evd{display:inline-flex;align-items:center;gap:4px;background:#12253f;border:1px solid #2a4a75;color:#9ec5f4;border-radius:4px;padding:1px 8px;font-size:11px;font-weight:600;cursor:pointer}
+.evd:hover{background:#173050}
+.empty{color:var(--muted);font-size:12.5px;padding:14px;text-align:center}
+
+/* ============ Map ============ */
+.mapwrap{position:relative;background:#141413;border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.map-legend{position:absolute;left:12px;bottom:10px;display:flex;gap:14px;font-size:11px;color:var(--ink2);background:rgba(20,20,19,.85);border:1px solid var(--border);border-radius:6px;padding:5px 12px}
+.map-legend .it{display:flex;align-items:center;gap:6px}
+svg text{font-family:var(--font)}
+.robot-dot{cursor:pointer}
+.zone-lbl{fill:#5b5a55;font-size:11px;font-weight:600;letter-spacing:.06em}
+
+/* ============ Drawer ============ */
+.drawer{position:absolute;top:0;right:0;bottom:0;width:360px;background:var(--surface);border-left:1px solid var(--border2);transform:translateX(105%);transition:transform .22s ease;z-index:30;display:flex;flex-direction:column;box-shadow:-16px 0 40px rgba(0,0,0,.45)}
+.drawer.open{transform:none}
+.drawer .dh{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.drawer .dh h2{font-size:15px}
+.drawer .db{padding:14px 16px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px}
+.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0}
+.kv b{font-variant-numeric:tabular-nums}
+.kv span{color:var(--muted)}
+
+/* ============ Copilot panel ============ */
+#copilot{position:absolute;top:0;right:0;bottom:0;width:390px;background:var(--surface);border-left:1px solid var(--border2);transform:translateX(105%);transition:transform .22s ease;z-index:40;display:flex;flex-direction:column;box-shadow:-16px 0 40px rgba(0,0,0,.5)}
+#copilot.open{transform:none}
+.cp-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--border)}
+.cp-head .t{font-weight:700;font-size:14px}
+.cp-head .s{font-size:11px;color:var(--muted)}
+.cp-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:92%;border-radius:10px;padding:10px 13px;font-size:12.8px;line-height:1.55}
+.msg.user{align-self:flex-end;background:#1c3a63;border:1px solid #2a4a75}
+.msg.ai{align-self:flex-start;background:var(--surface2);border:1px solid var(--border)}
+.msg.ai .ev{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+.msg.ai ul{margin:6px 0 2px 16px}
+.msg.ai li{margin:2px 0}
+.msg.ai b{color:#9ec5f4}
+.sugg{display:flex;flex-direction:column;gap:6px}
+.sugg button{text-align:left;background:var(--surface2);border:1px solid var(--border);color:var(--ink2);border-radius:var(--r-sm);padding:8px 11px;font-size:12px}
+.sugg button:hover{border-color:#2a4a75;color:var(--ink)}
+.cp-input{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border)}
+.cp-input input{flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:9px 12px;font-size:13px;font-family:inherit;outline:none}
+.cp-input input:focus{border-color:#2a4a75}
+.typing{display:inline-flex;gap:4px;padding:4px 0}
+.typing i{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:ty 1s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes ty{0%,100%{opacity:.25}50%{opacity:1}}
+
+/* ============ Alerts feed ============ */
+.al{display:flex;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);align-items:flex-start;font-size:12.5px}
+.al:last-child{border-bottom:none}
+.al .tt{color:var(--muted);font-size:11px;white-space:nowrap;padding-top:2px;font-variant-numeric:tabular-nums}
+.al .bd{flex:1}
+.al .bd .m{color:var(--ink2)}
+.al.unack .bd .m{color:var(--ink)}
+.al .ack{opacity:0;transition:opacity .15s}
+.al:hover .ack{opacity:1}
+.al.acked{opacity:.45}
+
+/* ============ Charts ============ */
+.chart{position:relative}
+.tip{position:absolute;pointer-events:none;background:#242423;border:1px solid var(--border2);border-radius:6px;padding:7px 10px;font-size:11.5px;display:none;z-index:20;box-shadow:0 6px 18px rgba(0,0,0,.4);white-space:nowrap}
+.tip .h{color:var(--muted);font-size:10.5px;margin-bottom:3px}
+.tip .row{display:flex;align-items:center;gap:6px}
+.tip .sw{width:8px;height:8px;border-radius:2px}
+.tip b{font-variant-numeric:tabular-nums}
+.legend{display:flex;gap:14px;font-size:11.5px;color:var(--ink2);margin-top:6px}
+.legend .it{display:flex;align-items:center;gap:6px}
+.legend .sw{width:9px;height:9px;border-radius:2px}
+
+/* ============ Timeline replay ============ */
+.scrub{display:flex;align-items:center;gap:12px;margin-top:10px}
+.scrub input[type=range]{flex:1;accent-color:var(--accent)}
+.scrub .tm{font-variant-numeric:tabular-nums;font-size:12px;color:var(--ink2);min-width:52px}
+.tl-events{position:relative;height:22px;margin:2px 2px 0}
+.tl-ev{position:absolute;top:2px;width:10px;height:10px;border-radius:50%;transform:translateX(-50%);cursor:pointer;border:2px solid var(--page)}
+
+/* ============ Toast ============ */
+#toasts{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:100}
+.toast{background:var(--surface2);border:1px solid var(--border2);border-left:3px solid var(--accent);border-radius:var(--r-sm);padding:10px 14px;font-size:12.5px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:tin .2s ease}
+@keyframes tin{from{transform:translateY(8px);opacity:0}}
+
+@media(max-width:1100px){.g4{grid-template-columns:1fr 1fr}.g31,.g13,.g2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <div class="logo"><div class="mark">⬡</div>FleetMind <span class="pill" style="margin-left:2px">DEMO · mock data</span></div>
+  <div class="site-sel">📍 <b>BLR-DC1</b> · Bengaluru Fulfillment Center <span style="color:var(--muted)">▾</span></div>
+  <div class="spacer"></div>
+  <div class="chip" id="chip-health"><span class="dot" style="background:var(--good)"></span>Fleet health <b id="h-health" style="color:var(--ink)">—</b></div>
+  <div class="chip" title="ISA-18.2 alarm budget: ≤12/hr per operator"><span id="alarm-dot" class="dot" style="background:var(--good)"></span><span id="h-alarmrate">— alarms/hr</span></div>
+  <div class="chip" id="h-clock">14:32</div>
+  <div class="chip" id="chip-cloud" title="Supabase sync status"><span class="dot" id="cloud-dot" style="background:var(--muted)"></span><span id="cloud-lbl">connecting…</span></div>
+  <button class="copilot-btn" onclick="Copilot.toggle()">✦ Copilot <span class="kbd">⌘K</span></button>
+  <div class="avatar">PN</div>
+</header>
+<nav id="nav">
+  <div class="sec">Operate</div>
+  <button data-v="overview" class="on"><i class="ic">◫</i>Overview</button>
+  <button data-v="liveops"><i class="ic">⌖</i>Live Ops</button>
+  <button data-v="incidents"><i class="ic">⚠</i>Incidents <span class="badge" id="n-inc">3</span></button>
+  <button data-v="missions"><i class="ic">➤</i>Missions</button>
+  <div class="sec">Improve</div>
+  <button data-v="maint"><i class="ic">🔧</i>Maintenance <span class="badge z" id="n-maint">2</span></button>
+  <button data-v="analytics"><i class="ic">∿</i>Analytics</button>
+  <div class="sec">Configure</div>
+  <button data-v="fleet"><i class="ic">⬡</i>Fleet &amp; Connectors</button>
+  <div class="nav-foot">v0.1 demo · VDA 5050 · 3 vendors<br><span style="color:#0ca30c">●</span> Sim feed connected</div>
+</nav>
+<main id="main">
+  <div class="view on" id="v-overview"></div>
+  <div class="view" id="v-liveops"></div>
+  <div class="view" id="v-incidents"></div>
+  <div class="view" id="v-missions"></div>
+  <div class="view" id="v-maint"></div>
+  <div class="view" id="v-analytics"></div>
+  <div class="view" id="v-fleet"></div>
+  <div class="drawer" id="drawer"></div>
+  <div id="copilot"></div>
+</main>
+</div>
+<div id="toasts"></div>
+<div class="tip" id="tip"></div>
+<script>
+"use strict";
+/* ================================================================
+   FleetMind demo — all mock. Architecture mirrors the real product:
+   Sim (→ later: MQTT/VDA5050 ingest) → Store → Views + Copilot
+   ================================================================ */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const fmt=n=>n.toLocaleString('en-IN');
+const pad=n=>String(n).padStart(2,'0');
+let simMin = 14*60+32;                       // sim clock 14:32
+const clock=()=>`${pad(Math.floor(simMin/60)%24)}:${pad(Math.floor(simMin%60))}`;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+
+/* ---------------- Warehouse geometry (SVG coords 1000x520) ---------------- */
+const ZONES=[
+  {n:'INBOUND',x:20,y:40,w:130,h:440,c:'#191c22'},
+  {n:'STORAGE A',x:180,y:40,w:290,h:200,c:'#17181c'},
+  {n:'STORAGE B',x:180,y:280,w:290,h:200,c:'#17181c'},
+  {n:'PACK',x:510,y:40,w:200,h:440,c:'#191b18'},
+  {n:'OUTBOUND',x:850,y:40,w:130,h:280,c:'#191c22'},
+  {n:'CHARGE',x:850,y:360,w:130,h:120,c:'#141a14'},
+];
+const RACKS=[]; // storage racks
+for(let r=0;r<3;r++){for(let z=0;z<2;z++){RACKS.push({x:200,y:60+z*240+r*62,w:250,h:26});}}
+for(let r=0;r<5;r++){RACKS.push({x:530,y:60+r*84,w:70,h:40});RACKS.push({x:620,y:60+r*84,w:70,h:40});}
+// waypoint nodes robots travel between (aisles)
+const WP={
+  in1:[85,120], in2:[85,300], in3:[85,440],
+  a1:[185,105],a2:[330,105],a3:[460,105],a4:[185,168],a5:[330,168],a6:[460,168],
+  b1:[185,345],b2:[330,345],b3:[460,345],b4:[185,408],b5:[330,408],b6:[460,408],
+  mid1:[490,120],mid2:[490,260],mid3:[490,420],
+  p1:[605,130],p2:[605,260],p3:[605,390],
+  out1:[790,120],out2:[915,150],out3:[915,260],
+  chg1:[880,400],chg2:[915,430],chg3:[950,400],
+  x1:[790,260],x2:[790,420]
+};
+const LANES=[['in1','a1'],['in2','a4'],['in2','b1'],['in3','b4'],['a1','a2'],['a2','a3'],['a4','a5'],['a5','a6'],['b1','b2'],['b2','b3'],['b4','b5'],['b5','b6'],['a3','mid1'],['a6','mid1'],['a6','mid2'],['b3','mid2'],['b3','mid3'],['b6','mid3'],['mid1','p1'],['mid2','p2'],['mid3','p3'],['p1','out1'],['p2','x1'],['p3','x2'],['out1','out2'],['x1','out3'],['x2','chg1'],['chg1','chg2'],['chg1','chg3'],['out3','out2'],['x1','p2'],['in1','in2'],['in2','in3']];
+const ADJ={};LANES.forEach(([a,b])=>{(ADJ[a]=ADJ[a]||[]).push(b);(ADJ[b]=ADJ[b]||[]).push(a);});
+function route(from,to){ // BFS
+  const q=[[from]],seen=new Set([from]);
+  while(q.length){const p=q.shift(),n=p[p.length-1];
+    if(n===to)return p;
+    for(const m of (ADJ[n]||[]))if(!seen.has(m)){seen.add(m);q.push([...p,m]);}}
+  return [from];
+}
+const PICKS=['a1','a2','a3','a4','a5','a6','b1','b2','b4','b5','b6'], DROPS=['p1','p2','p3'], OUTS=['out2','out3'];
+
+/* ---------------- Fleet state ---------------- */
+const VENDORS=['Ati Sherpa','MiR 250','OTTO 600'];
+const robots=[];
+for(let i=1;i<=10;i++){
+  const wp=Object.keys(WP)[Math.floor(rnd(0,Object.keys(WP).length))];
+  robots.push({
+    id:'AMR-'+pad(i), vendor:VENDORS[i%3], fw:'2.'+(3+i%4)+'.1',
+    status:'active',                    // active|charging|idle|fault|paused
+    node:wp, pos:[...WP[wp]], path:[], seg:0, prog:0,
+    battery:rnd(45,95), speedMax:rnd(1.2,1.7), speed:0,
+    tasksDone:Math.floor(rnd(38,86)), task:null,
+    health:rnd(84,99), motorTemp:rnd(38,52), errs:Math.floor(rnd(0,3)),
+    spdHist:Array.from({length:40},()=>0), batHist:[], log:[]
+  });
+}
+// scripted actors for the demo narrative
+robots[6].status='fault'; robots[6].battery=61; robots[6].node='b3'; robots[6].pos=[...WP.b3]; robots[6].faultMsg='Localization confidence 0.31 — position lost';
+robots[2].health=71; robots[2].motorTemp=63;           // maintenance story
+robots[8].status='charging'; robots[8].node='chg2'; robots[8].pos=[...WP.chg2]; robots[8].battery=34;
+
+function assign(r){
+  const pick=PICKS[Math.floor(rnd(0,PICKS.length))], drop=DROPS[Math.floor(rnd(0,DROPS.length))];
+  r.task={id:'T-'+Math.floor(rnd(4200,4900)),kind:'Pick → Pack',from:pick,to:drop,started:simMin};
+  r.path=route(r.node,pick).concat(route(pick,drop).slice(1)); r.seg=0; r.prog=0;
+}
+robots.forEach(r=>{if(r.status==='active')assign(r);});
+
+/* ---------------- Telemetry / KPI store ---------------- */
+const store={
+  thrHist:[], alHist:[], alerts:[], incidents:[], missions:[], tickets:[],
+  throughput:132, sla:98.2, alarmHr:6, ackedIds:new Set()
+};
+// seed 60 min of throughput history (dip 14:00-15:00 = incident narrative — dip already recovering)
+for(let m=0;m<60;m++){const t=simMin-60+m;
+  let v=128+Math.sin(m/9)*7+rnd(-4,4);
+  if(t>=14*60+2&&t<=14*60+26)v-=24;           // the dip
+  store.thrHist.push({t,v:Math.round(v)});}
+const AL_SEED=[
+  ['crit','AMR-07 localization fault — stopped in Aisle B3','AMR-07',14*60+2,false],
+  ['serious','Traffic congestion: 3 reroutes around Aisle B3','fleet',14*60+5,false],
+  ['warn','AMR-09 battery 34% — sent to charge','AMR-09',14*60+11,true],
+  ['warn','AMR-03 drivetrain vibration above baseline (2.8σ)','AMR-03',13*60+48,true],
+  ['info','Firmware 2.6.1 available for 4 × MiR 250','fleet',13*60+22,true],
+];
+AL_SEED.forEach(([sev,msg,src,t,ack],i)=>store.alerts.push({id:'AL-'+(900+i),sev,msg,src,t,ack}));
+store.incidents=[
+  {id:'INC-1042',sev:'crit',title:'AMR-07 localization loss blocking Aisle B3',src:'AMR-07',t:14*60+2,state:'Open',
+   impact:'Throughput −18% for 24 min · 3 robots rerouted · 11 tasks delayed',
+   rca:'Reflector panel at rack B3-04 was moved during the 13:40 replenishment (WMS job W-2291). AMR-07 (LiDAR-SLAM) lost localization confidence below the 0.35 threshold and executed a protective stop mid-aisle. MiR and OTTO units rerouted via Aisle B5-B6, adding ~90s per task.',
+   fix:'Dispatch operator to clear B3 · re-localize AMR-07 from QR anchor B3-A2 · flag rack B3-04 in the replenishment SOP',
+   dur:24},
+  {id:'INC-1041',sev:'serious',title:'Charge-bay contention delayed 2 robots at shift start',src:'CHARGE',t:9*60+14,state:'Resolved',
+   impact:'6 tasks delayed ~4 min · no SLA breach',rca:'Three robots hit the 30% battery threshold within 5 min of shift start; only 2 of 3 bays free. Root cause: overnight charge scheduling did not stagger end-of-charge times.',fix:'Enable staggered charge targets (85/90/95%) — shipped in policy v12',dur:16},
+  {id:'INC-1039',sev:'warn',title:'WMS task sync latency spike (4.2s p95)',src:'connector',t:'yesterday',state:'Resolved',
+   impact:'No task loss · queue depth peaked at 14',rca:'WMS webhook batch window misconfigured after vendor update.',fix:'Pinned batch window to 500ms; added latency alert at 2s p95',dur:41},
+];
+store.missions=[
+  {id:'M-311',name:'Cycle count — Storage A',robots:['AMR-02','AMR-05'],state:'Running',prog:62,eta:'15:20'},
+  {id:'M-312',name:'Outbound wave #7 (staging)',robots:['AMR-01','AMR-04','AMR-06'],state:'Running',prog:38,eta:'15:45'},
+  {id:'M-310',name:'Inbound putaway — Dock 2',robots:['AMR-08'],state:'Queued',prog:0,eta:'—'},
+  {id:'M-309',name:'Empty-pallet return sweep',robots:['AMR-10'],state:'Done',prog:100,eta:'13:58'},
+];
+store.tickets=[
+  {id:'MT-88',rob:'AMR-03',comp:'Drive motor (L)',pred:'Bearing wear — RUL ≈ 12 days',conf:.84,state:'Open',action:'Order bearing kit BRG-2044'},
+  {id:'MT-87',rob:'AMR-07',comp:'LiDAR',pred:'Dust occlusion trend on rear channel',conf:.61,state:'Open',action:'Clean sensor at next charge'},
+];
+
+function pushAlert(sev,msg,src){
+  const a={id:'AL-'+Date.now().toString(36)+Math.floor(rnd(10,99)),sev,msg,src,t:simMin,ack:false};
+  store.alerts.unshift(a); if(store.alerts.length>30)store.alerts.pop();
+  if(typeof Sync!=='undefined')Sync.insertAlert(a);
+  toast((sev==='crit'?'🔴 ':sev==='serious'?'🟠 ':'🟡 ')+msg);
+  return a;
+}
+function toast(m){const d=document.createElement('div');d.className='toast';d.textContent=m;$('#toasts').appendChild(d);setTimeout(()=>d.remove(),4200);}
+
+/* ---------------- Simulation tick ---------------- */
+let speedMult=1, tick=0;
+function step(dt){
+  simMin+=dt*speedMult*0.5;  tick++;
+  for(const r of robots){
+    r.batHist.push(r.battery); if(r.batHist.length>120)r.batHist.shift();
+    if(r.status==='charging'){r.battery=Math.min(100,r.battery+0.15*speedMult);r.speed=0;
+      if(r.battery>=85){r.status='active';r.node='chg1';assign(r);r.log.unshift([clock(),'Charge complete → resuming tasks']);}
+    }else if(r.status==='fault'||r.status==='paused'){r.speed=0;
+    }else{ // active — move along path
+      if(!r.path.length||r.seg>=r.path.length-1){ r.tasksDone++; r.node=r.path[r.path.length-1]||r.node;
+        if(r.battery<30){r.status='charging';r.path=route(r.node,'chg2');r.seg=0;r.prog=0;r.task=null;
+          r.log.unshift([clock(),'Battery '+r.battery.toFixed(0)+'% → autonomous charge']);}
+        else assign(r);
+        continue;}
+      const a=WP[r.path[r.seg]],b=WP[r.path[r.seg+1]];
+      const dx=b[0]-a[0],dy=b[1]-a[1],len=Math.hypot(dx,dy);
+      r.speed=r.speedMax*rnd(.82,1);
+      r.prog+=(r.speed*22*dt*speedMult)/len;
+      if(r.prog>=1){r.prog=0;r.seg++;r.node=r.path[r.seg];}
+      const p=Math.min(r.prog,1);
+      r.pos=[a[0]+dx*p,a[1]+dy*p];
+      r.battery=Math.max(5,r.battery-0.012*speedMult);
+      r.motorTemp=Math.min(70,r.motorTemp+rnd(-.1,.12));
+    }
+    r.spdHist.push(r.speed);if(r.spdHist.length>40)r.spdHist.shift();
+  }
+  // KPIs
+  const active=robots.filter(r=>r.status==='active').length;
+  const recovering=simMin<14*60+40;
+  store.throughput=Math.round(112+active*3.2+Math.sin(simMin/8)*5+(recovering?-6:2)+rnd(-2,2));
+  if(tick%4===0){store.thrHist.push({t:simMin,v:store.throughput});if(store.thrHist.length>60)store.thrHist.shift();}
+  store.alarmHr=Math.max(2,Math.round(store.alerts.filter(a=>!a.ack&&typeof a.t==='number'&&simMin-a.t<60).length+2));
+  // occasional ambient events
+  if(tick%90===0){const r=robots[Math.floor(rnd(0,10))];if(r.status==='active')pushAlert('info','Path re-planned for '+r.id+' (congestion avoidance)',r.id);}
+  if(tick%140===70)pushAlert('warn',robots[4].id+' pick verification retry at '+robots[4].node.toUpperCase(),robots[4].id);
+}
+
+/* ================= Chart helpers (hand-rolled SVG, dataviz spec) ================= */
+const tip=$('#tip');
+function showTip(html,x,y){tip.innerHTML=html;tip.style.display='block';
+  const r=tip.getBoundingClientRect();
+  tip.style.left=Math.min(x+14,innerWidth-r.width-12)+'px';
+  tip.style.top=Math.max(8,y-r.height-10)+'px';}
+function hideTip(){tip.style.display='none';}
+
+function lineChart(el,data,{h=150,color='var(--s1)',unit='',label='value',fmtX=t=>clock2(t)}={}){
+  const w=el.clientWidth||600, P={l:34,r:8,t:8,b:20};
+  const vs=data.map(d=>d.v), min=Math.min(...vs), max=Math.max(...vs), pad=(max-min)*0.15||10;
+  const y0=Math.max(0,min-pad), y1=max+pad;
+  const X=i=>P.l+(i/(data.length-1))*(w-P.l-P.r);
+  const Y=v=>P.t+(1-(v-y0)/(y1-y0))*(h-P.t-P.b);
+  let grid='',ticks='';
+  for(let g=0;g<4;g++){const v=y0+(y1-y0)*g/3, y=Y(v);
+    grid+=`<line x1="${P.l}" x2="${w-P.r}" y1="${y}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>`;
+    ticks+=`<text x="${P.l-6}" y="${y+3.5}" text-anchor="end" font-size="10" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${Math.round(v)}</text>`;}
+  const lbls=[0,Math.floor(data.length/2),data.length-1].map(i=>`<text x="${X(i)}" y="${h-5}" text-anchor="middle" font-size="10" fill="var(--muted)">${fmtX(data[i].t)}</text>`).join('');
+  const pts=data.map((d,i)=>`${X(i).toFixed(1)},${Y(d.v).toFixed(1)}`).join(' ');
+  const area=`M${X(0)},${Y(data[0].v)} L${pts.split(' ').join(' L')} L${X(data.length-1)},${h-P.b} L${X(0)},${h-P.b} Z`;
+  el.innerHTML=`<svg width="${w}" height="${h}" style="display:block">
+    ${grid}${ticks}${lbls}
+    <path d="${area}" fill="${color}" opacity="0.10"/>
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
+    <line id="ch-x" y1="${P.t}" y2="${h-P.b}" stroke="var(--border2)" stroke-width="1" style="display:none"/>
+    <circle id="ch-dot" r="4" fill="${color}" stroke="var(--surface)" stroke-width="2" style="display:none"/>
+    <rect x="${P.l}" y="${P.t}" width="${w-P.l-P.r}" height="${h-P.t-P.b}" fill="transparent" class="hov"/>
+  </svg>`;
+  const svg=el.querySelector('svg'),hov=el.querySelector('.hov'),xl=el.querySelector('#ch-x'),dot=el.querySelector('#ch-dot');
+  hov.addEventListener('mousemove',e=>{
+    const bx=svg.getBoundingClientRect();
+    const i=Math.round(((e.clientX-bx.left)-P.l)/((w-P.l-P.r)/(data.length-1)));
+    const j=Math.max(0,Math.min(data.length-1,i)), d=data[j];
+    xl.setAttribute('x1',X(j));xl.setAttribute('x2',X(j));xl.style.display='block';
+    dot.setAttribute('cx',X(j));dot.setAttribute('cy',Y(d.v));dot.style.display='block';
+    showTip(`<div class="h">${fmtX(d.t)}</div><div class="row"><span class="sw" style="background:${color.startsWith('var')?'#3987e5':color}"></span>${label}&nbsp;<b>${d.v}${unit}</b></div>`,e.clientX,e.clientY);});
+  hov.addEventListener('mouseleave',()=>{xl.style.display='none';dot.style.display='none';hideTip();});
+}
+const clock2=t=>typeof t==='number'?`${pad(Math.floor(t/60)%24)}:${pad(Math.floor(t%60))}`:t;
+
+function spark(vals,{w=110,h=26,color='var(--s1)'}={}){
+  if(!vals.length)return '';
+  const min=Math.min(...vals),max=Math.max(...vals),rg=(max-min)||1;
+  const pts=vals.map((v,i)=>`${(i/(vals.length-1))*w},${h-2-((v-min)/rg)*(h-6)}`).join(' ');
+  return `<svg width="${w}" height="${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+}
+function hbar(el,rows,{unit='',color='var(--s1)'}={}){ // horizontal bars, rounded data-end
+  const max=Math.max(...rows.map(r=>r.v))||1;
+  el.innerHTML=rows.map(r=>`
+    <div style="display:flex;align-items:center;gap:10px;margin:7px 0" class="hb" data-n="${r.n}" data-v="${r.v}">
+      <span style="width:64px;font-size:11.5px;color:var(--ink2);text-align:right;font-variant-numeric:tabular-nums">${r.n}</span>
+      <div style="flex:1;height:14px;position:relative">
+        <div style="position:absolute;inset:0;border-radius:0 4px 4px 0;background:${r.c||color};width:${(r.v/max*100).toFixed(1)}%;opacity:.9"></div>
+      </div>
+      <b style="width:52px;font-size:11.5px;font-variant-numeric:tabular-nums">${r.v}${unit}</b>
+    </div>`).join('');
+  el.querySelectorAll('.hb').forEach(d=>{
+    d.addEventListener('mousemove',e=>showTip(`<div class="row"><b>${d.dataset.n}</b>&nbsp;${d.dataset.v}${unit}</div>`,e.clientX,e.clientY));
+    d.addEventListener('mouseleave',hideTip);});
+}
+
+/* ================= Status helpers ================= */
+const STATUS={active:['●','var(--s3)','Active'],charging:['⚡','var(--s4)','Charging'],idle:['◌','var(--muted)','Idle'],fault:['✕','var(--crit)','Fault'],paused:['❚❚','var(--muted)','Paused']};
+/* Other writers (yantrasim / yantrabridge) publish a richer VDA-style status
+   vocabulary; fold it into the console's five display states. */
+const ST_NORM={active:'active',working:'active',moving:'active',transit:'active',degraded:'active',charging:'charging',idle:'idle',fault:'fault',estop:'fault',safety_stop:'fault',paused:'paused'};
+const normStatus=s=>ST_NORM[s]||'idle';
+/* yantrasim publishes pos in metres (grid ~28x16 m); the console map uses SVG px.
+   Heuristic: small coordinates are metres — scale them into the map viewport. */
+const posToSvg=p=>Array.isArray(p)&&p.length===2&&p[0]!=null&&Math.abs(p[0])<=40&&Math.abs(p[1])<=40?[80+p[0]*28,50+p[1]*20]:p;
+const stBadge=s=>{const[ic,c,l]=STATUS[s]||STATUS[normStatus(s)]||STATUS.idle;return `<span class="st" style="color:${c}"><i class="ic">${ic}</i>${l}</span>`;};
+const sevBadge=s=>({crit:'<span class="sev crit">▲ CRITICAL</span>',serious:'<span class="sev serious">▲ SERIOUS</span>',warn:'<span class="sev warn">● WARNING</span>',info:'<span class="sev info">○ INFO</span>'}[s]);
+const batColor=b=>b>50?'var(--s3)':b>25?'var(--warn)':'var(--crit)';
+
+/* ================= Views ================= */
+function fleetStats(){
+  const on=robots.filter(r=>r.status!=='fault').length;
+  const faults=robots.filter(r=>r.status==='fault').length;
+  const avgB=robots.reduce((s,r)=>s+r.battery,0)/robots.length;
+  const health=Math.round(100 - faults*9 - store.alerts.filter(a=>!a.ack&&a.sev!=='info').length*2.5 - (avgB<35?6:0));
+  const tasks=robots.reduce((s,r)=>s+r.tasksDone,0);
+  return {on,faults,avgB,health,tasks,util:Math.round(robots.filter(r=>r.status==='active').length/robots.length*100)};
+}
+
+function rOverview(){
+  const s=fleetStats(), unack=store.alerts.filter(a=>!a.ack);
+  const topIssues=[
+    {t:'AMR-07 fault is the top throughput drag',d:'Blocking Aisle B3 · 24 min · use Copilot for RCA',sev:'crit',go:"openIncident('INC-1042')"},
+    {t:'AMR-03 drivetrain trending to failure',d:'RUL ≈ 12 days · bearing kit recommended',sev:'serious',go:"go('maint')"},
+    {t:'Charge policy v12 active',d:'Staggered targets — contention resolved',sev:'info',go:"go('analytics')"},
+  ];
+  $('#v-overview').innerHTML=`
+  <div class="vhead"><h1>Overview</h1><span class="sub">Shift 2 · 06:00–15:00 · ${clock()}</span>
+    <div class="right"><button class="btn sm ghost" onclick="Copilot.ask('Draft the shift handover report')">✦ Draft shift report</button></div></div>
+  <div class="grid g4">
+    <div class="card stat"><div class="val" id="ov-health">${s.health}<small>/100</small></div><div class="lbl">Fleet health</div><div class="delta ${s.health>85?'up':'down'}">${s.health>85?'▲ Normal band':'▼ Degraded — 1 fault open'}</div></div>
+    <div class="card stat"><div class="val">${s.on}<small>/10 online</small></div><div class="lbl">Robots</div><div class="delta flat">${robots.filter(r=>r.status==='active').length} active · ${robots.filter(r=>r.status==='charging').length} charging · ${s.faults} fault</div></div>
+    <div class="card stat"><div class="val" id="ov-thr">${store.throughput}<small> tasks/hr</small></div><div class="lbl">Throughput</div><div class="delta ${store.throughput>125?'up':'down'}">${store.throughput>125?'▲':'▼'} vs 131 target</div></div>
+    <div class="card stat"><div class="val">${unack.length}<small> open</small></div><div class="lbl">Unacked alerts</div><div class="delta ${store.alarmHr<=12?'up':'down'}">${store.alarmHr}/hr · budget ≤12 <span class="pill" title="ISA-18.2">ISA-18.2</span></div></div>
+  </div>
+  <div class="grid g31" style="margin-top:14px">
+    <div class="card"><h3>Throughput — last 60 min <span class="right">tasks/hr · 1-min buckets</span></h3>
+      <div class="chart" id="ch-thr"></div>
+      <div style="margin-top:8px;font-size:12px;color:var(--ink2)">The 14:02–14:26 dip is <span class="evd" onclick="openIncident('INC-1042')">INC-1042</span> — AMR-07 localization fault. Recovery in progress.</div>
+    </div>
+    <div class="card"><h3>Top issues</h3>
+      ${topIssues.map(i=>`<div style="padding:9px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;gap:8px;align-items:center">${sevBadge(i.sev)}<b style="font-size:12.5px">${i.t}</b></div>
+        <div style="color:var(--muted);font-size:11.5px;margin:4px 0 6px">${i.d}</div>
+        <button class="btn sm" onclick="${i.go}">Open</button></div>`).join('')}
+    </div>
+  </div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h3>Live alerts <span class="right">hover to acknowledge</span></h3><div id="ov-alerts"></div></div>
+    <div class="card"><h3>Fleet at a glance</h3>
+      <table class="t"><thead><tr><th>Robot</th><th>Status</th><th>Battery</th><th>Task</th><th>Speed</th></tr></thead>
+      <tbody>${robots.slice(0,6).map(r=>`<tr class="click" onclick="openRobot('${r.id}')">
+        <td><b>${r.id}</b> <span class="pill">${r.vendor}</span></td><td>${stBadge(r.status)}</td>
+        <td><div style="display:flex;align-items:center;gap:8px"><div class="bar-track" style="width:52px"><div class="bar-fill" style="width:${r.battery}%;background:${batColor(r.battery)}"></div></div>${r.battery.toFixed(0)}%</div></td>
+        <td style="color:var(--ink2)">${r.task?r.task.kind:'—'}</td><td>${r.speed.toFixed(1)} m/s</td></tr>`).join('')}
+      </tbody></table>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="go('liveops')">View all 10 robots →</button>
+    </div>
+  </div>`;
+  lineChart($('#ch-thr'),store.thrHist,{h:170,label:'throughput',unit:' t/hr'});
+  renderAlerts($('#ov-alerts'),store.alerts.slice(0,6));
+}
+function renderAlerts(el,list){
+  el.innerHTML=list.map(a=>`<div class="al ${a.ack?'acked':'unack'}">
+    <span class="tt">${clock2(a.t)}</span>
+    <div class="bd"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${sevBadge(a.sev)}<span class="pill">${a.src}</span></div>
+    <div class="m" style="margin-top:3px">${a.msg}</div></div>
+    ${a.ack?'':`<button class="btn sm ack" onclick="ackAlert('${a.id}')">Ack</button>`}</div>`).join('')||'<div class="empty">No alerts — all quiet</div>';
+}
+function ackAlert(id){const a=store.alerts.find(x=>x.id===id);if(a){a.ack=true;if(typeof Sync!=='undefined')Sync.ackAlert(id);render();}}
+
+/* ---------------- Live Ops ---------------- */
+let selRobot=null;
+function rLiveOps(){
+  $('#v-liveops').innerHTML=`
+  <div class="vhead"><h1>Live Ops</h1><span class="sub">BLR-DC1 floor · real-time · click a robot</span>
+    <div class="right">
+      <span class="chip"><span class="dot" style="background:var(--s3)"></span>Active</span>
+      <span class="chip"><span class="dot" style="background:var(--s4)"></span>Charging</span>
+      <span class="chip"><span class="dot" style="background:var(--crit)"></span>Fault</span>
+      <button class="btn sm" id="spd-btn" onclick="cycleSpeed()">Sim ×${speedMult}</button>
+    </div></div>
+  <div class="grid g31">
+    <div class="mapwrap"><svg id="map" viewBox="0 0 1000 520" style="display:block;width:100%"></svg>
+      <div class="map-legend"><span class="it">▭ racks</span><span class="it">— lanes</span><span class="it" style="color:#9ec5f4">⚑ tap robot for detail</span></div>
+    </div>
+    <div class="card" style="max-height:560px;overflow-y:auto"><h3>Fleet · 10 robots</h3><div id="fl-list"></div></div>
+  </div>`;
+  drawMapBase(); updateMap(); renderFleetList();
+}
+function drawMapBase(){
+  const svg=$('#map'); if(!svg)return;
+  let s='';
+  ZONES.forEach(z=>{s+=`<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="8" fill="${z.c}" stroke="var(--border)"/>
+    <text class="zone-lbl" x="${z.x+10}" y="${z.y+18}">${z.n}</text>`;});
+  LANES.forEach(([a,b])=>{const p=WP[a],q=WP[b];s+=`<line x1="${p[0]}" y1="${p[1]}" x2="${q[0]}" y2="${q[1]}" stroke="#232322" stroke-width="7" stroke-linecap="round"/>`;});
+  RACKS.forEach(r=>{s+=`<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="4" fill="#26262a" stroke="#31313a"/>`;});
+  s+=`<text x="880" y="352" font-size="10" fill="#4f6b4f">⚡ 3 bays</text>`;
+  s+=`<g id="robots-layer"></g><g id="fx-layer"></g>`;
+  svg.innerHTML=s;
+}
+function updateMap(){
+  const layer=$('#robots-layer'); if(!layer)return;
+  layer.innerHTML=robots.map(r=>{
+    const[ic,c]=STATUS[r.status]||STATUS[normStatus(r.status)]||STATUS.idle;
+    const col=r.status==='active'?'#8f8f8a':r.status==='charging'?'var(--s4)':r.status==='fault'?'var(--crit)':'#6b6b66';
+    const ring=r.id===selRobot?`<circle r="15" fill="none" stroke="#3987e5" stroke-width="2" opacity=".9"/>`:'';
+    const pulse=r.status==='fault'?`<circle r="17" fill="none" stroke="var(--crit)" stroke-width="1.5" opacity=".5"><animate attributeName="r" values="12;22" dur="1.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".6;0" dur="1.6s" repeatCount="indefinite"/></circle>`:'';
+    return `<g class="robot-dot" transform="translate(${r.pos[0].toFixed(1)},${r.pos[1].toFixed(1)})" onclick="openRobot('${r.id}')">
+      ${pulse}${ring}
+      <circle r="10" fill="${col}" stroke="var(--page)" stroke-width="2"/>
+      <text y="3.5" text-anchor="middle" font-size="8.5" font-weight="700" fill="#0d0d0d">${r.id.slice(4)}</text>
+      <text y="-14" text-anchor="middle" font-size="9" fill="var(--ink2)">${r.id}</text>
+    </g>`;}).join('');
+}
+function renderFleetList(){
+  const el=$('#fl-list'); if(!el)return;
+  el.innerHTML=robots.map(r=>`
+   <div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer" onclick="openRobot('${r.id}')">
+     <div><b style="font-size:12.5px">${r.id}</b><div style="font-size:10.5px;color:var(--muted)">${r.vendor}</div></div>
+     <div style="margin-left:auto;text-align:right">${stBadge(r.status)}
+       <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:3px;font-size:11px;color:var(--ink2)">
+       <div class="bar-track" style="width:44px"><div class="bar-fill" style="width:${r.battery}%;background:${batColor(r.battery)}"></div></div>${r.battery.toFixed(0)}%</div>
+     </div></div>`).join('');
+}
+function cycleSpeed(){speedMult=speedMult===1?2:speedMult===2?4:1;const b=$('#spd-btn');if(b)b.textContent='Sim ×'+speedMult;}
+
+/* ---------------- Robot drawer ---------------- */
+function openRobot(id){
+  selRobot=id; const r=robots.find(x=>x.id===id); const d=$('#drawer');
+  d.innerHTML=`
+  <div class="dh"><h2>${r.id}</h2><span class="pill">${r.vendor}</span>${stBadge(r.status)}
+    <button class="btn ghost sm" style="margin-left:auto" onclick="closeDrawer()">✕</button></div>
+  <div class="db">
+    ${r.status==='fault'?`<div class="card" style="border-color:#5c2a2a;background:#221214"><b style="color:#e66767">✕ ${r.faultMsg}</b>
+      <div style="font-size:11.5px;color:var(--ink2);margin-top:4px">Protective stop engaged · blocking Aisle B3</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn sm primary" onclick="fixRobot('${r.id}')">Re-localize from anchor</button>
+        <button class="btn sm" onclick="Copilot.ask('Why did ${r.id} fault?')">✦ Ask Copilot</button></div></div>`:''}
+    <div class="card">
+      <div class="kv"><span>Battery</span><b style="color:${batColor(r.battery)}">${r.battery.toFixed(0)}%</b></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${r.battery}%;background:${batColor(r.battery)}"></div></div>
+      <div class="kv" style="margin-top:8px"><span>Speed</span><b>${r.speed.toFixed(2)} m/s</b></div>
+      <div>${spark(r.spdHist,{w:300,h:30,color:'#3987e5'})}</div>
+      <div class="kv"><span>Motor temp</span><b style="color:${r.motorTemp>60?'var(--serious)':'var(--ink)'}">${r.motorTemp.toFixed(0)}°C</b></div>
+      <div class="kv"><span>Health score</span><b>${r.health.toFixed(0)}/100</b></div>
+      <div class="kv"><span>Tasks this shift</span><b>${r.tasksDone}</b></div>
+      <div class="kv"><span>Firmware</span><b>${r.fw}</b></div>
+      <div class="kv"><span>Current task</span><b>${r.task?r.task.id+' · '+r.task.kind:'—'}</b></div>
+    </div>
+    <div class="card"><h3>Actions</h3><div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${r.status==='paused'?`<button class="btn sm primary" onclick="cmdRobot('${r.id}','resume')">▶ Resume</button>`:`<button class="btn sm" onclick="cmdRobot('${r.id}','pause')">❚❚ Pause</button>`}
+      <button class="btn sm" onclick="cmdRobot('${r.id}','charge')">⚡ Send to charge</button>
+      <button class="btn sm danger" onclick="cmdRobot('${r.id}','stop')">■ E-stop</button></div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Commands are human-approved and audit-logged (mock)</div></div>
+    <div class="card"><h3>Recent events</h3>
+      ${(r.log.length?r.log:[[clock2(simMin-8),'Task '+(r.task?r.task.id:'T-4408')+' started'],[clock2(simMin-22),'Passed node '+r.node.toUpperCase()],[clock2(simMin-40),'Battery check OK']]).slice(0,6).map(l=>`<div class="al"><span class="tt">${l[0]}</span><div class="bd"><span class="m">${l[1]}</span></div></div>`).join('')}
+    </div>
+  </div>`;
+  d.classList.add('open');
+}
+function closeDrawer(){$('#drawer').classList.remove('open');selRobot=null;}
+function cmdRobot(id,cmd){
+  const r=robots.find(x=>x.id===id);
+  if(cmd==='pause'){r.status='paused';r.log.unshift([clock(),'Paused by operator PN']);}
+  if(cmd==='resume'){r.status='active';assign(r);r.log.unshift([clock(),'Resumed by operator PN']);}
+  if(cmd==='charge'){r.status='active';r.path=route(r.node,'chg2');r.seg=0;r.prog=0;r.task=null;r.battery=Math.min(r.battery,29);r.log.unshift([clock(),'Sent to charge by operator PN']);}
+  if(cmd==='stop'){r.status='paused';r.speed=0;r.log.unshift([clock(),'E-STOP by operator PN']);}
+  toast(id+' — '+cmd+' command acknowledged');
+  openRobot(id); render();
+}
+function fixRobot(id){
+  const r=robots.find(x=>x.id===id);
+  r.status='active';r.faultMsg=null;assign(r);
+  r.log.unshift([clock(),'Re-localized from QR anchor B3-A2 — confidence 0.97']);
+  const inc=store.incidents.find(i=>i.id==='INC-1042');if(inc){inc.state='Resolved';if(typeof Sync!=='undefined')Sync.patchIncident('INC-1042',{state:'Resolved'});}
+  pushAlert('info',id+' recovered — Aisle B3 clear, traffic normalizing',id);
+  store.alerts.filter(a=>a.src===id&&a.sev==='crit').forEach(a=>a.ack=true);
+  openRobot(id);render();
+}
+
+/* ---------------- Incidents + timeline replay ---------------- */
+let curInc=null, replayT=0;
+function rIncidents(){
+  $('#v-incidents').innerHTML=`
+  <div class="vhead"><h1>Incidents</h1><span class="sub">auto-detected from telemetry · with replay &amp; RCA</span></div>
+  <div class="grid g13">
+    <div class="card" style="align-self:start"><h3>Queue</h3>
+      ${store.incidents.map(i=>`<div style="padding:10px 4px;border-bottom:1px solid var(--border);cursor:pointer;${curInc===i.id?'background:var(--surface2);border-radius:6px;padding-left:8px':''}" onclick="openIncident('${i.id}')">
+        <div style="display:flex;gap:8px;align-items:center">${sevBadge(i.sev)}<span class="pill">${i.state}</span></div>
+        <b style="display:block;font-size:12.5px;margin-top:4px">${i.title}</b>
+        <span style="font-size:11px;color:var(--muted)">${i.id} · ${clock2(i.t)} · ${i.dur} min</span></div>`).join('')}
+    </div>
+    <div id="inc-detail">${curInc?'':'<div class="card empty">Select an incident to open replay + root-cause analysis</div>'}</div>
+  </div>`;
+  if(curInc)renderIncDetail();
+}
+function openIncident(id){curInc=id;replayT=0;go('incidents');}
+function renderIncDetail(){
+  const i=store.incidents.find(x=>x.id===curInc); if(!i)return;
+  $('#inc-detail').innerHTML=`
+  <div class="card">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${sevBadge(i.sev)}<h2 style="font-size:15px">${i.title}</h2>
+      <span class="pill">${i.id}</span><span class="pill">${i.state}</span>
+      ${i.state==='Open'?`<button class="btn sm primary" style="margin-left:auto" onclick="fixRobot('AMR-07')">Run guided recovery</button>`:''}</div>
+    <div style="color:var(--ink2);font-size:12.5px;margin-top:8px"><b style="color:var(--serious)">Impact:</b> ${i.impact}</div>
+    ${i.id==='INC-1042'?`
+    <h3 style="margin-top:16px">Incident replay — position + telemetry, time-synced</h3>
+    <div class="mapwrap"><svg id="replay-map" viewBox="150 260 380 200" style="display:block;width:100%;max-height:230px"></svg></div>
+    <div class="tl-events" id="tl-ev"></div>
+    <div class="scrub"><button class="btn sm" id="rp-play" onclick="replayPlay()">▶</button>
+      <input type="range" id="rp-range" min="0" max="100" value="0" oninput="replaySeek(this.value)">
+      <span class="tm" id="rp-time">14:02</span></div>
+    <div class="grid g2" style="margin-top:10px">
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">AMR-07 localization confidence</div><div class="chart" id="rp-conf"></div></div>
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">Aisle B3 traffic (robots/min)</div><div class="chart" id="rp-traf"></div></div>
+    </div>`:''}
+    <h3 style="margin-top:16px">✦ Copilot root-cause analysis</h3>
+    <div class="card" style="background:var(--surface2)">
+      <p style="font-size:12.8px;color:var(--ink2)">${i.rca}</p>
+      <p style="font-size:12.8px;margin-top:8px"><b style="color:#9ec5f4">Recommended actions:</b> ${i.fix}</p>
+      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+        <span class="evd" onclick="openRobot('${i.src}')">${i.src} telemetry</span>
+        <span class="evd">WMS job W-2291</span>
+        <span class="evd">Camera B3-C2 @ ${clock2(i.t)}</span>
+        <span class="evd" onclick="Copilot.ask('Why did AMR-07 fault?')">Ask a follow-up ✦</span></div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:10px">Every claim links to raw evidence — the copilot never answers without receipts.</div>
+    </div>
+  </div>`;
+  if(i.id==='INC-1042'){drawReplay();replaySeek(replayT);
+    const conf=Array.from({length:30},(_,k)=>({t:14*60+2+k*0.8,v:+(k<6?0.9-k*0.1:k<20?0.31:0.31+(k-20)*0.066).toFixed(2)}));
+    lineChart($('#rp-conf'),conf.map(d=>({t:d.t,v:Math.round(d.v*100)})),{h:110,color:'var(--s2)',unit:'%',label:'confidence'});
+    const traf=Array.from({length:30},(_,k)=>({t:14*60+2+k*0.8,v:Math.max(0,Math.round(6-(k<6?0:k<20?5:5-(k-20)*0.5)+(k%3?0:1)))}));
+    lineChart($('#rp-traf'),traf,{h:110,color:'var(--s1)',label:'robots/min'});}
+}
+const RP_PATH=[[460,345],[430,345],[400,345],[380,345],[380,345],[380,345],[380,345],[380,345],[380,345],[380,345]]; // travels then stops
+const RP_EVENTS=[[4,'crit','Protective stop'],[18,'warn','3 robots rerouted'],[62,'info','Operator dispatched'],[96,'info','Re-localized']];
+function drawReplay(){
+  const svg=$('#replay-map'); if(!svg)return;
+  let s=`<rect x="150" y="260" width="380" height="200" fill="#141413"/>`;
+  s+=`<rect x="180" y="280" width="290" height="170" rx="8" fill="#17181c" stroke="var(--border)"/><text class="zone-lbl" x="190" y="298">STORAGE B</text>`;
+  [['b1','b2'],['b2','b3'],['b4','b5'],['b5','b6'],['b1','b4'],['b3','b6']].forEach(([a,b])=>{const p=WP[a],q=WP[b];s+=`<line x1="${p[0]}" y1="${p[1]}" x2="${q[0]}" y2="${q[1]}" stroke="#232322" stroke-width="7" stroke-linecap="round"/>`;});
+  s+=`<rect x="200" y="300" width="250" height="22" rx="4" fill="#26262a"/><rect x="200" y="362" width="250" height="22" rx="4" fill="#26262a"/>`;
+  s+=`<text x="330" y="316" text-anchor="middle" font-size="9" fill="#5b5a55">RACK B3-04 (moved reflector ⚑)</text>`;
+  s+=`<polyline id="rp-trail" points="" fill="none" stroke="var(--s2)" stroke-width="2" stroke-dasharray="4 3" opacity=".8"/>`;
+  s+=`<g id="rp-bot"><circle r="10" fill="var(--crit)" stroke="var(--page)" stroke-width="2"/><text y="3.5" text-anchor="middle" font-size="8.5" font-weight="700" fill="#0d0d0d">07</text></g>`;
+  svg.innerHTML=s;
+  const ev=$('#tl-ev'); ev.innerHTML=RP_EVENTS.map(([p,sev,l])=>`<div class="tl-ev" style="left:${p}%;background:${sev==='crit'?'var(--crit)':sev==='warn'?'var(--warn)':'var(--muted)'}" title="${l}"></div>`).join('');
+}
+let rpTimer=null;
+function replaySeek(v){
+  replayT=+v; const r=$('#rp-range'); if(r)r.value=v;
+  const idx=Math.min(RP_PATH.length-1,Math.floor(v/100*(RP_PATH.length-1)));
+  const frac=(v/100*(RP_PATH.length-1))-idx;
+  const a=RP_PATH[idx], b=RP_PATH[Math.min(idx+1,RP_PATH.length-1)];
+  const x=a[0]+(b[0]-a[0])*frac, y=a[1]+(b[1]-a[1])*frac;
+  const bot=$('#rp-bot'); if(bot)bot.setAttribute('transform',`translate(${x},${y})`);
+  const trail=$('#rp-trail'); if(trail)trail.setAttribute('points',RP_PATH.slice(0,idx+1).map(p=>p.join(',')).join(' ')+` ${x},${y}`);
+  const t=$('#rp-time'); if(t)t.textContent=clock2(14*60+2+(v/100)*24);
+}
+function replayPlay(){
+  const btn=$('#rp-play');
+  if(rpTimer){clearInterval(rpTimer);rpTimer=null;btn.textContent='▶';return;}
+  btn.textContent='❚❚';
+  rpTimer=setInterval(()=>{replayT+=1.2;if(replayT>=100){replayT=100;clearInterval(rpTimer);rpTimer=null;btn.textContent='▶';}replaySeek(replayT);},60);
+}
+
+/* ---------------- Missions ---------------- */
+function rMissions(){
+  $('#v-missions').innerHTML=`
+  <div class="vhead"><h1>Missions</h1><span class="sub">plan → assign → monitor</span>
+    <div class="right"><button class="btn primary sm" onclick="newMission()">＋ New mission</button></div></div>
+  <div class="card"><table class="t"><thead><tr><th>Mission</th><th>Robots</th><th>State</th><th>Progress</th><th>ETA</th><th></th></tr></thead><tbody>
+  ${store.missions.map(m=>`<tr>
+    <td><b>${m.name}</b><div style="font-size:10.5px;color:var(--muted)">${m.id}</div></td>
+    <td>${m.robots.map(r=>`<span class="pill">${r}</span>`).join(' ')}</td>
+    <td><span class="st" style="color:${m.state==='Running'?'var(--s3)':m.state==='Done'?'var(--muted)':'var(--s4)'}"><i class="ic">${m.state==='Running'?'▶':m.state==='Done'?'✓':'◷'}</i>${m.state}</span></td>
+    <td style="min-width:140px"><div style="display:flex;align-items:center;gap:8px"><div class="bar-track" style="flex:1"><div class="bar-fill" style="width:${m.prog}%;background:var(--s1)"></div></div>${m.prog}%</div></td>
+    <td>${m.eta}</td>
+    <td>${m.state==='Running'?`<button class="btn sm ghost">❚❚</button>`:m.state==='Queued'?`<button class="btn sm ghost">▶</button>`:''}</td></tr>`).join('')}
+  </tbody></table></div>
+  <div class="card" style="margin-top:14px"><h3>Intent-based tasking (Lattice pattern)</h3>
+    <div style="display:flex;gap:8px"><input style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--ink);padding:9px 12px;font-size:13px;outline:none" placeholder='e.g. "Stage outbound wave 8 by 16:30 using any free robots, avoid Aisle B3"'>
+    <button class="btn primary" onclick="toast('Mission plan drafted — 3 robots, 47 tasks, ETA 16:22 (mock). Review & approve.')">✦ Plan</button></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Operator states intent → system decomposes into tasks → human approves before dispatch.</div></div>`;
+}
+function newMission(){toast('Mission builder opens here (mock)');}
+
+/* ---------------- Maintenance ---------------- */
+function rMaint(){
+  $('#v-maint').innerHTML=`
+  <div class="vhead"><h1>Maintenance</h1><span class="sub">health scores · predictions · tickets</span></div>
+  <div class="grid g13">
+    <div class="card" style="align-self:start"><h3>Predicted failures</h3>
+      ${store.tickets.map(t=>`<div style="padding:10px 4px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;gap:8px;align-items:center"><b>${t.rob}</b><span class="pill">${t.comp}</span><span class="pill">${Math.round(t.conf*100)}% conf</span></div>
+        <div style="font-size:12px;color:var(--serious);margin:4px 0">${t.pred}</div>
+        <div style="font-size:11.5px;color:var(--muted)">→ ${t.action}</div>
+        <button class="btn sm" style="margin-top:6px" onclick="toast('Ticket ${t.id} pushed to CMMS (mock)')">Create CMMS ticket</button></div>`).join('')}
+    </div>
+    <div class="card"><h3>Robot health <span class="right">composite of vibration, temp, error rate, battery cycles</span></h3>
+      <table class="t"><thead><tr><th>Robot</th><th>Health</th><th></th><th>Motor °C</th><th>Errors 7d</th><th>Battery cycles</th><th>Next service</th></tr></thead><tbody>
+      ${[...robots].sort((a,b)=>a.health-b.health).map(r=>`<tr class="click" onclick="openRobot('${r.id}')">
+        <td><b>${r.id}</b> <span class="pill">${r.vendor}</span></td>
+        <td style="width:120px"><div class="bar-track"><div class="bar-fill" style="width:${r.health}%;background:${r.health>85?'var(--s3)':r.health>75?'var(--warn)':'var(--crit)'}"></div></div></td>
+        <td><b>${r.health.toFixed(0)}</b></td>
+        <td style="color:${r.motorTemp>60?'var(--serious)':'var(--ink2)'}">${r.motorTemp.toFixed(0)}°</td>
+        <td>${r.errs}</td><td>${Math.floor(r.tasksDone*3.1)}</td>
+        <td style="color:var(--muted)">${r.health<75?'THIS WEEK':r.health<88?'in 3 wks':'in 6 wks'}</td></tr>`).join('')}
+      </tbody></table></div>
+  </div>`;
+}
+
+/* ---------------- Analytics ---------------- */
+function rAnalytics(){
+  const s=fleetStats();
+  $('#v-analytics').innerHTML=`
+  <div class="vhead"><h1>Analytics</h1><span class="sub">shift 2 · ${clock()}</span>
+    <div class="right"><button class="btn sm" onclick="toast('PDF export queued (mock)')">Export PDF</button></div></div>
+  <div class="grid g4">
+    <div class="card stat"><div class="val">${s.tasks}</div><div class="lbl">Tasks completed (shift)</div><div class="delta up">▲ 4.2% vs yesterday</div></div>
+    <div class="card stat"><div class="val">${s.util}<small>%</small></div><div class="lbl">Fleet utilization</div><div class="delta flat">target 78%</div></div>
+    <div class="card stat"><div class="val">${store.sla}<small>%</small></div><div class="lbl">Task SLA (≤6 min)</div><div class="delta down">▼ 0.9pp — INC-1042</div></div>
+    <div class="card stat"><div class="val">₹8.4<small>/task</small></div><div class="lbl">Cost per task</div><div class="delta up">▲ improving (₹9.1 last wk)</div></div>
+  </div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h3>Tasks by robot — this shift</h3><div id="an-rob"></div></div>
+    <div class="card"><h3>Time lost by cause — this week <span class="right">minutes</span></h3><div id="an-cause"></div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:6px">Localization faults are 41% of lost time → the copilot recommends reflector-audit SOP. This chart is what renews contracts.</div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Fleet ROI summary (CFO view)</h3>
+    <table class="t"><thead><tr><th>Metric</th><th>This week</th><th>Last week</th><th>Δ</th></tr></thead><tbody>
+      <tr><td>Tasks completed</td><td>31,240</td><td>29,180</td><td class="up">＋7.1%</td></tr>
+      <tr><td>Cost per task</td><td>₹8.4</td><td>₹9.1</td><td class="up">−7.7%</td></tr>
+      <tr><td>Robot-hours lost (faults)</td><td>11.2</td><td>16.8</td><td class="up">−33%</td></tr>
+      <tr><td>SLA compliance</td><td>98.2%</td><td>97.4%</td><td class="up">＋0.8pp</td></tr>
+      <tr><td>Payback progress (12-robot lease)</td><td colspan="2">14.2 of 22 months</td><td class="flat">on track</td></tr>
+    </tbody></table></div>`;
+  hbar($('#an-rob'),[...robots].sort((a,b)=>b.tasksDone-a.tasksDone).slice(0,8).map(r=>({n:r.id,v:r.tasksDone})),{});
+  hbar($('#an-cause'),[
+    {n:'Localization',v:164,c:'var(--s2)'},{n:'Congestion',v:88,c:'var(--s1)'},{n:'Charging',v:71,c:'var(--s1)'},
+    {n:'WMS sync',v:42,c:'var(--s1)'},{n:'Pick retry',v:35,c:'var(--s1)'}],{unit:'m'});
+}
+
+/* ---------------- Fleet & connectors ---------------- */
+function rFleet(){
+  $('#v-fleet').innerHTML=`
+  <div class="vhead"><h1>Fleet &amp; Connectors</h1><span class="sub">multi-vendor by design</span></div>
+  <div class="grid g2">
+    <div class="card"><h3>Connected fleets</h3>
+      ${[['Ati Sherpa ×4','VDA 5050 / MQTT','var(--s3)'],['MiR 250 ×3','VDA 5050 / REST bridge','var(--s3)'],['OTTO 600 ×3','OEM API adapter','var(--s3)'],['Zebra scanners','WMS webhook','var(--s3)']].map(([n,p,c])=>`
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border)">
+        <span class="dot" style="width:8px;height:8px;border-radius:50%;background:${c}"></span><b>${n}</b>
+        <span class="pill" style="margin-left:auto">${p}</span><span class="st" style="color:var(--s3)"><i class="ic">●</i>Healthy</span></div>`).join('')}
+      <button class="btn sm" style="margin-top:10px" onclick="toast('Connector catalog opens (mock) — VDA 5050, ROS 2, OPC UA, MQTT, webhooks')">＋ Add connector</button></div>
+    <div class="card"><h3>Data pipeline (live)</h3>
+      ${[['Ingest rate','1,240 msg/s'],['Telemetry retention','30 d aggregated · 72 h raw'],['Video clips (event-triggered)','214 today · 4.1 GB'],['MCAP sessions','10 robots · continuous'],['Copilot queries today','23'],['Audit log','all commands + AI answers']].map(([k,v])=>`<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Roles</h3>
+    <table class="t"><thead><tr><th>Role</th><th>Sees</th><th>Can</th></tr></thead><tbody>
+      <tr><td><b>Operator</b></td><td>Live Ops, alerts, missions</td><td>Ack, pause/resume, guided recovery</td></tr>
+      <tr><td><b>Engineer</b></td><td>+ telemetry, MCAP export, connectors</td><td>Deep-link to Foxglove, tune alerts</td></tr>
+      <tr><td><b>Manager</b></td><td>+ analytics, ROI, SLA reports</td><td>Export, schedule email digests</td></tr>
+    </tbody></table></div>`;
+}
+
+/* ================= Copilot ================= */
+const Copilot={
+  open:false, msgs:[],
+  toggle(){this.open=!this.open;$('#copilot').classList.toggle('open',this.open);if(this.open)this.render();},
+  render(){
+    const c=$('#copilot');
+    c.innerHTML=`
+    <div class="cp-head"><div style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#3987e5,#9085e9);display:grid;place-items:center">✦</div>
+      <div><div class="t">Fleet Copilot</div><div class="s">grounded in live fleet data · every answer cites evidence</div></div>
+      <button class="btn ghost sm" style="margin-left:auto" onclick="Copilot.toggle()">✕</button></div>
+    <div class="cp-body" id="cp-body">
+      ${this.msgs.length?'':`<div class="msg ai">Hi Punith — I'm watching all 10 robots. Ask me anything about the fleet, or try:</div>
+      <div class="sugg">
+        <button onclick="Copilot.ask('Why did throughput drop after 14:00?')">Why did throughput drop after 14:00?</button>
+        <button onclick="Copilot.ask('Which robot needs service next?')">Which robot needs service next?</button>
+        <button onclick="Copilot.ask('Draft the shift handover report')">Draft the shift handover report</button>
+        <button onclick="Copilot.ask('How is the fleet doing right now?')">How is the fleet doing right now?</button>
+      </div>`}
+      ${this.msgs.map(m=>m.html).join('')}
+    </div>
+    <div class="cp-input"><input id="cp-in" placeholder="Ask about your fleet…" onkeydown="if(event.key==='Enter')Copilot.ask(this.value)">
+      <button class="btn primary" onclick="Copilot.ask($('#cp-in').value)">Send</button></div>`;
+    const b=$('#cp-body');b.scrollTop=b.scrollHeight;
+  },
+  /* ---- Sarathi live-agent bridge (see CONFIG block at top of file) ----
+     Tries the sarathi service first; on ANY failure falls back to the
+     local rule-based answer(q) engine below (unchanged). */
+  SARATHI_URL:'http://localhost:8001/ask',
+  SARATHI_TIMEOUT_MS:4000,
+  esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');},
+  /** POST {question} to sarathi with a hard timeout; resolves {answer,evidence,tier} or throws. */
+  async askRemote(q){
+    const c=new AbortController(); const t=setTimeout(()=>c.abort(),this.SARATHI_TIMEOUT_MS);
+    try{
+      const r=await fetch(this.SARATHI_URL,{method:'POST',signal:c.signal,
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      if(!d||typeof d.answer!=='string')throw new Error('bad payload: missing answer');
+      return d;
+    }finally{clearTimeout(t);}
+  },
+  /** Small tier pill: 'live agent' (green) / 'model only' (amber) / 'offline' (grey). */
+  tierPill(tier){
+    const key=String(tier||'').toLowerCase().replace(/[\s-]+/g,'_');
+    const m={live_agent:['live agent','#199e70'],grounded:['live agent','#199e70'],
+             model_only:['model only','#c98500'],llm_only:['model only','#c98500'],
+             offline:['offline','#898781']};
+    const [lbl,c]=m[key]||[this.esc(tier||'live agent'),'#3987e5'];
+    return `<span class="pill" style="color:${c};border-color:${c}66">${lbl}</span>`;
+  },
+  /** Render a sarathi {answer, evidence[], tier} payload as a copilot message body.
+      Evidence items may be strings or objects with a label/id/source field —
+      they are rendered with the console's existing .evd chip style. */
+  renderRemote(d){
+    const ans=this.esc(d.answer).replace(/\n/g,'<br>');
+    const evs=(Array.isArray(d.evidence)?d.evidence:[]).map(e=>{
+      const lbl=typeof e==='string'?e:(e&&(e.label||e.id||e.source||e.title))||'evidence';
+      return `<span class="evd">${this.esc(lbl)}</span>`;
+    }).join('');
+    return `${ans}${evs?`<div class="ev">${evs}</div>`:''}<div style="margin-top:7px">${this.tierPill(d.tier)}</div>`;
+  },
+  async ask(q){
+    if(!q||!q.trim())return;
+    if(!this.open)this.toggle();
+    this.msgs.push({html:`<div class="msg user">${q}</div>`});
+    this.msgs.push({html:`<div class="msg ai"><span class="typing"><i></i><i></i><i></i></span></div>`});
+    this.render();
+    try{ // 1) live agent first
+      const d=await this.askRemote(q);
+      this.msgs.pop();
+      this.msgs.push({html:`<div class="msg ai">${this.renderRemote(d)}</div>`});
+      this.render();
+    }catch(e){ // 2) any failure → existing local engine, exactly as before
+      setTimeout(()=>{this.msgs.pop();this.msgs.push({html:`<div class="msg ai">${this.answer(q)}</div>`});this.render();},300);
+    }
+  },
+  answer(q){
+    const s=fleetStats(); q=q.toLowerCase();
+    const ev=(...items)=>`<div class="ev">${items.join('')}</div>`;
+    const chip=(l,fn)=>`<span class="evd" onclick="${fn}">${l}</span>`;
+    if(q.includes('throughput')||q.includes('drop')||q.includes('14:00')||q.includes('fault?')||q.includes('amr-07')){
+      const inc=store.incidents[0];
+      return `Throughput fell <b>−18%</b> between 14:02–14:26. Root cause, with evidence:
+      <ul><li><b>14:02</b> — AMR-07's localization confidence collapsed to 0.31 (threshold 0.35) and it executed a protective stop mid-Aisle B3.</li>
+      <li>The trigger: rack B3-04's reflector panel was moved during the 13:40 replenishment (WMS job W-2291).</li>
+      <li>3 robots rerouted via B5–B6 (+~90s/task); 11 tasks delayed; no SLA breach yet.</li></ul>
+      ${inc.state==='Open'?`<b>Recommended now:</b> run guided recovery (re-localize from QR anchor B3-A2), then add rack B3-04 to the reflector-audit SOP.`:`Recovery completed — throughput is normalizing (currently ${store.throughput} t/hr).`}
+      ${ev(chip('INC-1042 replay',"openIncident('INC-1042')"),chip('AMR-07 telemetry',"openRobot('AMR-07')"),chip('Throughput chart',"go('overview')"))}`;
+    }
+    if(q.includes('service')||q.includes('maint')){
+      return `<b>AMR-03</b> is your next service priority:
+      <ul><li>Left drive-motor vibration is <b>2.8σ above baseline</b> and rising ~4%/day for 6 days.</li>
+      <li>Motor temp ${robots[2].motorTemp.toFixed(0)}°C vs fleet median 46°C.</li>
+      <li>Failure-model estimate: bearing wear, <b>RUL ≈ 12 days</b> (84% confidence).</li></ul>
+      Acting this week is a planned 40-min swap; ignoring it is a likely mid-shift stop (~₹18K in lost throughput based on your cost/task). Bearing kit BRG-2044 is in stock.
+      ${ev(chip('Create CMMS ticket',"toast('Ticket MT-88 pushed (mock)')"),chip('AMR-03 health',"openRobot('AMR-03')"),chip('Maintenance view',"go('maint')"))}`;
+    }
+    if(q.includes('handover')||q.includes('report')||q.includes('shift')){
+      return `<b>Shift 2 handover — BLR-DC1 · ${clock()}</b>
+      <ul><li><b>Output:</b> ${s.tasks} tasks · ${store.throughput} t/hr current · SLA ${store.sla}% (−0.9pp, incident-driven)</li>
+      <li><b>Fleet:</b> ${s.on}/10 available · avg battery ${s.avgB.toFixed(0)}% · utilization ${s.util}%</li>
+      <li><b>Incident:</b> INC-1042 (AMR-07 localization, Aisle B3) — ${store.incidents[0].state}. ${store.incidents[0].state==='Open'?'⚠ Hand over with recovery pending.':'Resolved via QR re-localization.'}</li>
+      <li><b>Watch items:</b> AMR-03 drivetrain (service this week) · AMR-09 completing charge · reflector-audit SOP update pending sign-off</li>
+      <li><b>Alerts:</b> ${store.alerts.filter(a=>!a.ack).length} unacked · rate ${store.alarmHr}/hr (budget ≤12)</li></ul>
+      ${ev(chip('Copy to clipboard',"toast('Copied (mock)')"),chip('Email to shift 3 lead',"toast('Sent (mock)')"))}`;
+    }
+    if(q.includes('how')||q.includes('status')||q.includes('doing')){
+      return `Fleet is <b>${s.health>=85?'healthy':'degraded'}</b> — score ${s.health}/100.
+      <ul><li>${robots.filter(r=>r.status==='active').length} active, ${robots.filter(r=>r.status==='charging').length} charging, ${s.faults} fault${s.faults===1?'':'s'}</li>
+      <li>Throughput ${store.throughput} t/hr ${store.throughput>=131?'(on target)':'(below 131 target — recovering from INC-1042)'}</li>
+      <li>Avg battery ${s.avgB.toFixed(0)}% · alarm rate ${store.alarmHr}/hr (within budget)</li></ul>
+      ${s.faults?`Main issue: AMR-07 in Aisle B3. Want me to walk you through recovery?`:`No blocking issues right now.`}
+      ${ev(chip('Live map',"go('liveops')"),chip('Open incidents',"go('incidents')"))}`;
+    }
+    return `In the wired version I'd answer that from live telemetry via tool calls (SQL over TimescaleDB + MCAP search + doc RAG). In this demo, try one of the suggested questions — they run against the live mock state.
+    ${ev(chip('Fleet status',"Copilot.ask('How is the fleet doing right now?')"))}`;
+  }
+};
+
+/* ================= Supabase sync (polling PostgREST, leader-elected sim) ================= */
+const SUPA_URL='https://flwyvhsmgrrqpmhcqlzd.supabase.co';
+const SUPA_KEY='sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf'; // publishable anon key — safe client-side
+const Sync={
+  mode:'connecting',            // connecting | leader | follower | local
+  me:'w-'+Math.random().toString(36).slice(2,10),
+  lastPush:0,
+  hdr(extra){return Object.assign({'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},extra||{});},
+  async q(path,opt){ // fetch wrapper, 4s timeout
+    const c=new AbortController();const t=setTimeout(()=>c.abort(),4000);
+    try{const r=await fetch(SUPA_URL+'/rest/v1/'+path,Object.assign({signal:c.signal},opt,{headers:this.hdr(opt&&opt.headers)}));
+      clearTimeout(t);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const txt=await r.text();return txt?JSON.parse(txt):null;
+    }catch(e){clearTimeout(t);throw e;}
+  },
+  setChip(){const d=$('#cloud-dot'),l=$('#cloud-lbl');if(!d)return;
+    const m={leader:['var(--good)','Cloud: LIVE · simulating'],follower:['var(--s1)','Cloud: LIVE · viewing'],local:['var(--warn)','Local sim (offline)'],connecting:['var(--muted)','connecting…'],nodb:['var(--crit)','Run schema SQL ⇒ retry']};
+    const[c,txt]=m[this.mode]||m.connecting;d.style.background=c;l.textContent=txt;},
+  async init(){
+    try{ await this.q('fleet_meta?select=id&limit=1'); }
+    catch(e){ this.mode = String(e).includes('404')||String(e).includes('406')?'nodb':'local'; this.setChip();
+      if(this.mode==='nodb')toast('⚠ Supabase reachable but schema missing — run fleetmind_schema.sql in the SQL Editor, then reload.');
+      else toast('Supabase unreachable from this network — running local sim.');
+      if(this.mode==='nodb')this.mode='local';
+      return; }
+    await this.claim(); this.setChip();
+    // pull seeded incidents/missions once
+    try{const inc=await this.q('incidents?select=*&order=created_at.desc');
+      if(inc&&inc.length)store.incidents=inc.map(i=>({id:i.id,sev:i.sev,title:i.title,src:i.src,t:i.tlabel,state:i.state,impact:i.impact,rca:i.rca,fix:i.fix,dur:i.dur}));
+      const ms=await this.q('missions?select=*&order=id');
+      if(ms&&ms.length)store.missions=ms.map(m=>({id:m.id,name:m.name,robots:m.robots,state:m.state,prog:m.prog,eta:m.eta}));
+    }catch(e){}
+    setInterval(()=>this.cycle().catch(()=>{}),2000);
+    setInterval(()=>this.claim().catch(()=>{}),10000); // failover check
+    toast(this.mode==='leader'?'☁ Connected to Supabase — this tab is running the fleet':'☁ Connected — another tab is simulating; this one is a live viewer');
+  },
+  async claim(){
+    try{
+      const rows=await this.q('fleet_meta?id=eq.1&select=writer_id,updated_at');
+      const row=rows&&rows[0];
+      const stale=!row||!row.writer_id||(Date.now()-new Date(row.updated_at).getTime()>8000);
+      if(row&&row.writer_id===this.me){this.mode='leader';}
+      else if(stale){ await this.q('fleet_meta?id=eq.1',{method:'PATCH',body:JSON.stringify({writer_id:this.me,updated_at:new Date().toISOString()})}); this.mode='leader'; }
+      else this.mode='follower';
+    }catch(e){ if(this.mode!=='local'){this.mode='local';} }
+    this.setChip();
+  },
+  async cycle(){
+    if(this.mode==='leader')await this.push(); else if(this.mode==='follower')await this.pull();
+  },
+  async push(){
+    const rows=robots.map(r=>({id:r.id,vendor:r.vendor,status:r.status,battery:+r.battery.toFixed(1),
+      pos:[+r.pos[0].toFixed(1),+r.pos[1].toFixed(1)],speed:+r.speed.toFixed(2),task_kind:r.task?r.task.kind:null,
+      health:+r.health.toFixed(1),motor_temp:+r.motorTemp.toFixed(1),tasks_done:r.tasksDone,fault_msg:r.faultMsg||null,
+      updated_at:new Date().toISOString()}));
+    await this.q('robots?on_conflict=id',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(rows)});
+    await this.q('fleet_meta?id=eq.1',{method:'PATCH',body:JSON.stringify({writer_id:this.me,sim_min:simMin,throughput:store.throughput,updated_at:new Date().toISOString()})});
+    // reflect acks made elsewhere
+    try{const als=await this.q('alerts?select=id,ack&ack=eq.true&limit=40');
+      if(als)als.forEach(a=>{const l=store.alerts.find(x=>x.id===a.id);if(l)l.ack=true;});}catch(e){}
+  },
+  async pull(){
+    const rows=await this.q('robots?select=*');
+    if(rows&&rows.length){
+      rows.forEach(d=>{const r=robots.find(x=>x.id===d.id);if(!r)return;
+        r.vendor=d.vendor||r.vendor;r.status=normStatus(d.status);
+        if(d.battery!=null)r.battery=+d.battery;
+        const np=posToSvg(d.pos);if(np)r.pos=np;
+        if(d.speed!=null)r.speed=+d.speed;
+        r.task=d.task_kind?{id:'T-live',kind:d.task_kind}:null;
+        if(d.health!=null)r.health=+d.health;
+        if(d.motor_temp!=null)r.motorTemp=+d.motor_temp;
+        if(d.tasks_done!=null)r.tasksDone=d.tasks_done;
+        r.faultMsg=d.fault_msg||null;
+        r.spdHist.push(r.speed);if(r.spdHist.length>40)r.spdHist.shift();});
+    }
+    const meta=await this.q('fleet_meta?id=eq.1&select=sim_min,throughput');
+    if(meta&&meta[0]){simMin=+meta[0].sim_min;store.throughput=meta[0].throughput;
+      if(tick%4===0){store.thrHist.push({t:simMin,v:store.throughput});if(store.thrHist.length>60)store.thrHist.shift();}}
+    const als=await this.q('alerts?select=*&order=created_at.desc&limit=25');
+    if(als)store.alerts=als.map(a=>({id:a.id,sev:a.sev,msg:a.msg,src:a.src,t:a.tlabel||'—',ack:a.ack}));
+    tick++;
+  },
+  insertAlert(a){ if(this.mode!=='leader')return;
+    this.q('alerts',{method:'POST',headers:{'Prefer':'return=minimal'},body:JSON.stringify({id:a.id,sev:a.sev,msg:a.msg,src:a.src,tlabel:clock2(a.t)})}).catch(()=>{}); },
+  ackAlert(id){ if(this.mode==='local')return;
+    this.q('alerts?id=eq.'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({ack:true})}).catch(()=>{}); },
+  patchIncident(id,body){ if(this.mode==='local')return;
+    this.q('incidents?id=eq.'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(body)}).catch(()=>{}); },
+};
+
+/* ================= Router + main loop ================= */
+const VIEWS={overview:rOverview,liveops:rLiveOps,incidents:rIncidents,missions:rMissions,maint:rMaint,analytics:rAnalytics,fleet:rFleet};
+let curView='overview';
+function go(v){
+  curView=v;
+  $$('#nav button[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  $$('.view').forEach(x=>x.classList.remove('on'));
+  $('#v-'+v).classList.add('on');
+  closeDrawer(); render(true);
+}
+$$('#nav button[data-v]').forEach(b=>b.addEventListener('click',()=>go(b.dataset.v)));
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();Copilot.toggle();}});
+
+let lastFull=0;
+function render(force){
+  const now=performance.now();
+  // header chips always
+  const s=fleetStats();
+  $('#h-health').textContent=s.health+'/100';
+  $('#chip-health .dot').style.background=s.health>=85?'var(--good)':s.health>=70?'var(--warn)':'var(--crit)';
+  $('#h-alarmrate').textContent=store.alarmHr+' alarms/hr';
+  $('#alarm-dot').style.background=store.alarmHr<=12?'var(--good)':'var(--crit)';
+  $('#h-clock').textContent='🕐 '+clock();
+  $('#n-inc').textContent=store.incidents.filter(i=>i.state==='Open').length||'';
+  if(!store.incidents.some(i=>i.state==='Open'))$('#n-inc').classList.add('z');
+  // live-ops map updates every frame; full view re-render throttled
+  if(curView==='liveops'){updateMap();if(force||now-lastFull>2000){renderFleetList();lastFull=now;}}
+  else if(force){VIEWS[curView]();lastFull=now;}
+  else if(now-lastFull>3000&&['overview','analytics','maint'].includes(curView)){VIEWS[curView]();lastFull=now;} // never auto-rerender incidents (would reset replay scrub)
+}
+VIEWS.overview();rLiveOps();$('#v-liveops').classList.remove('on');$('#v-overview').classList.add('on');
+setInterval(()=>{ if(Sync.mode!=='follower')step(0.4); render(false); },400);
+Sync.init();
+setTimeout(()=>toast('👋 Tips: click AMR-07 (red, pulsing) on Live Ops · open INC-1042 replay · press ⌘K for Copilot'),1200);
+</script>
+</body>
+</html>

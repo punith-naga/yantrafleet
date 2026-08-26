@@ -1,0 +1,252 @@
+"""Fleet data tools.
+
+Every tool reads Supabase (via the swappable Transport) and returns a
+``ToolResult`` whose ``source_id`` is the citation key used in answer
+evidence (Datadog/Dynatrace pattern: the LLM never originates numbers,
+it only copies them out of these results).
+
+Tools deliberately echo their filters back inside ``data`` so that every
+number a template or model may quote (including thresholds) is present in
+the evidence payload — this is what the grounding eval checks.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import statistics
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+
+from .transport import Params, Transport
+
+
+@dataclass
+class ToolResult:
+    """One executed tool call: the citation unit."""
+
+    tool: str
+    args: dict[str, Any]
+    data: dict[str, Any]
+    source_id: str
+    ts: str
+
+    def label(self) -> str:
+        """Human-readable evidence label, e.g. ``query_robots(status=fault)``."""
+        shown = {k: v for k, v in self.args.items() if v is not None}
+        inner = ", ".join(f"{k}={v}" for k, v in sorted(shown.items()))
+        return f"{self.tool}({inner})"
+
+
+def _make_source_id(tool: str, args: dict[str, Any]) -> tuple[str, str]:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    digest = hashlib.sha1(
+        json.dumps(args, sort_keys=True, default=str).encode()
+    ).hexdigest()[:8]
+    return f"{tool}:{digest}:{ts}", ts
+
+
+@dataclass
+class Toolbox:
+    """The four fleet tools, bound to one Transport, with a per-request log."""
+
+    transport: Transport
+    row_limit: int = 50
+    log: list[ToolResult] = field(default_factory=list)
+
+    # -- internals ---------------------------------------------------------
+
+    def _record(self, tool: str, args: dict[str, Any], data: dict[str, Any]) -> ToolResult:
+        source_id, ts = _make_source_id(tool, args)
+        result = ToolResult(tool=tool, args=args, data=data, source_id=source_id, ts=ts)
+        self.log.append(result)
+        return result
+
+    def _rows(self, table: str, params: Params) -> list[dict[str, Any]]:
+        return self.transport.get(table, params)
+
+    # -- tools -------------------------------------------------------------
+
+    def get_fleet_summary(self) -> ToolResult:
+        """Aggregate snapshot: robot counts, battery stats, alerts, throughput."""
+        robots = self._rows("robots", [("select", "*")])
+        meta_rows = self._rows("fleet_meta", [("select", "*"), ("id", "eq.1")])
+        unacked = self._rows("alerts", [("select", "*"), ("ack", "eq.false")])
+
+        by_status: dict[str, int] = {}
+        for r in robots:
+            by_status[str(r.get("status"))] = by_status.get(str(r.get("status")), 0) + 1
+        batteries = [float(r["battery"]) for r in robots if r.get("battery") is not None]
+        lowest = min(robots, key=lambda r: float(r.get("battery") or 1e9), default=None)
+        by_sev: dict[str, int] = {}
+        for a in unacked:
+            by_sev[str(a.get("sev"))] = by_sev.get(str(a.get("sev")), 0) + 1
+        meta = meta_rows[0] if meta_rows else {}
+
+        data = {
+            "robots_total": len(robots),
+            "by_status": by_status,
+            "battery_avg": round(statistics.mean(batteries), 1) if batteries else None,
+            "lowest_battery": (
+                {"id": lowest.get("id"), "battery": lowest.get("battery"),
+                 "status": lowest.get("status")}
+                if lowest else None
+            ),
+            "faulted_ids": [r.get("id") for r in robots if r.get("status") == "fault"],
+            "unacked_alerts": len(unacked),
+            "unacked_by_sev": by_sev,
+            "throughput": meta.get("throughput"),
+            "sim_min": meta.get("sim_min"),
+        }
+        return self._record("get_fleet_summary", {}, data)
+
+    def query_robots(
+        self,
+        status: str | None = None,
+        vendor: str | None = None,
+        max_battery: float | None = None,
+        min_battery: float | None = None,
+        robot_id: str | None = None,
+        order: str | None = None,
+        limit: int | None = None,
+    ) -> ToolResult:
+        """List robots with optional filters (status, vendor, battery range, id)."""
+        args = {
+            "status": status, "vendor": vendor, "max_battery": max_battery,
+            "min_battery": min_battery, "robot_id": robot_id,
+            "order": order, "limit": limit,
+        }
+        params: Params = [("select", "*")]
+        if status:
+            params.append(("status", f"eq.{status}"))
+        if vendor:
+            params.append(("vendor", f"eq.{vendor}"))
+        if max_battery is not None:
+            params.append(("battery", f"lt.{max_battery}"))
+        if min_battery is not None:
+            params.append(("battery", f"gte.{min_battery}"))
+        if robot_id:
+            params.append(("id", f"eq.{robot_id}"))
+        params.append(("order", order or "id.asc"))
+        params.append(("limit", str(limit or self.row_limit)))
+        rows = self._rows("robots", params)
+        data = {"rows": rows, "count": len(rows), "filters": {k: v for k, v in args.items() if v is not None}}
+        return self._record("query_robots", args, data)
+
+    def query_alerts(
+        self,
+        sev: str | None = None,
+        ack: bool | None = None,
+        limit: int | None = None,
+    ) -> ToolResult:
+        """List alerts, newest first, optionally by severity / ack state."""
+        args = {"sev": sev, "ack": ack, "limit": limit}
+        params: Params = [("select", "*")]
+        if sev:
+            params.append(("sev", f"eq.{sev}"))
+        if ack is not None:
+            params.append(("ack", f"eq.{str(ack).lower()}"))
+        params.append(("order", "created_at.desc"))
+        params.append(("limit", str(limit or self.row_limit)))
+        rows = self._rows("alerts", params)
+        data = {"rows": rows, "count": len(rows), "filters": {k: v for k, v in args.items() if v is not None}}
+        return self._record("query_alerts", args, data)
+
+    def query_incidents(
+        self,
+        state: str | None = None,
+        sev: str | None = None,
+        limit: int | None = None,
+    ) -> ToolResult:
+        """List incidents, optionally by state (open/resolved) and severity."""
+        args = {"state": state, "sev": sev, "limit": limit}
+        params: Params = [("select", "*")]
+        if state:
+            params.append(("state", f"eq.{state}"))
+        if sev:
+            params.append(("sev", f"eq.{sev}"))
+        params.append(("limit", str(limit or self.row_limit)))
+        rows = self._rows("incidents", params)
+        data = {"rows": rows, "count": len(rows), "filters": {k: v for k, v in args.items() if v is not None}}
+        return self._record("query_incidents", args, data)
+
+    # -- dynamic dispatch (for the LLM agent loop) -------------------------
+
+    def call(self, name: str, args: dict[str, Any]) -> ToolResult:
+        """Dispatch a tool by name, dropping unknown arguments defensively."""
+        fn = {
+            "get_fleet_summary": self.get_fleet_summary,
+            "query_robots": self.query_robots,
+            "query_alerts": self.query_alerts,
+            "query_incidents": self.query_incidents,
+        }.get(name)
+        if fn is None:
+            raise ValueError(f"unknown tool: {name}")
+        import inspect
+
+        allowed = set(inspect.signature(fn).parameters)
+        return fn(**{k: v for k, v in args.items() if k in allowed})
+
+
+# OpenAI-style function schemas handed to litellm in tier 1.
+TOOL_SPECS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_fleet_summary",
+            "description": "Aggregate fleet snapshot: robot counts by status, "
+                           "average/lowest battery, faulted robots, unacked "
+                           "alert counts, throughput and sim time.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_robots",
+            "description": "List robots with optional filters.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "e.g. active, idle, charging, fault"},
+                    "vendor": {"type": "string"},
+                    "max_battery": {"type": "number", "description": "battery strictly below this %"},
+                    "min_battery": {"type": "number", "description": "battery at or above this %"},
+                    "robot_id": {"type": "string", "description": "exact robot id"},
+                    "order": {"type": "string", "description": "PostgREST order, e.g. battery.asc"},
+                    "limit": {"type": "integer"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_alerts",
+            "description": "List alerts, newest first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sev": {"type": "string", "description": "severity, e.g. critical, warn, info"},
+                    "ack": {"type": "boolean", "description": "acknowledged filter"},
+                    "limit": {"type": "integer"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_incidents",
+            "description": "List incidents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string", "description": "e.g. open, resolved"},
+                    "sev": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+            },
+        },
+    },
+]

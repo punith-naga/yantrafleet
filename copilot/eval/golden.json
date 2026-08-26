@@ -1,0 +1,61 @@
+{
+  "description": "Golden Q/A cases for the sarathi copilot. Run against the mocked fleet fixture in tests/conftest.py (tier-3 offline engine, deterministic). expected_contains matching is case-insensitive.",
+  "cases": [
+    {
+      "id": "g1-fleet-summary",
+      "question": "How is the fleet doing right now?",
+      "expected_intent": "fleet_summary",
+      "expected_tools": ["get_fleet_summary"],
+      "expected_contains": ["6 robots", "44.5"]
+    },
+    {
+      "id": "g2-low-battery",
+      "question": "Which robots are low on battery?",
+      "expected_intent": "low_battery",
+      "expected_tools": ["query_robots"],
+      "expected_contains": ["R-004", "8%", "R-006", "14%"]
+    },
+    {
+      "id": "g3-critical-alerts",
+      "question": "Any critical alerts I should know about?",
+      "expected_intent": "alerts",
+      "expected_tools": ["query_alerts"],
+      "expected_contains": ["critical", "motor overtemp"]
+    },
+    {
+      "id": "g4-open-incidents",
+      "question": "Show me the open incidents.",
+      "expected_intent": "incidents",
+      "expected_tools": ["query_incidents"],
+      "expected_contains": ["INC-1", "Motor overtemp on R-004"]
+    },
+    {
+      "id": "g5-faulted-robots",
+      "question": "Which robots are faulted?",
+      "expected_intent": "faults",
+      "expected_tools": ["query_robots"],
+      "expected_contains": ["R-004", "motor overtemp"]
+    },
+    {
+      "id": "g6-robot-detail",
+      "question": "What's the status of R-003?",
+      "expected_intent": "robot_detail",
+      "expected_tools": ["query_robots"],
+      "expected_contains": ["R-003", "active", "55%"]
+    },
+    {
+      "id": "g7-throughput",
+      "question": "What's our current throughput?",
+      "expected_intent": "throughput",
+      "expected_tools": ["get_fleet_summary"],
+      "expected_contains": ["41.5", "342"]
+    },
+    {
+      "id": "g8-charging-count",
+      "question": "How many robots are charging?",
+      "expected_intent": "charging",
+      "expected_tools": ["query_robots"],
+      "expected_contains": ["2 robot(s) charging", "R-002", "R-006"]
+    }
+  ]
+}
