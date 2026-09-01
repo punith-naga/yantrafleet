@@ -68,6 +68,14 @@ FLEET_FIXTURE: dict[str, list[dict]] = {
         {"id": "M-1", "name": "Wave A", "robots": ["R-001", "R-003"],
          "state": "running", "prog": 62, "eta": "10:31"},
     ],
+    "commands": [
+        {"id": "c-100", "robot_id": "R-004", "cmd": "estop", "status": "pending",
+         "requested_by": "console:PN", "decided_by": None, "note": None,
+         "created_at": "2026-08-26T10:10:00Z"},
+        {"id": "c-099", "robot_id": "R-002", "cmd": "charge", "status": "executed",
+         "requested_by": "console:PN", "decided_by": "console:PN",
+         "note": "R-002 routed to charger", "created_at": "2026-08-26T09:55:00Z"},
+    ],
     "fleet_meta": [
         {"id": 1, "writer_id": "sim-1", "sim_min": 342, "throughput": 41.5,
          "updated_at": "2026-08-26T10:14:07Z"},

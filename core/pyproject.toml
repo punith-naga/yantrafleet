@@ -2,7 +2,7 @@
 name = "yantracore"
 version = "0.2.0"
 description = "Shared contracts (status vocabulary) for YantraFleet components"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 
 [build-system]
 requires = ["setuptools>=68"]

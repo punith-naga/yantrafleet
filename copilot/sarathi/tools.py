@@ -170,6 +170,33 @@ class Toolbox:
         data = {"rows": rows, "count": len(rows), "filters": {k: v for k, v in args.items() if v is not None}}
         return self._record("query_incidents", args, data)
 
+
+    def query_commands(
+        self,
+        status: str | None = None,
+        robot_id: str | None = None,
+        limit: int | None = None,
+    ) -> ToolResult:
+        """List operator commands in the approval gate (v0.2 commands table).
+
+        status: pending | approved | rejected | executed | failed.
+        """
+        args = {"status": status, "robot_id": robot_id, "limit": limit}
+        params: Params = [("select", "*"), ("order", "created_at.desc")]
+        if status:
+            params.append(("status", f"eq.{status}"))
+        if robot_id:
+            params.append(("robot_id", f"eq.{robot_id}"))
+        params.append(("limit", str(limit or self.row_limit)))
+        rows = self._rows("commands", params)
+        by_status: dict[str, int] = {}
+        for r in rows:
+            by_status[str(r.get("status"))] = by_status.get(str(r.get("status")), 0) + 1
+        data = {"rows": rows, "count": len(rows), "by_status": by_status,
+                "pending_count": by_status.get("pending", 0),
+                "filters": {k: v for k, v in args.items() if v is not None}}
+        return self._record("query_commands", args, data)
+
     # -- dynamic dispatch (for the LLM agent loop) -------------------------
 
     def call(self, name: str, args: dict[str, Any]) -> ToolResult:
@@ -179,6 +206,7 @@ class Toolbox:
             "query_robots": self.query_robots,
             "query_alerts": self.query_alerts,
             "query_incidents": self.query_incidents,
+            "query_commands": self.query_commands,
         }.get(name)
         if fn is None:
             raise ValueError(f"unknown tool: {name}")
@@ -244,6 +272,23 @@ TOOL_SPECS: list[dict[str, Any]] = [
                 "properties": {
                     "state": {"type": "string", "description": "e.g. open, resolved"},
                     "sev": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_commands",
+            "description": "List operator commands in the human-approval gate "
+                           "(pending approvals, executed/failed history).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string",
+                               "description": "pending, approved, rejected, executed, failed"},
+                    "robot_id": {"type": "string"},
                     "limit": {"type": "integer"},
                 },
             },

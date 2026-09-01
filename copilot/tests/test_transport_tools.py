@@ -65,3 +65,17 @@ def test_failing_transport_raises() -> None:
     box = Toolbox(transport=FailingTransport())
     with pytest.raises(TransportError):
         box.get_fleet_summary()
+
+
+def test_query_commands_counts_pending(transport):
+    box = Toolbox(transport=transport)
+    res = box.query_commands()
+    assert res.data["pending_count"] == 1
+    assert res.data["by_status"]["executed"] == 1
+    assert res.data["rows"][0]["cmd"] in ("estop", "charge")
+
+
+def test_query_commands_filter_status(transport):
+    box = Toolbox(transport=transport)
+    res = box.query_commands(status="pending")
+    assert all(r["status"] == "pending" for r in res.data["rows"])

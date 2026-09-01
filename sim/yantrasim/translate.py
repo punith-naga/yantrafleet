@@ -101,3 +101,21 @@ def fleet_meta_row(writer_id: str, sim_time_s: float, throughput_per_h: float,
         "throughput": throughput_per_h,
         "updated_at": timestamp,
     }
+
+
+def telemetry_row(state, extras, timestamp: str):
+    """One history sample for ``robot_telemetry`` (v0.3).
+
+    Derived from the same VDA state as robot_row so history and live rows
+    can never disagree.
+    """
+    row = robot_row(state, extras)
+    return {
+        "robot_id": row["id"],
+        "ts": timestamp,
+        "battery": row["battery"],
+        "speed": row["speed"],
+        "motor_temp": row["motor_temp"],
+        "status": row["status"],
+        "pos": row["pos"],
+    }

@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 
 from ..sim import TickOutput
-from ..translate import alert_row, fleet_meta_row, robot_row
+from ..translate import alert_row, fleet_meta_row, robot_row, telemetry_row
 
 log = logging.getLogger(__name__)
 
@@ -47,10 +47,12 @@ class SupabaseTransport:
         writer_id: str = "yantrasim",
         client: httpx.Client | None = None,
         timeout_s: float = 10.0,
+        history_every: int = 3,
     ) -> None:
         self.base_url, self.key = resolve_config(url, key)
         self.rest = f"{self.base_url}/rest/v1"
         self.writer_id = writer_id
+        self.history_every = history_every
         self._client = client or httpx.Client(timeout=timeout_s)
 
     # -- Transport protocol ------------------------------------------------
@@ -64,6 +66,24 @@ class SupabaseTransport:
             self._post("alerts", alerts, on_conflict="id", merge=False)
         meta = fleet_meta_row(self.writer_id, out.sim_time_s, out.throughput_per_h, ts)
         self._post("fleet_meta", [meta], on_conflict="id", merge=True)
+        # v0.3: downsampled history for replay/analytics (every Nth tick).
+        if self.history_every and out.tick % self.history_every == 0:
+            samples = [telemetry_row(s, out.extras[self._rid(s, out)], ts)
+                       for s in out.states]
+            self._insert("robot_telemetry", samples)
+
+    def _insert(self, table: str, rows: list) -> None:
+        """Append-only insert (history tables); failures logged, not fatal."""
+        try:
+            resp = self._client.post(
+                f"{self.rest}/{table}", json=rows,
+                headers={**self._headers(), "Prefer": "return=minimal"},
+            )
+            if resp.status_code >= 400:
+                log.warning("supabase %s INSERT -> %s: %s",
+                            table, resp.status_code, resp.text[:200])
+        except httpx.HTTPError as exc:
+            log.warning("supabase %s INSERT failed: %s", table, exc)
 
     def _headers(self) -> dict[str, str]:
         return {

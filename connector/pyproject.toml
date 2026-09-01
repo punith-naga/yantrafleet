@@ -2,7 +2,7 @@
 name = "yantrabridge"
 version = "0.1.0"
 description = "VDA 5050 v2.1 state -> Supabase connector for YantraFleet"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.27",
 ]

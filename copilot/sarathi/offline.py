@@ -47,6 +47,8 @@ def classify_intent(question: str) -> tuple[str, dict[str, Any]]:
         return "robot_detail", {"robot_id": m.group(1)}
     if "incident" in q:
         return "incidents", {}
+    if any(w in q for w in ("approval", "approvals", "approve", "pending command", "command queue", "waiting for")):
+        return "approvals", {}
     if "alert" in q or "alarm" in q:
         sev = None
         for word in ("critical", "warn", "info"):
@@ -98,6 +100,8 @@ class OfflineEngine:
             return self._robot_detail(box, slots["robot_id"])
         if intent == "incidents":
             return self._incidents(box)
+        if intent == "approvals":
+            return self._approvals(box)
         if intent == "alerts":
             return self._alerts(box, slots.get("sev"))
         if intent == "faults":
@@ -198,6 +202,24 @@ class OfflineEngine:
             for x in rows[:5]
         )
         return f"{r.data['count']} unacknowledged {label}alert(s): {listing}."
+
+    def _approvals(self, box: Toolbox) -> str:
+        res = box.query_commands(limit=20)
+        rows = res.data["rows"]
+        pending = [r for r in rows if r.get("status") == "pending"]
+        if not pending:
+            recent = rows[:3]
+            tail = "; ".join(
+                f"{r.get('cmd')} {r.get('robot_id')} -> {r.get('status')}"
+                for r in recent) or "no commands recorded"
+            return (f"No commands are waiting for approval. "
+                    f"Recent activity: {tail}.")
+        lines = ", ".join(
+            f"{r.get('cmd')} {r.get('robot_id')} (from {r.get('requested_by') or 'console'})"
+            for r in pending)
+        return (f"{len(pending)} command(s) awaiting approval: {lines}. "
+                f"Approve or reject them on the Overview page; approved "
+                f"commands are executed by the live feed and audited.")
 
     def _incidents(self, box: Toolbox) -> str:
         r = box.query_incidents(state="open")

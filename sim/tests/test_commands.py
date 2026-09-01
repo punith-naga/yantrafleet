@@ -101,3 +101,42 @@ class TestPoller:
         t = SupabaseTransport(client=httpx.Client(
             transport=httpx.MockTransport(handler)))
         assert t.poll_commands(lambda rid, cmd: (True, "")) == 0
+
+
+class TestTelemetryHistory:
+    def test_history_rows_posted_every_nth_tick(self):
+        from yantrasim.sim import FleetSim
+        posts = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST":
+                posts.append((request.url.path, json.loads(request.content)))
+                return httpx.Response(201)
+            return httpx.Response(200, json=[])
+
+        t = SupabaseTransport(client=httpx.Client(
+            transport=httpx.MockTransport(handler)), history_every=2)
+        sim = FleetSim(seed=3)
+        for _ in range(4):
+            t.publish(sim.tick(dt_s=5.0))
+        hist = [rows for path, rows in posts if path.endswith("/robot_telemetry")]
+        assert len(hist) == 2                      # ticks 2 and 4
+        sample = hist[0][0]
+        assert set(sample) == {"robot_id", "ts", "battery", "speed",
+                               "motor_temp", "status", "pos"}
+        assert sample["status"] in ("active", "idle", "charging", "paused",
+                                    "estop", "degraded", "fault")
+
+    def test_history_disabled_with_zero(self):
+        posts = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            posts.append(request.url.path)
+            return httpx.Response(201) if request.method == "POST" else httpx.Response(200, json=[])
+
+        from yantrasim.sim import FleetSim
+        t = SupabaseTransport(client=httpx.Client(
+            transport=httpx.MockTransport(handler)), history_every=0)
+        sim = FleetSim(seed=3)
+        t.publish(sim.tick(dt_s=5.0))
+        assert not any(p.endswith("/robot_telemetry") for p in posts)

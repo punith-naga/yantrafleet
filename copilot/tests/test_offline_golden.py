@@ -66,3 +66,10 @@ def test_intent_classifier_edges() -> None:
     assert classify_intent("which robots are charging")[0] == "charging"
     assert classify_intent("battery situation?")[0] == "low_battery"
     assert classify_intent("hello there")[0] == "fleet_summary"
+
+
+def test_offline_approvals_intent(transport):
+    ans = _engine(transport).answer("what is waiting for approval?")
+    assert "awaiting approval" in ans.answer
+    assert "estop R-004" in ans.answer
+    assert any("query_commands" in e["label"] for e in ans.evidence)
