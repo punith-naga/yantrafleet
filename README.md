@@ -14,7 +14,11 @@ robots(id, vendor, status, battery, pos jsonb [x,y], speed, task_kind,
        health, motor_temp, tasks_done, fault_msg, updated_at)
 alerts(id, sev, msg, src, tlabel, ack, created_at)
 fleet_meta(id=1, writer_id, sim_min, throughput, updated_at)
-incidents(...)  — read/patched by console and copilot
+robot_telemetry(id, robot_id, ts, battery, speed, motor_temp, status, pos)
+incidents(id, sev, title, src, tlabel, state, impact, rca, fix, dur,
+          created_at)  — written by the detector, read/patched by console
+                         and copilot (rca/fix nullable)
+commands(id, robot_id, cmd, status, requested_by, decided_by, ..., note)
 ```
 
 ## Components
@@ -24,7 +28,9 @@ incidents(...)  — read/patched by console and copilot
 | `sim/`       | `yantrasim`   | Deterministic 10-AMR warehouse simulator (3 vendors, 8x5 waypoint grid, chargers, faults). Emits VDA 5050 v2.1 `state` messages; publishes to Supabase (default), MQTT (`[mqtt]` extra), or stdout. |
 | `connector/` | `yantrabridge`| Pure VDA 5050 v2.1 → Supabase row translation, alert dedup (inactive→active edges, battery hysteresis), and a batched PostgREST sink. Sources: JSONL file or MQTT. |
 | `copilot/`   | `sarathi`     | FastAPI service (`POST /ask` on :8001) that answers fleet questions with cited evidence. Degrades through tiers: `grounded` (LLM + live tools) → `llm_only` → `offline` (template answers, no LLM needed). |
-| `console/`   | —             | Single-file web console (`index.html`, no build step): live map, robot detail, alerts, incidents, and a Copilot panel that calls sarathi first and falls back to a local rule engine. |
+| `console/`   | —             | Single-file web console (`index.html`, no build step): live map, robot detail, alerts, incidents (with recorded-telemetry replay), and a Copilot panel that calls sarathi first and falls back to a local rule engine. |
+| `detector/`  | `yantradetect`| Incident detector: polls `robots`, maintains `incidents` — PagerDuty-style dedup with deterministic idempotent `INC-XXXX` ids, Prometheus-style pending window + clear hold, re-open window with flap counting, stale auto-resolve. `python -m yantradetect --interval 5` (or `--once`, `--dry-run`). |
+| `e2e/`       | —             | Offline end-to-end suite: `fakerest.py` (in-process fake PostgREST on 127.0.0.1) + `test_e2e.py` driving sim transport → command gate → copilot toolbox → detector sink over real localhost HTTP, zero network egress. |
 
 ## Quickstart (Windows)
 
@@ -32,11 +38,14 @@ Prereqs: Python 3.11+, a modern browser. From the repo root:
 
 ```bat
 :: 1) install
-pip install -e core -e sim -e connector
+pip install -e core -e sim -e connector -e detector
 pip install -r copilot\requirements.txt
 
-:: 2) start the simulator (writes robots/alerts/fleet_meta to Supabase)
+:: 2) start the simulator (writes robots/alerts/fleet_meta/telemetry to Supabase)
 py -m yantrasim --supabase
+
+:: 2b) start the incident detector (optional; maintains the incidents table)
+py -m yantradetect --interval 5
 
 :: 3) start the copilot service (new terminal, from copilot\)
 py -m uvicorn sarathi.server:app --port 8001
@@ -70,13 +79,37 @@ serves grounded template answers (`tier: offline`).
 Each Python component has an offline pytest suite (no network, no browser):
 
 ```bat
+cd core & py -m pytest
 cd sim & py -m pytest
 cd connector & py -m pytest
 cd copilot & py -m pytest
+cd detector & py -m pytest
 cd console & py -m pytest   :: needs Node for the inline-script syntax check
+cd e2e & py -m pytest       :: offline end-to-end (fake PostgREST loopback)
 ```
 
-See `TEST-REPORT.md` for the latest verification run.
+Run each suite from its own directory (test module basenames collide across
+components). See `TEST-REPORT.md` for the latest verification run.
+
+## v0.4 — incident detector, real replay & e2e
+
+Apply `supabase/0003_telemetry.sql` if you have not already (v0.3 schema).
+Then:
+
+1. **Detector** — `py -m yantradetect --interval 5` polls `robots` and
+   opens/resolves `incidents` rows: a robot seen in `fault`/`estop` for 2
+   consecutive polls opens an incident (`sev` crit/serious); recovery
+   resolves it with duration and impact. Deterministic ids make retried
+   writes idempotent; `--dry-run` prints actions without writing.
+2. **Incident replay from recorded telemetry** — opening an incident in the
+   console fetches the robot's `robot_telemetry` rows in a window around the
+   incident's `created_at` and drives the replay map, scrubber, and
+   battery/speed charts from real samples (alerts in the window become event
+   dots). With fewer than 10 recorded samples the scripted INC-1042 demo
+   replay is shown instead, with a note.
+3. **Copilot telemetry** — ask sarathi about a robot's recent telemetry; the
+   `query_telemetry` tool returns windowed samples plus battery/speed/
+   motor-temp stats and status-transition counts.
 
 ## v0.2 — command gate & canonical statuses
 

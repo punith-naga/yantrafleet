@@ -56,6 +56,13 @@
       "expected_intent": "charging",
       "expected_tools": ["query_robots"],
       "expected_contains": ["2 robot(s) charging", "R-002", "R-006"]
+    },
+    {
+      "id": "g9-telemetry-history",
+      "question": "Show me the telemetry trend for R-004 over the last 30 minutes.",
+      "expected_intent": "history",
+      "expected_tools": ["query_telemetry"],
+      "expected_contains": ["R-004", "12 samples", "30% -> 8%", "88C", "2 status change(s)", "fault"]
     }
   ]
 }

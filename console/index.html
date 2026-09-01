@@ -587,16 +587,18 @@ function rLiveOps(){
   </div>`;
   drawMapBase(); updateMap(); renderFleetList();
 }
-function drawMapBase(){
-  const svg=$('#map'); if(!svg)return;
+function mapBaseSvgStr(){ // zones + lanes + racks — shared by the live map and the replay map
   let s='';
   ZONES.forEach(z=>{s+=`<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="8" fill="${z.c}" stroke="var(--border)"/>
     <text class="zone-lbl" x="${z.x+10}" y="${z.y+18}">${z.n}</text>`;});
   LANES.forEach(([a,b])=>{const p=WP[a],q=WP[b];s+=`<line x1="${p[0]}" y1="${p[1]}" x2="${q[0]}" y2="${q[1]}" stroke="#232322" stroke-width="7" stroke-linecap="round"/>`;});
   RACKS.forEach(r=>{s+=`<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="4" fill="#26262a" stroke="#31313a"/>`;});
   s+=`<text x="880" y="352" font-size="10" fill="#4f6b4f">⚡ 3 bays</text>`;
-  s+=`<g id="robots-layer"></g><g id="fx-layer"></g>`;
-  svg.innerHTML=s;
+  return s;
+}
+function drawMapBase(){
+  const svg=$('#map'); if(!svg)return;
+  svg.innerHTML=mapBaseSvgStr()+`<g id="robots-layer"></g><g id="fx-layer"></g>`;
 }
 function updateMap(){
   const layer=$('#robots-layer'); if(!layer)return;
@@ -710,7 +712,7 @@ function renderIncDetail(){
       <span class="pill">${i.id}</span><span class="pill">${i.state}</span>
       ${i.state==='Open'?`<button class="btn sm primary" style="margin-left:auto" onclick="fixRobot('AMR-07')">Run guided recovery</button>`:''}</div>
     <div style="color:var(--ink2);font-size:12.5px;margin-top:8px"><b style="color:var(--serious)">Impact:</b> ${i.impact}</div>
-    ${i.id==='INC-1042'?`
+    <div id="rp-wrap">${i.id==='INC-1042'?`
     <h3 style="margin-top:16px">Incident replay — position + telemetry, time-synced</h3>
     <div class="mapwrap"><svg id="replay-map" viewBox="150 260 380 200" style="display:block;width:100%;max-height:230px"></svg></div>
     <div class="tl-events" id="tl-ev"></div>
@@ -720,7 +722,8 @@ function renderIncDetail(){
     <div class="grid g2" style="margin-top:10px">
       <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">AMR-07 localization confidence</div><div class="chart" id="rp-conf"></div></div>
       <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">Aisle B3 traffic (robots/min)</div><div class="chart" id="rp-traf"></div></div>
-    </div>`:''}
+    </div>`:''}</div>
+    <div id="rp-note" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
     <h3 style="margin-top:16px">✦ Copilot root-cause analysis</h3>
     <div class="card" style="background:var(--surface2)">
       <p style="font-size:12.8px;color:var(--ink2)">${i.rca}</p>
@@ -738,6 +741,7 @@ function renderIncDetail(){
     lineChart($('#rp-conf'),conf.map(d=>({t:d.t,v:Math.round(d.v*100)})),{h:110,color:'var(--s2)',unit:'%',label:'confidence'});
     const traf=Array.from({length:30},(_,k)=>({t:14*60+2+k*0.8,v:Math.max(0,Math.round(6-(k<6?0:k<20?5:5-(k-20)*0.5)+(k%3?0:1)))}));
     lineChart($('#rp-traf'),traf,{h:110,color:'var(--s1)',label:'robots/min'});}
+  loadRealReplay(i); // v0.3: try recorded robot_telemetry — replaces the scripted replay when available
 }
 const RP_PATH=[[460,345],[430,345],[400,345],[380,345],[380,345],[380,345],[380,345],[380,345],[380,345],[380,345]]; // travels then stops
 const RP_EVENTS=[[4,'crit','Protective stop'],[18,'warn','3 robots rerouted'],[62,'info','Operator dispatched'],[96,'info','Re-localized']];
@@ -756,6 +760,7 @@ function drawReplay(){
 let rpTimer=null;
 function replaySeek(v){
   replayT=+v; const r=$('#rp-range'); if(r)r.value=v;
+  if(RP&&RP.inc===curInc){replaySeekReal(replayT);return;}   // real-telemetry replay active
   const idx=Math.min(RP_PATH.length-1,Math.floor(v/100*(RP_PATH.length-1)));
   const frac=(v/100*(RP_PATH.length-1))-idx;
   const a=RP_PATH[idx], b=RP_PATH[Math.min(idx+1,RP_PATH.length-1)];
@@ -769,6 +774,133 @@ function replayPlay(){
   if(rpTimer){clearInterval(rpTimer);rpTimer=null;btn.textContent='▶';return;}
   btn.textContent='❚❚';
   rpTimer=setInterval(()=>{replayT+=1.2;if(replayT>=100){replayT=100;clearInterval(rpTimer);rpTimer=null;btn.textContent='▶';}replaySeek(replayT);},60);
+}
+
+/* ---- v0.3 real-telemetry replay (robot_telemetry via PostgREST) ----
+   When an incident opens and the cloud is reachable, fetch the src robot's
+   recorded telemetry in [start−2min, start+max(dur,10)min] and drive the
+   replay UI (scrubber, marker, trail, charts, event dots) from real samples.
+   Fewer than 10 samples, or any fetch failure → the scripted INC-1042 demo
+   replay stays, with a small note. */
+let RP=null, rpReq=0;   // RP = active real-replay model {inc,robotId,samples,events,cursors}
+function lttbIdx(ts,vs,thr){ // Largest-Triangle-Three-Buckets — returns kept indices
+  const n=ts.length; if(thr>=n||thr<3)return ts.map((_,i)=>i);
+  const out=[0], bkt=(n-2)/(thr-2); let a=0;
+  for(let i=0;i<thr-2;i++){
+    let s=Math.floor((i+1)*bkt)+1, e=Math.min(Math.floor((i+2)*bkt)+1,n);
+    let avT=0,avV=0,c=0; for(let j=s;j<e;j++){avT+=ts[j];avV+=vs[j];c++;}
+    if(c){avT/=c;avV/=c;}else{avT=ts[n-1];avV=vs[n-1];}
+    const s0=Math.floor(i*bkt)+1, e0=Math.min(Math.floor((i+1)*bkt)+1,n);
+    let best=s0, bestA=-1;
+    for(let j=s0;j<e0;j++){
+      const ar=Math.abs((ts[a]-avT)*(vs[j]-vs[a])-(ts[a]-ts[j])*(avV-vs[a]));
+      if(ar>bestA){bestA=ar;best=j;}
+    }
+    out.push(best); a=best;
+  }
+  out.push(n-1); return out;
+}
+function rpNote(inc){ // fallback note under the (possibly scripted) replay block
+  if(curInc!==inc.id)return;
+  const el=$('#rp-note'); if(!el)return;
+  el.textContent=inc.id==='INC-1042'?'scripted demo replay (no telemetry recorded)'
+    :'no telemetry recorded for this incident — replay unavailable';
+}
+async function loadRealReplay(inc){
+  const req=++rpReq; RP=null;
+  const live=typeof Sync!=='undefined'&&Sync.mode!=='local'&&Sync.mode!=='connecting';
+  if(!live||!inc.created_at){rpNote(inc);return;}
+  try{
+    const anchor=new Date(inc.created_at).getTime();
+    if(!isFinite(anchor)){rpNote(inc);return;}
+    const t0=new Date(anchor-2*60000).toISOString();
+    const t1=new Date(anchor+Math.max(+inc.dur||0,10)*60000).toISOString();
+    const enc=encodeURIComponent;
+    const rows=await Sync.q(`robot_telemetry?robot_id=eq.${enc(inc.src)}&ts=gte.${enc(t0)}&ts=lte.${enc(t1)}&order=ts.asc&limit=2000&select=ts,battery,speed,motor_temp,status,pos`);
+    if(req!==rpReq)return;                                   // another incident opened meanwhile
+    if(!rows||rows.length<10){rpNote(inc);return;}
+    let S=rows.map(r=>({tms:new Date(r.ts).getTime(),
+      battery:r.battery==null?null:+r.battery, speed:r.speed==null?null:+r.speed,
+      status:r.status, pos:posToSvg(r.pos)}));
+    // forward/backfill missing positions (hold last fix — never fabricate motion)
+    let last=null;
+    S.forEach(s=>{if(Array.isArray(s.pos)&&s.pos.length===2&&isFinite(+s.pos[0])&&isFinite(+s.pos[1])){s.pos=[+s.pos[0],+s.pos[1]];last=s.pos;}else s.pos=last;});
+    const first=S.find(s=>s.pos); if(!first){rpNote(inc);return;}
+    S.forEach(s=>{if(!s.pos)s.pos=first.pos;});
+    // downsample to ≤300 points for scrubbing — LTTB keeps incident spikes visible
+    if(S.length>300){
+      const keep=lttbIdx(S.map(s=>s.tms),S.map(s=>s.battery!=null?s.battery:(s.speed!=null?s.speed:0)),300);
+      S=keep.map(k=>S[k]);
+    }
+    // timeline event dots: that robot's alerts inside the window
+    let evs=[];
+    try{
+      const al=await Sync.q(`alerts?src=eq.${enc(inc.src)}&created_at=gte.${enc(t0)}&created_at=lte.${enc(t1)}&order=created_at.asc&limit=40&select=sev,msg,created_at`);
+      const T0=S[0].tms, T1=S[S.length-1].tms;
+      evs=(al||[]).map(a=>({frac:Math.max(0,Math.min(1,(new Date(a.created_at).getTime()-T0)/((T1-T0)||1))),sev:a.sev,msg:a.msg}));
+    }catch(e){/* alerts optional */}
+    if(req!==rpReq)return;
+    RP={inc:inc.id,robotId:inc.src,samples:S,events:evs,cursors:[]};
+    if(curInc===inc.id&&curView==='incidents')renderRealReplay();
+  }catch(e){ if(req===rpReq)rpNote(inc); }
+}
+function renderRealReplay(){
+  const wrap=$('#rp-wrap'); if(!wrap||!RP)return;
+  wrap.innerHTML=`
+    <h3 style="margin-top:16px">Incident replay — recorded telemetry · ${RP.samples.length} samples</h3>
+    <div class="mapwrap"><svg id="replay-map" style="display:block;width:100%;max-height:230px"></svg></div>
+    <div class="tl-events" id="tl-ev"></div>
+    <div class="scrub"><button class="btn sm" id="rp-play" onclick="replayPlay()">▶</button>
+      <input type="range" id="rp-range" min="0" max="100" value="${+replayT||0}" step="0.5" oninput="replaySeek(this.value)">
+      <span class="tm" id="rp-time">—</span></div>
+    <div class="grid g2" style="margin-top:10px">
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">${RP.robotId} battery (%)</div><div class="chart" id="rp-bat"></div></div>
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">${RP.robotId} speed (m/s)</div><div class="chart" id="rp-spd"></div></div>
+    </div>`;
+  const nt=$('#rp-note'); if(nt)nt.textContent='replay driven by recorded robot_telemetry for '+RP.robotId+' · event dots = alerts in window';
+  drawRealReplay();
+  $('#tl-ev').innerHTML=RP.events.map(e=>`<div class="tl-ev" style="left:${(e.frac*100).toFixed(1)}%;background:${e.sev==='crit'?'var(--crit)':e.sev==='serious'?'var(--serious)':e.sev==='warn'?'var(--warn)':'var(--muted)'}" title="${Copilot.esc(e.msg||'')}" onclick="replaySeek(${(e.frac*100).toFixed(1)})"></div>`).join('');
+  const fmtT=t=>{const d=new Date(t);return pad(d.getHours())+':'+pad(d.getMinutes());};
+  lineChart($('#rp-bat'),RP.samples.map(s=>({t:s.tms,v:Math.round(s.battery!=null?s.battery:0)})),{h:110,color:'var(--s3)',unit:'%',label:'battery',fmtX:fmtT});
+  lineChart($('#rp-spd'),RP.samples.map(s=>({t:s.tms,v:+(s.speed!=null?s.speed:0).toFixed(2)})),{h:110,color:'var(--s1)',label:'m/s',fmtX:fmtT});
+  RP.cursors=[addReplayCursor($('#rp-bat')),addReplayCursor($('#rp-spd'))];
+  replaySeek(+replayT||0);
+}
+function drawRealReplay(){ // warehouse base auto-framed on the robot's recorded path
+  const svg=$('#replay-map'); if(!svg||!RP)return;
+  const xs=RP.samples.map(s=>s.pos[0]), ys=RP.samples.map(s=>s.pos[1]);
+  let x0=Math.min.apply(null,xs), x1=Math.max.apply(null,xs), y0=Math.min.apply(null,ys), y1=Math.max.apply(null,ys);
+  const px=Math.max(50,(x1-x0)*.25), py=Math.max(40,(y1-y0)*.25);
+  x0-=px;x1+=px;y0-=py;y1+=py;
+  if(x1-x0<320){const c=(x0+x1)/2;x0=c-160;x1=c+160;}
+  if(y1-y0<170){const c=(y0+y1)/2;y0=c-85;y1=c+85;}
+  svg.setAttribute('viewBox',`${x0.toFixed(0)} ${y0.toFixed(0)} ${(x1-x0).toFixed(0)} ${(y1-y0).toFixed(0)}`);
+  const pts=RP.samples.map(s=>s.pos[0].toFixed(1)+','+s.pos[1].toFixed(1)).join(' ');
+  svg.innerHTML=`<rect x="${x0.toFixed(0)}" y="${y0.toFixed(0)}" width="${(x1-x0).toFixed(0)}" height="${(y1-y0).toFixed(0)}" fill="#141413"/>`
+    +mapBaseSvgStr()
+    +`<polyline points="${pts}" fill="none" stroke="var(--s2)" stroke-width="2" opacity=".25"/>`
+    +`<polyline id="rp-trail" points="" fill="none" stroke="var(--s2)" stroke-width="2" stroke-dasharray="4 3" opacity=".85"/>`
+    +`<g id="rp-bot"><circle r="10" fill="var(--s2)" stroke="var(--page)" stroke-width="2"/><text y="3.5" text-anchor="middle" font-size="8.5" font-weight="700" fill="#0d0d0d">${RP.robotId.slice(-2)}</text></g>`;
+}
+function addReplayCursor(el){ // vertical time cursor over a lineChart; returns frac→x updater
+  const svg=el&&el.querySelector('svg'); if(!svg)return null;
+  const w=+svg.getAttribute('width'), h=+svg.getAttribute('height');
+  const ln=document.createElementNS('http://www.w3.org/2000/svg','line');
+  ln.setAttribute('y1',8); ln.setAttribute('y2',h-20);
+  ln.setAttribute('stroke','var(--accent)'); ln.setAttribute('stroke-width','1.5'); ln.setAttribute('opacity','.8');
+  svg.appendChild(ln);
+  return f=>{const x=34+f*(w-34-8);ln.setAttribute('x1',x.toFixed(1));ln.setAttribute('x2',x.toFixed(1));};
+}
+function replaySeekReal(v){
+  const S=RP.samples, n=S.length;
+  const f=Math.max(0,Math.min(1,(+v||0)/100)), fp=f*(n-1), idx=Math.floor(fp), fr=fp-idx;
+  const a=S[idx], b=S[Math.min(idx+1,n-1)];
+  const x=a.pos[0]+(b.pos[0]-a.pos[0])*fr, y=a.pos[1]+(b.pos[1]-a.pos[1])*fr;
+  const bot=$('#rp-bot'); if(bot)bot.setAttribute('transform',`translate(${x.toFixed(1)},${y.toFixed(1)})`);
+  const trail=$('#rp-trail'); if(trail)trail.setAttribute('points',S.slice(0,idx+1).map(s=>s.pos[0].toFixed(1)+','+s.pos[1].toFixed(1)).join(' ')+` ${x.toFixed(1)},${y.toFixed(1)}`);
+  const d=new Date(a.tms+(b.tms-a.tms)*fr);
+  const t=$('#rp-time'); if(t)t.textContent=pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+  (RP.cursors||[]).forEach(u=>{if(u)u(n>1?fp/(n-1):0);});
 }
 
 /* ---------------- Missions ---------------- */
@@ -1020,7 +1152,7 @@ const Sync={
     await this.claim(); this.setChip();
     // pull seeded incidents/missions once
     try{const inc=await this.q('incidents?select=*&order=created_at.desc');
-      if(inc&&inc.length)store.incidents=inc.map(i=>({id:i.id,sev:i.sev,title:i.title,src:i.src,t:i.tlabel,state:i.state,impact:i.impact,rca:i.rca,fix:i.fix,dur:i.dur}));
+      if(inc&&inc.length)store.incidents=inc.map(i=>({id:i.id,sev:i.sev,title:i.title,src:i.src,t:i.tlabel,state:i.state,impact:i.impact,rca:i.rca||'Automated detection (yantradetect) — root-cause analysis pending.',fix:i.fix||'Inspect the robot on the floor · acknowledge related alerts · ask the copilot for telemetry around the event.',dur:i.dur,created_at:i.created_at}));
       const ms=await this.q('missions?select=*&order=id');
       if(ms&&ms.length)store.missions=ms.map(m=>({id:m.id,name:m.name,robots:m.robots,state:m.state,prog:m.prog,eta:m.eta}));
     }catch(e){}

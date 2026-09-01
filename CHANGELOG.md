@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.4.0 — 2026-09-01
+- **Incident detector** (`detector/`, package `yantradetect`): polls the
+  `robots` table and maintains the `incidents` table with industry patterns —
+  PagerDuty-style dedup (one open incident per robot, deterministic
+  `INC-XXXX` ids so retried upserts are idempotent), Prometheus-style pending
+  window and clear-hold hysteresis, re-open window with flap counting, and
+  stale auto-resolve. Pure engine (`IncidentEngine.observe(rows, now) ->
+  [Action]`, no I/O) + `PostgRESTSink`/`DryRunSink`. `python -m yantradetect
+  --interval 5`, `--once`, `--dry-run`. 35 offline tests.
+- **Offline end-to-end suite** (`e2e/`): `fakerest.py` is an in-process fake
+  PostgREST (stdlib HTTP server: upserts with `on_conflict` + `Prefer`
+  resolution, `eq./neq./in./lt./gt./is.` filters, `order`/`limit`/`select`,
+  PATCH merges). `test_e2e.py` drives the real sim transport, the command
+  approval gate, sarathi's toolbox, and the detector sink over genuine
+  localhost httpx — 10 tests, zero network egress.
+- **Copilot telemetry tool**: `query_telemetry(robot_id, minutes=30,
+  limit=500)` reads `robot_telemetry` and returns rows + stats (battery
+  min/max/avg, speed avg, motor-temp max, status transitions), with the time
+  window anchored on the newest sample so replayed/simulated clocks work.
+- **Console real incident replay**: opening an incident now fetches the src
+  robot's recorded `robot_telemetry` around `created_at` and drives the
+  replay map/scrubber/charts from real samples (LTTB-downsampled, positions
+  forward-filled); the scripted INC-1042 demo remains the fallback when no
+  telemetry is recorded.
+- Consistency fixes from release verification: detector open rows now carry
+  `created_at` (console orders incidents by it; engine `seed()` restores
+  `opened_at` from it), and the console shows placeholder RCA/fix copy for
+  detector-created incidents instead of `null`.
+
+## v0.3.0 — 2026-08-31
+- Telemetry history: `robot_telemetry` table (`supabase/0003_telemetry.sql`)
+  sampled every Nth sim tick, with `purge_old_telemetry()` retention helper.
+- Copilot approval awareness (`query_commands`) and Python 3.10 compatibility.
+
 ## v0.2.0 — 2026-08-26
 - **Canonical status vocabulary** (`core/yantracore`): active | idle | charging |
   paused | estop | degraded | fault — enforced by a DB CHECK constraint

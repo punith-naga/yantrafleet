@@ -15,7 +15,7 @@ import hashlib
 import json
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .transport import Params, Transport
@@ -38,6 +38,34 @@ class ToolResult:
         return f"{self.tool}({inner})"
 
 
+def _parse_ts(raw: Any) -> datetime | None:
+    """Parse an ISO-8601 timestamp (Z-suffixed or offset); None on failure."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _window_rows(rows: list[dict[str, Any]], minutes: int) -> list[dict[str, Any]]:
+    """Keep rows whose ``ts`` is within ``minutes`` of the newest sample.
+
+    Anchoring on the newest sample (not wall clock) keeps the window
+    meaningful for simulated/replayed telemetry. Rows with unparseable
+    timestamps are kept — dropping data silently would hide problems.
+    """
+    stamps = [_parse_ts(r.get("ts")) for r in rows]
+    known = [s for s in stamps if s is not None]
+    if not known:
+        return rows
+    cutoff = max(known) - timedelta(minutes=minutes)
+    return [r for r, s in zip(rows, stamps) if s is None or s >= cutoff]
+
+
 def _make_source_id(tool: str, args: dict[str, Any]) -> tuple[str, str]:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     digest = hashlib.sha1(
@@ -48,7 +76,7 @@ def _make_source_id(tool: str, args: dict[str, Any]) -> tuple[str, str]:
 
 @dataclass
 class Toolbox:
-    """The four fleet tools, bound to one Transport, with a per-request log."""
+    """The fleet tools, bound to one Transport, with a per-request log."""
 
     transport: Transport
     row_limit: int = 50
@@ -197,6 +225,56 @@ class Toolbox:
                 "filters": {k: v for k, v in args.items() if v is not None}}
         return self._record("query_commands", args, data)
 
+    def query_telemetry(
+        self,
+        robot_id: str,
+        minutes: int = 30,
+        limit: int = 500,
+    ) -> ToolResult:
+        """Recent telemetry samples for one robot, newest first, plus stats.
+
+        The time window is anchored on the *newest sample's* timestamp (not
+        wall clock) so it works against replayed/simulated data whose clock
+        may lag real time. Stats: sample count, battery min/max/avg, average
+        speed, max motor temp, and number of status transitions.
+        """
+        args = {"robot_id": robot_id, "minutes": minutes, "limit": limit}
+        params: Params = [
+            ("select", "*"),
+            ("robot_id", f"eq.{robot_id}"),
+            ("order", "ts.desc"),
+            ("limit", str(limit)),
+        ]
+        rows = self._rows("robot_telemetry", params)
+        rows = _window_rows(rows, minutes)
+
+        batteries = [float(r["battery"]) for r in rows if r.get("battery") is not None]
+        speeds = [float(r["speed"]) for r in rows if r.get("speed") is not None]
+        temps = [float(r["motor_temp"]) for r in rows if r.get("motor_temp") is not None]
+        # rows are newest-first; count transitions in chronological order.
+        statuses = [r.get("status") for r in reversed(rows) if r.get("status") is not None]
+        status_changes = sum(1 for a, b in zip(statuses, statuses[1:]) if a != b)
+
+        stats = {
+            "samples": len(rows),
+            "battery_min": min(batteries) if batteries else None,
+            "battery_max": max(batteries) if batteries else None,
+            "battery_avg": round(statistics.mean(batteries), 1) if batteries else None,
+            "speed_avg": round(statistics.mean(speeds), 2) if speeds else None,
+            "motor_temp_max": max(temps) if temps else None,
+            "status_changes": status_changes,
+            "first_status": statuses[0] if statuses else None,
+            "last_status": statuses[-1] if statuses else None,
+        }
+        data = {
+            "rows": rows,
+            "count": len(rows),
+            "stats": stats,
+            "window_minutes": minutes,
+            "filters": {"robot_id": robot_id, "minutes": minutes, "limit": limit},
+        }
+        return self._record("query_telemetry", args, data)
+
     # -- dynamic dispatch (for the LLM agent loop) -------------------------
 
     def call(self, name: str, args: dict[str, Any]) -> ToolResult:
@@ -207,6 +285,7 @@ class Toolbox:
             "query_alerts": self.query_alerts,
             "query_incidents": self.query_incidents,
             "query_commands": self.query_commands,
+            "query_telemetry": self.query_telemetry,
         }.get(name)
         if fn is None:
             raise ValueError(f"unknown tool: {name}")
@@ -294,4 +373,29 @@ TOOL_SPECS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_telemetry",
+            "description": "Recent telemetry history for one robot (newest "
+                           "first) with computed stats: sample count, battery "
+                           "min/max/avg, average speed, max motor temp, and "
+                           "status-change count. Use for trend / history / "
+                           "'over the last N minutes' questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_id": {"type": "string", "description": "exact robot id"},
+                    "minutes": {"type": "integer",
+                                "description": "window size in minutes (default 30)"},
+                    "limit": {"type": "integer",
+                              "description": "max samples (default 500)"},
+                },
+                "required": ["robot_id"],
+            },
+        },
+    },
 ]
+
+# Alias: some callers/docs refer to these as TOOL_SCHEMAS.
+TOOL_SCHEMAS = TOOL_SPECS

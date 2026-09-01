@@ -18,6 +18,9 @@ from .transport import TransportError
 # Robot ids look like "R-003" / "AGV-001" / "bot_7" — letters, sep, digits.
 _ROBOT_ID_RE = re.compile(r"\b([A-Za-z]{1,6}[-_]\d{1,5})\b")
 
+# "last 15 minutes" / "past 5 min" — captures the window size.
+_LAST_MIN_RE = re.compile(r"\b(?:last|past)\s+(\d{1,4})\s*min(?:ute)?s?\b", re.I)
+
 
 @dataclass
 class OfflineAnswer:
@@ -43,6 +46,12 @@ def classify_intent(question: str) -> tuple[str, dict[str, Any]]:
     """Keyword/regex intent classification. Returns (intent, slots)."""
     q = question.lower()
     m = _ROBOT_ID_RE.search(question)
+    m_min = _LAST_MIN_RE.search(question)
+    if m_min or any(w in q for w in ("history", "trend", "over time", "telemetry")):
+        slots: dict[str, Any] = {"robot_id": m.group(1) if m else None}
+        if m_min:
+            slots["minutes"] = int(m_min.group(1))
+        return "history", slots
     if m:
         return "robot_detail", {"robot_id": m.group(1)}
     if "incident" in q:
@@ -96,6 +105,8 @@ class OfflineEngine:
     # -- per-intent templates ---------------------------------------------
 
     def _render(self, intent: str, slots: dict[str, Any], box: Toolbox) -> str:
+        if intent == "history":
+            return self._history(box, slots.get("robot_id"), slots.get("minutes"))
         if intent == "robot_detail":
             return self._robot_detail(box, slots["robot_id"])
         if intent == "incidents":
@@ -190,6 +201,43 @@ class OfflineEngine:
         if x.get("fault_msg"):
             text += f" Fault: {x['fault_msg']}."
         return text
+
+    def _history(
+        self, box: Toolbox, robot_id: str | None, minutes: int | None
+    ) -> str:
+        if not robot_id:
+            # No specific robot named — fall back to the fleet-wide snapshot.
+            return self._fleet_summary(box)
+        r = box.query_telemetry(robot_id=robot_id, minutes=minutes or 30)
+        rows = r.data["rows"]
+        window = r.data["window_minutes"]
+        if not rows:
+            return (
+                f"No telemetry samples for {robot_id} in the last "
+                f"{_num(window)} minutes."
+            )
+        s = r.data["stats"]
+        newest, oldest = rows[0], rows[-1]  # rows are newest-first
+        lines = [
+            f"Telemetry for {robot_id} (last {_num(window)} min, "
+            f"{_num(s['samples'])} samples):"
+        ]
+        if s["battery_min"] is not None:
+            lines.append(
+                f"Battery went {_num(oldest['battery'])}% -> "
+                f"{_num(newest['battery'])}% "
+                f"(min {_num(s['battery_min'])}%, max {_num(s['battery_max'])}%, "
+                f"avg {_num(s['battery_avg'])}%)."
+            )
+        if s["speed_avg"] is not None:
+            lines.append(f"Average speed {_num(s['speed_avg'])} m/s.")
+        if s["motor_temp_max"] is not None:
+            lines.append(f"Max motor temp {_num(s['motor_temp_max'])}C.")
+        lines.append(
+            f"{_num(s['status_changes'])} status change(s); "
+            f"latest status: {s['last_status']}."
+        )
+        return " ".join(lines)
 
     def _alerts(self, box: Toolbox, sev: str | None) -> str:
         r = box.query_alerts(sev=sev, ack=False)

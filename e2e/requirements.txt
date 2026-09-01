@@ -1,0 +1,7 @@
+# Offline e2e harness. The fake PostgREST itself is stdlib-only
+# (http.server); these are the client/test deps.
+httpx>=0.27
+pytest>=8.0
+# Component packages (editable installs from this repo):
+#   pip install --break-system-packages -e ./core -e ./sim
+# sarathi is imported straight from ./copilot via sys.path (no install).

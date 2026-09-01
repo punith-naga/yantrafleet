@@ -68,6 +68,54 @@ def test_intent_classifier_edges() -> None:
     assert classify_intent("hello there")[0] == "fleet_summary"
 
 
+def test_intent_classifier_history() -> None:
+    # history keywords beat the plain robot-id shortcut
+    intent, slots = classify_intent("show the battery trend for R-004")
+    assert intent == "history" and slots["robot_id"] == "R-004"
+    intent, slots = classify_intent("R-004 telemetry over the last 15 minutes")
+    assert intent == "history"
+    assert slots == {"robot_id": "R-004", "minutes": 15}
+    # history keywords without a robot id still classify as history
+    intent, slots = classify_intent("how has the fleet behaved over time?")
+    assert intent == "history" and slots["robot_id"] is None
+    # a plain id question stays robot_detail
+    assert classify_intent("what's up with R-004?")[0] == "robot_detail"
+
+
+def test_offline_history_intent_grounded(transport):
+    ans = _engine(transport).answer(
+        "show me the telemetry history for R-004 over the last 30 minutes"
+    )
+    assert ans.intent == "history"
+    # grounded numbers from the fixture decline: 30% -> 8%, max temp 88C
+    for frag in ("R-004", "12 samples", "30% -> 8%", "88C",
+                 "2 status change(s)", "fault"):
+        assert frag in ans.answer, f"missing {frag!r} in: {ans.answer}"
+    # evidence cites query_telemetry with real refs
+    assert any("query_telemetry" in e["label"] for e in ans.evidence)
+    real_refs = {t.source_id for t in ans.tool_log}
+    assert all(e["ref"] in real_refs for e in ans.evidence)
+    # every number in the answer exists in the tool data (grounding)
+    corpus = json.dumps([t.data for t in ans.tool_log], default=str)
+    available = {float(m) for m in _NUM_RE.findall(corpus)}
+    for tok in _NUM_RE.findall(ans.answer):
+        assert float(tok) in available, f"ungrounded {tok!r}: {ans.answer}"
+
+
+def test_offline_history_no_robot_falls_back_to_summary(transport):
+    ans = _engine(transport).answer("what's the trend across the fleet?")
+    assert ans.intent == "history"
+    assert "Fleet summary: 6 robots" in ans.answer
+    assert any("get_fleet_summary" in e["label"] for e in ans.evidence)
+
+
+def test_offline_history_unknown_robot(transport):
+    ans = _engine(transport).answer("telemetry history for R-999")
+    assert ans.intent == "history"
+    assert "No telemetry samples for R-999" in ans.answer
+    assert any("query_telemetry" in e["label"] for e in ans.evidence)
+
+
 def test_offline_approvals_intent(transport):
     ans = _engine(transport).answer("what is waiting for approval?")
     assert "awaiting approval" in ans.answer

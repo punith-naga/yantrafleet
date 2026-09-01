@@ -1,98 +1,120 @@
-# YantraFleet — Release Verification Report
+# YantraFleet — Release Verification Report (v0.4)
 
-Date: 2026-08-26 · Environment: Linux, Python 3.11, pytest 9.1, Node available
-Verifier: release-verification pass over sim/, connector/, copilot/, console/
+Date: 2026-09-01 · Environment: Linux, Python 3.11.15, pytest 9.1.1,
+httpx 0.28.1, Node v22.22.2
+Verifier: release-verification pass over core/, sim/, connector/, copilot/,
+detector/, console/, e2e/
 
 ## 1. Test runs
 
-Dependencies installed per component (`pip install -e sim[mqtt,dev]`,
-`pip install -e connector[dev]`, `pip install -r copilot/requirements.txt`).
+Installed: `pip install -e core -e sim -e connector -e detector`,
+`pip install -r copilot/requirements.txt -r e2e/requirements.txt`
+(`--break-system-packages` in the root container; use a venv normally).
+Both requirements files already existed.
 
-| Component  | Suite                       | Result        |
-|------------|-----------------------------|---------------|
-| sim        | `sim/tests` (6 files)       | **43 passed** |
-| connector  | `connector/tests` (3 files) | **32 passed** |
-| copilot    | `copilot/tests`             | **18 passed** |
-| console    | `console/tests` (structure, sarathi bridge, fallback, `node --check`) | **9 passed** |
+| Component | Suite                                  | Result         |
+|-----------|----------------------------------------|----------------|
+| core      | `core/tests`                           | **4 passed**   |
+| sim       | `sim/tests`                            | **51 passed**  |
+| connector | `connector/tests`                      | **32 passed**  |
+| copilot   | `copilot/tests`                        | **28 passed**  |
+| detector  | `detector/tests`                       | **35 passed**  |
+| console   | `console/tests` (structure + `node --check`) | **9 passed** |
+| e2e       | `e2e/test_e2e.py` (fake PostgREST loopback)  | **10 passed** |
 
-**Total: 102 passed, 0 failed.** All suites run fully offline (httpx
-MockTransport / StaticTransport / stdlib only). No pre-existing failures were
-found; fixes below were consistency fixes, and all suites were re-run green
-after them.
+**Total: 169 passed, 0 failed.** All suites run fully offline. The e2e suite
+uses real httpx over 127.0.0.1 sockets against `e2e/fakerest.py` (in-process
+fake PostgREST); everything else uses mock/static transports or stdlib.
 
-## 2. Console inline-script check
+Note: suites must be run from each component's own directory — test module
+basenames collide across components (`test_cli.py`, `test_sink.py` in both
+sim and detector), so a single repo-root `pytest core sim ...` invocation
+fails at collection. This matches CI, which runs per-directory.
 
-`console/index.html` contains exactly one inline `<script>` block. It was
-extracted and passed `node --check` (also enforced continuously by
-`console/tests/test_console.py::test_inline_script_parses`). Re-verified
-after the edits below.
+`node scripts/check_console.mjs`: **OK** — 1 inline script block parses clean.
 
-## 3. Cross-component consistency
+## 2. Cross-component consistency (v0.4 checks)
 
-Checked against the shared schema
-`robots(id, vendor, status, battery, pos, speed, task_kind, health,
-motor_temp, tasks_done, fault_msg)`:
+Consistent (verified, no change needed):
 
-Consistent (no change needed):
-- **Columns**: sim `robot_row()`, connector `translate_state()`, the console's
-  `Sync.push()`, and copilot's `query_robots`/`get_fleet_summary` all use
-  exactly the schema columns (plus `updated_at`). Connector correctly omits
-  `motor_temp`/`tasks_done` when the vendor extension is absent so upserts
-  never clobber other writers.
-- **Tables**: all writers/readers agree on `robots`, `alerts(id,sev,msg,src,
-  tlabel,ack,created_at)`, `fleet_meta(id=1,...)`; copilot additionally reads
-  `incidents`, which the console patches — compatible.
-- **Supabase project**: identical URL + publishable key defaults in sim,
-  connector, copilot, and console; all overridable via
-  `SUPABASE_URL`/`SUPABASE_KEY`.
-- **Copilot /ask contract**: returns `{answer, evidence[], tier}` with tiers
-  `grounded|llm_only|offline`; the console's `tierPill()` maps exactly those
-  ids (plus the spec aliases `live_agent`/`model_only`).
+- **Detector → incidents schema**: `IncidentEngine` open rows carry
+  `id, sev, title, src, tlabel, state, impact, dur, created_at`; patches set
+  `state/dur/impact`. The console's incidents reader consumes exactly
+  `id, sev, title, src, tlabel, state, impact, rca, fix, dur, created_at`
+  (rca/fix nullable — see fix 2 below), and copilot's `query_incidents`
+  filters on `state`/`sev`. `sev` values (`crit`/`serious`) are within the
+  console's badge vocabulary (`crit`/`serious`/`warn`). Verified end-to-end
+  by the new `e2e/test_e2e.py::test_detector_incident_roundtrip` (detector
+  engine + `PostgRESTSink` against the fake PostgREST, read back with the
+  console's column expectations, including upsert idempotency).
+- **Console replay fetch ↔ robot_telemetry**: `loadRealReplay()` selects
+  `ts,battery,speed,motor_temp,status,pos` with `robot_id=eq.` +
+  `ts=gte./lte.` + `order=ts.asc&limit=2000` — all columns exist in
+  `supabase/0003_telemetry.sql`, and the filter/order shapes are exercised
+  against the fake in `test_telemetry_accumulates_downsampled`.
+- **Copilot query_telemetry ↔ schema**: selects `*` from `robot_telemetry`
+  with `robot_id=eq.`, `order=ts.desc`, `limit`; stats read only
+  `battery/speed/motor_temp/status/ts`. Window anchored on the newest
+  sample's `ts` (not wall clock), so simulated/replayed data works.
+- **Canonical statuses**: sim writes only `yantracore.CANONICAL` (asserted in
+  e2e), detector classifies via `yantracore.normalize` + `NOT_OPERATING`
+  (legacy spellings like `safety_stop` covered by its tests), copilot
+  summaries assert `by_status ⊆ CANONICAL`, and the console's `STATUS` map
+  covers all 7 canonical values with `ST_NORM` normalisation at the display
+  edge.
 
-Inconsistencies found and **fixed**:
-1. **Status vocabulary** — sim writes `working/moving/safety_stop/degraded`,
-   connector writes `estop/active`, but the console's `STATUS` display map
-   only knew `active|charging|idle|fault|paused`; an unknown status crashed
-   `stBadge()`/`updateMap()` (destructuring `undefined`). Fix (console/
-   index.html): added `ST_NORM` normalisation (`working/moving/transit/
-   degraded→active`, `estop/safety_stop→fault`, unknown→`idle`), applied in
-   `Sync.pull()`, plus defensive `STATUS[...]||STATUS.idle` lookups. The
-   writers' richer VDA-style vocabulary is intentional (their tests pin it),
-   so normalisation lives at the display edge.
-2. **Position units** — sim publishes `pos` in metres (grid ≈ 28×16 m) while
-   the console's map uses SVG pixels (≈960×420). Follower mode would have
-   drawn all robots in the top-left corner. Fix: `posToSvg()` heuristic in
-   the console scales metre-range coordinates into the map viewport.
-3. **Null-tolerance in console pull** — connector rows may carry `null`
-   battery/pos or omit `motor_temp`/`tasks_done`; the console coerced these
-   with `+d.x` → `NaN`. Fix: `Sync.pull()` now keeps the previous value when
-   a field is null/absent.
-4. **Copilot entry point** — the documented quickstart command
-   `py -m uvicorn sarathi.server:app --port 8001` pointed at a module that
-   did not exist (the app lives in `sarathi/app.py`). Fix: added
-   `copilot/sarathi/server.py` re-exporting `app` (import verified).
+Inconsistencies found and **fixed** (all suites re-run green after):
+
+1. **Detector open rows lacked `created_at`**
+   (`detector/yantradetect/engine.py`). The console orders
+   `incidents?order=created_at.desc`, the real-replay window is anchored on
+   `inc.created_at` (without it, detector-created incidents could never show
+   a real replay), and the detector's own `seed()` restores `opened_at` from
+   `created_at` after a restart — but the row relied on a DB column default
+   that the repo's migrations never define. The engine now emits
+   `created_at` (ISO of `opened_at`) explicitly; deterministic, so upsert
+   idempotency is preserved. Locked in by `test_open_row_fault` and the new
+   e2e round-trip test.
+2. **Console rendered `null` RCA for detector incidents**
+   (`console/index.html`). Detector rows leave `rca`/`fix` null (RCA is the
+   copilot's job), but the incident detail card interpolated them directly
+   ("null" in the UI). The `Sync` incidents mapping now falls back to
+   placeholder copy ("Automated detection … root-cause analysis pending" /
+   generic recommended actions).
+
+## 3. Changes made in this pass
+
+- `detector/yantradetect/engine.py` — open rows include `created_at`.
+- `detector/tests/test_engine.py` — assert `created_at` in the open row.
+- `console/index.html` — null-safe `rca`/`fix` fallbacks in the incidents
+  mapping.
+- `e2e/test_e2e.py` — new `test_detector_incident_roundtrip` (detector →
+  fake PostgREST → console-shape read-back, 9 → 10 tests).
+- `CHANGELOG.md` — v0.4.0 entry (plus the previously missing v0.3.0 entry).
+- `README.md` — schema block expanded (telemetry/incidents/commands),
+  detector + e2e component rows, detector quickstart step, per-directory
+  test instructions, v0.4 section (detector, real replay, query_telemetry).
+- This report.
 
 ## 4. Known gaps
 
 - **No live end-to-end run**: Supabase, MQTT brokers, and LLM APIs are
-  unreachable in this offline environment. Everything network-facing is
-  exercised via mock transports; the actual PostgREST calls, CORS from
-  `file://`, and LLM tiers 1–2 are untested against real services.
-- **Status vocabulary is normalised, not unified**: the DB stores whichever
-  writer's vocabulary ran last (`working` vs `active`, `estop` vs
-  `safety_stop`). Copilot answers echo the raw stored value, and
-  `get_fleet_summary().faulted_ids` counts only `status=="fault"` — an
-  `estop`/`safety_stop` robot is not counted as faulted. Consumers all
-  render safely, but a shared status enum (or moving normalisation into the
-  writers) would be cleaner for v0.2.
-- **Console `posToSvg` is a heuristic** (coords ≤ 40 treated as metres); a
-  writer legitimately publishing small pixel coordinates would be rescaled.
-  Fine for the current map, but the schema should eventually declare units.
-- **Console tests are structural** (regex + `node --check`), not behavioural
-  — no DOM/browser test of the render paths.
-- **Multi-writer contention**: sim, connector, and a leader console all
-  upsert `robots`; last-write-wins per row is by design, but concurrent
-  writers will visibly fight. `fleet_meta.writer_id` leader election covers
-  the console only.
+  unreachable offline. The fake PostgREST covers upsert/filter/patch shapes,
+  but real PostgREST behaviour (RLS, CHECK constraints, `created_at` column
+  defaults, CORS from `file://`) and LLM tiers 1–2 remain untested against
+  real services.
+- **No SQL migration for `incidents`**: the table predates the repo's
+  migration files (created with the v0.1 dashboard schema); its authoritative
+  DDL lives only in Supabase. The detector now sends every column it needs
+  explicitly, but a checked-in `000N_incidents.sql` (with a CHECK on `state`
+  and `sev`) would make the contract enforceable.
+- **Detector vs console patch races**: the console's guided recovery patches
+  `incidents.state='Resolved'` directly; a running detector will keep its own
+  view and may patch duration afterwards. Last-write-wins per column — benign
+  today, but a single writer of `state` would be cleaner.
+- **e2e does not run the detector CLI loop or sarathi's FastAPI layer** —
+  engine+sink and toolbox+offline engine are exercised in-process instead.
+- **Console tests are structural** (regex + `node --check`), not behavioural;
+  the replay module is verified by parse + consistency review only.
 - `pip install --break-system-packages` was used (root container); use a
   venv in normal development.
