@@ -80,6 +80,32 @@ recorded telemetry of the incident's source robot:
   INC-1042 demo replay is kept as a fallback and a small note reads
   *"scripted demo replay (no telemetry recorded)"*.
 
+## Real data in Missions / Maintenance / Analytics (v0.4)
+
+When the Supabase sync is connected (header chip shows "Cloud: LIVE"), three
+formerly all-mock views pull or compute real data; offline they keep the
+original local-sim demo content unchanged.
+
+- **Missions** — rows come from the `missions` table (pulled every 3rd sync
+  cycle, ~6 s). *＋ New mission* prompts for a name and inserts a Queued row
+  `{id: "M-<suffix>", robots: [], state: "Queued", prog: 0}` locally and (when
+  live) into the cloud table, so other tabs see it. The intent-based tasking
+  card stays a mock of the planned Lattice-style planner.
+- **Maintenance** — the "Predicted failures" card tries the
+  `maintenance_findings` table and renders open findings with their
+  `rul_days` / `confidence`; if the table doesn't exist (or returns nothing)
+  it gracefully falls back to the demo tickets and is labelled `demo`. The
+  robot-health table is always driven by the (live-synced) robots rows.
+- **Analytics** — tiles are labelled honestly: *Tasks completed*
+  (Σ `robots.tasks_done`) and *Fleet utilization* (active / total robots) are
+  marked `computed` when live; *Time lost by cause* becomes
+  Σ `incidents.dur` grouped by title keyword (localization / charge / other)
+  when incident durations exist; SLA, cost-per-task and the ROI table are
+  marked `demo` (illustrative). The throughput chart was already real.
+- **Alerts** — acks already sync; additionally, when more than 5 alerts are
+  unacked, a text-only hint chip appears above the Live-alerts feed noting
+  that a notifier would page the on-call operator.
+
 ## Configuration
 
 All config lives in `index.html` (documented in the comment block at the top):

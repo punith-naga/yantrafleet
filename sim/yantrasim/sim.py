@@ -13,7 +13,7 @@ import math
 import random
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import vda, world
@@ -33,6 +33,17 @@ RANDOM_FAULTS: tuple[str, ...] = ("motor_overtemp", "obstacle_blocked", "estop")
 SCRIPTED_FAULT_ROBOT = "AMR-07"
 SCRIPTED_FAULT_TICK = 20
 SCRIPTED_FAULT_DURATION_TICKS = 12
+
+# --------------------------------------------------------------------------
+# Missions (v0.5): rolling groups of task assignments
+# --------------------------------------------------------------------------
+
+MISSION_TARGET_CONCURRENT = 3      # keep up to this many missions in flight
+MISSION_MIN_ROBOTS = 2
+MISSION_MAX_ROBOTS = 4
+MISSION_TASKS_RANGE = (10, 20)     # planned tasks per mission
+MISSION_DONE_LINGER_TICKS = 6      # keep Done missions in the snapshot briefly
+MISSION_FALLBACK_S_PER_TASK = 90.0  # ETA guess before any task completes
 
 # --------------------------------------------------------------------------
 # Tunables (units in comments)
@@ -64,6 +75,33 @@ class Event:
 
 
 @dataclass
+class Mission:
+    """A rolling group of task assignments owned by 2-4 robots."""
+
+    mission_id: str
+    name: str
+    robots: list[str]               # owning robot ids (fixed at spawn)
+    planned: int                    # total tasks this mission comprises
+    done: int = 0                   # tasks completed under this mission
+    state: str = "Queued"           # Queued -> Running -> Done
+    started_time_s: float | None = None   # sim time of first tagged assignment
+    completed_tick: int | None = None
+    created_ts: str | None = None   # wall-clock ISO, stamped at first snapshot
+    eta_final: str | None = None    # completion clock label once Done
+
+    @property
+    def active(self) -> bool:
+        return self.state != "Done"
+
+    @property
+    def prog(self) -> int:
+        """Progress percent = completed / total planned tasks."""
+        if self.planned <= 0:
+            return 100
+        return min(int(round(100.0 * self.done / self.planned)), 100)
+
+
+@dataclass
 class Robot:
     """Mutable per-robot simulation state (internal; not a wire format)."""
 
@@ -89,6 +127,9 @@ class Robot:
     fault_kind: str | None = None
     fault_ticks_left: int = 0
     low_battery_alerted: bool = False
+    # Missions (v0.5)
+    mission_id: str | None = None   # mission that owns this robot
+    task_mission: str | None = None  # mission tag on the in-flight task
     # VDA order/header bookkeeping
     order_id: str = ""
     order_update_id: int = 0
@@ -112,6 +153,9 @@ class TickOutput:
     extras: dict[str, dict[str, Any]]         # robot_id -> non-VDA telemetry
     events: list[Event]
     throughput_per_h: float                   # fleet tasks/hour (rolling avg)
+    missions: list[dict[str, Any]] = field(default_factory=list)
+    """Missions snapshot: table-shaped dicts (id,name,robots,state,prog,eta,
+    created_at) for the ``missions`` table."""
 
 
 class FleetSim:
@@ -137,6 +181,14 @@ class FleetSim:
                 theta=0.0,
             )
             self.robots.append(r)
+        # Missions (v0.5): rolling groups of task assignments. A separate
+        # seeded RNG keeps mission composition deterministic WITHOUT
+        # perturbing the v0.4 robot-behaviour stream (same seed still
+        # reproduces the same faults/tasks as before missions existed).
+        self.mission_rng = random.Random(seed ^ 0x4D495353)  # "MISS"
+        self.missions: list[Mission] = []
+        self.mission_seq = 0
+        self._spawn_missions()
 
     # -- public API --------------------------------------------------------
 
@@ -144,12 +196,12 @@ class FleetSim:
         """Advance the world by ``dt_s`` simulated seconds and snapshot it."""
         self.tick_count += 1
         self.sim_time_s += dt_s
+        now_dt = now or datetime.now(timezone.utc)
+        ts = now_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
         events: list[Event] = []
         for r in self.robots:
             self._step_robot(r, dt_s, events)
-
-        ts = (now or datetime.now(timezone.utc)).isoformat(timespec="milliseconds")
-        ts = ts.replace("+00:00", "Z")
+        self._mission_upkeep(ts)
         states: list[dict[str, Any]] = []
         extras: dict[str, dict[str, Any]] = {}
         for r in self.robots:
@@ -162,6 +214,7 @@ class FleetSim:
                 "motor_temp": round(r.motor_temp, 1),
                 "tasks_done": r.tasks_done,
                 "internal_status": r.status,
+                "mission": r.mission_id,
             }
         hours = max(self.sim_time_s / 3600.0, 1e-9)
         throughput = sum(r.tasks_done for r in self.robots) / hours
@@ -172,6 +225,7 @@ class FleetSim:
             extras=extras,
             events=events,
             throughput_per_h=round(throughput, 1),
+            missions=self._missions_snapshot(ts, now_dt),
         )
 
     # -- per-robot state machine ------------------------------------------
@@ -218,6 +272,7 @@ class FleetSim:
         if r.battery <= LOW_BATTERY_GO_CHARGE and r.status != "to_charger":
             self._route_to(r, world.nearest_charger(r.node), "to_charger")
             r.task_kind = None
+            r.task_mission = None  # abandoned task does not count for a mission
 
         if r.battery <= LOW_BATTERY_ALERT and not r.low_battery_alerted:
             r.low_battery_alerted = True
@@ -244,6 +299,7 @@ class FleetSim:
                 r.tasks_done += 1
                 r.task_kind = None
                 r.status = "idle"
+                self._credit_mission_task(r)
             return
 
         if r.status in ("moving", "to_charger"):
@@ -281,6 +337,15 @@ class FleetSim:
         targets = [n for n in world.TASK_NODES if n != r.node]
         target = self.rng.choice(targets)
         r.task_kind = self.rng.choice(TASK_KINDS)
+        # Tag the task with the robot's mission (v0.5).
+        r.task_mission = None
+        if r.mission_id is not None:
+            m = self._mission_by_id(r.mission_id)
+            if m is not None and m.active:
+                r.task_mission = m.mission_id
+                if m.state == "Queued":
+                    m.state = "Running"
+                    m.started_time_s = self.sim_time_s
         self._route_to(r, target, "moving")
 
     def _route_to(self, r: Robot, target: str, status: str) -> None:
@@ -333,6 +398,109 @@ class FleetSim:
             r.work_left_s = WORK_SECONDS
         else:  # routed while idle with zero-length path
             r.status = "idle"
+
+    # -- missions (v0.5) ---------------------------------------------------
+
+    def _mission_by_id(self, mission_id: str) -> Mission | None:
+        for m in self.missions:
+            if m.mission_id == mission_id:
+                return m
+        return None
+
+    def _mission_name(self) -> str:
+        """Deterministic rolling names cycling three warehouse templates."""
+        i = self.mission_seq - 1  # 0-based over spawn order
+        kind = i % 3
+        n = i // 3 + 1
+        if kind == 0:
+            return f"Outbound wave #{n}"
+        if kind == 1:
+            return f"Cycle count — Storage {chr(ord('A') + (n - 1) % 4)}"
+        return f"Inbound putaway — Dock {(n - 1) % 3 + 1}"
+
+    def _spawn_missions(self) -> None:
+        """Top up to MISSION_TARGET_CONCURRENT active missions.
+
+        Each new mission takes 2-4 currently unowned robots; spawning stops
+        when fewer than MISSION_MIN_ROBOTS robots are free.
+        """
+        while sum(1 for m in self.missions if m.active) < MISSION_TARGET_CONCURRENT:
+            free = [r for r in self.robots if r.mission_id is None]
+            if len(free) < MISSION_MIN_ROBOTS:
+                break
+            rng = self.mission_rng
+            k = min(rng.randint(MISSION_MIN_ROBOTS, MISSION_MAX_ROBOTS),
+                    len(free))
+            crew = rng.sample(free, k)
+            self.mission_seq += 1
+            m = Mission(
+                mission_id=f"M-{self.mission_seq:03d}",
+                name=self._mission_name(),
+                robots=[r.robot_id for r in crew],
+                planned=rng.randint(*MISSION_TASKS_RANGE),
+            )
+            for r in crew:
+                r.mission_id = m.mission_id
+            self.missions.append(m)
+
+    def _credit_mission_task(self, r: Robot) -> None:
+        """A robot finished a task: count it toward its tagged mission."""
+        tag, r.task_mission = r.task_mission, None
+        if tag is None:
+            return
+        m = self._mission_by_id(tag)
+        if m is None or not m.active:
+            return  # mission finished/retired while the task was in flight
+        m.done += 1
+
+    def _mission_upkeep(self, ts: str) -> None:
+        """Complete missions, free their robots, spawn replacements, prune."""
+        for m in self.missions:
+            if m.active and m.done >= m.planned:
+                m.state = "Done"
+                m.completed_tick = self.tick_count
+                m.eta_final = ts[11:16] if len(ts) >= 16 else ts
+                for r in self.robots:
+                    if r.mission_id == m.mission_id:
+                        r.mission_id = None
+        self._spawn_missions()
+        # Drop long-Done missions from the working set (rows persist in DB).
+        self.missions = [
+            m for m in self.missions
+            if m.active or (self.tick_count - (m.completed_tick or 0)
+                            <= MISSION_DONE_LINGER_TICKS)
+        ]
+
+    def _mission_eta(self, m: Mission, now_dt: datetime) -> str:
+        """Clock-string ETA ("HH:MM") for the missions table."""
+        if m.state == "Done":
+            return m.eta_final or now_dt.strftime("%H:%M")
+        if m.state == "Queued":
+            return "—"
+        remaining = max(m.planned - m.done, 0)
+        elapsed = self.sim_time_s - (m.started_time_s or self.sim_time_s)
+        if m.done > 0 and elapsed > 0:
+            est_s = remaining * (elapsed / m.done)
+        else:
+            est_s = remaining * MISSION_FALLBACK_S_PER_TASK / max(len(m.robots), 1)
+        return (now_dt + timedelta(seconds=est_s)).strftime("%H:%M")
+
+    def _missions_snapshot(self, ts: str, now_dt: datetime) -> list[dict[str, Any]]:
+        """Table-shaped mission rows (missions table: id,name,robots,state,prog,eta)."""
+        rows: list[dict[str, Any]] = []
+        for m in self.missions:
+            if m.created_ts is None:
+                m.created_ts = ts
+            rows.append({
+                "id": m.mission_id,
+                "name": m.name,
+                "robots": list(m.robots),
+                "state": m.state,
+                "prog": m.prog,
+                "eta": self._mission_eta(m, now_dt),
+                "created_at": m.created_ts,
+            })
+        return rows
 
     @staticmethod
     def _cool(r: Robot, dt: float) -> None:

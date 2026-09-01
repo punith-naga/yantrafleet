@@ -115,3 +115,100 @@ def test_throughput_reported():
     fleet = FleetSim(seed=11)
     out = run_ticks(fleet, 120)[-1]
     assert out.throughput_per_h > 0
+
+
+# ---------------------------------------------------------------------------
+# Missions (v0.5): rolling groups of task assignments
+# ---------------------------------------------------------------------------
+
+def test_missions_spawned_at_init():
+    fleet = FleetSim(seed=7)
+    active = [m for m in fleet.missions if m.active]
+    assert 2 <= len(active) <= simmod.MISSION_TARGET_CONCURRENT
+    owned = []
+    for m in active:
+        assert m.state == "Queued"
+        assert simmod.MISSION_MIN_ROBOTS <= len(m.robots) <= simmod.MISSION_MAX_ROBOTS
+        lo, hi = simmod.MISSION_TASKS_RANGE
+        assert lo <= m.planned <= hi
+        owned += m.robots
+    # A robot belongs to at most one mission.
+    assert len(owned) == len(set(owned))
+    for m in active:
+        for rid in m.robots:
+            r = next(rb for rb in fleet.robots if rb.robot_id == rid)
+            assert r.mission_id == m.mission_id
+
+
+def test_assign_task_tags_mission():
+    fleet = FleetSim(seed=7)
+    fleet.tick(dt_s=10.0, now=FIXED_NOW)
+    tagged = [r for r in fleet.robots if r.task_mission is not None]
+    assert tagged, "some owned robot should have picked up a mission-tagged task"
+    for r in tagged:
+        assert r.task_mission == r.mission_id
+        m = fleet._mission_by_id(r.task_mission)
+        assert m is not None and m.state == "Running"
+
+
+def test_missions_snapshot_shape_on_tick_output():
+    fleet = FleetSim(seed=7)
+    out = fleet.tick(dt_s=10.0, now=FIXED_NOW)
+    assert out.missions, "TickOutput must expose a missions snapshot"
+    for row in out.missions:
+        assert set(row) == {"id", "name", "robots", "state", "prog", "eta",
+                            "created_at"}
+        assert row["state"] in ("Queued", "Running", "Done")
+        assert isinstance(row["robots"], list) and row["robots"]
+        assert isinstance(row["prog"], int) and 0 <= row["prog"] <= 100
+        if row["state"] == "Queued":
+            assert row["eta"] == "—"
+        else:
+            assert len(row["eta"]) == 5 and row["eta"][2] == ":"  # HH:MM
+        assert row["created_at"].endswith("Z")
+
+
+def test_mission_progress_increases_completes_and_respawns():
+    fleet = FleetSim(seed=7)
+    initial_ids = {m.mission_id for m in fleet.missions}
+    saw_progress = False
+    saw_done = False
+    saw_new = False
+    for _ in range(200):
+        out = fleet.tick(dt_s=10.0, now=FIXED_NOW)
+        by_state = {}
+        for row in out.missions:
+            by_state.setdefault(row["state"], []).append(row)
+            if row["state"] == "Running" and 0 < row["prog"] < 100:
+                saw_progress = True
+            if row["state"] == "Done":
+                saw_done = True
+                assert row["prog"] == 100
+            if row["id"] not in initial_ids:
+                saw_new = True
+        # Rolling invariant: 2-3 concurrent (non-Done) missions at all times.
+        active = [r for r in out.missions if r["state"] != "Done"]
+        assert 2 <= len(active) <= simmod.MISSION_TARGET_CONCURRENT
+    assert saw_progress and saw_done and saw_new
+
+
+def test_mission_done_rows_pruned_after_linger():
+    fleet = FleetSim(seed=7)
+    done_tick = None
+    for _ in range(300):
+        out = fleet.tick(dt_s=10.0, now=FIXED_NOW)
+        done_ids = [r["id"] for r in out.missions if r["state"] == "Done"]
+        if done_tick is None and done_ids:
+            done_tick = out.tick
+            done_id = done_ids[0]
+        if done_tick is not None and out.tick > done_tick + simmod.MISSION_DONE_LINGER_TICKS:
+            assert done_id not in [r["id"] for r in out.missions]
+            break
+    assert done_tick is not None
+
+
+def test_missions_deterministic_same_seed():
+    a, b = FleetSim(seed=99), FleetSim(seed=99)
+    snaps_a = [a.tick(dt_s=10.0, now=FIXED_NOW).missions for _ in range(60)]
+    snaps_b = [b.tick(dt_s=10.0, now=FIXED_NOW).missions for _ in range(60)]
+    assert snaps_a == snaps_b

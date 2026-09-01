@@ -28,6 +28,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 TABLES: tuple[str, ...] = (
     "robots", "alerts", "incidents", "commands", "fleet_meta", "robot_telemetry",
+    "missions", "maintenance_findings",
 )
 
 Row = dict[str, Any]

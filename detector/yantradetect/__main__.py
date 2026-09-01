@@ -3,9 +3,11 @@
     python -m yantradetect --interval 5        # poll loop
     python -m yantradetect --once              # single poll, then exit
     python -m yantradetect --once --dry-run    # print actions, write nothing
+    python -m yantradetect --maintenance --once  # telemetry -> maintenance_findings
 
-The reader is always the PostgREST ``robots`` table; ``--dry-run`` only
-swaps the *writer* for a printing sink.
+The reader is always PostgREST (``robots``, or ``robot_telemetry`` under
+``--maintenance``); ``--dry-run`` only swaps the *writer* for a printing
+sink.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import time
 import httpx
 
 from .engine import IncidentEngine
+from .maintenance import MaintenanceEngine, MaintenanceSink
 from .sink import DryRunSink, PostgRESTSink
 
 log = logging.getLogger("yantradetect")
@@ -43,7 +46,46 @@ def build_parser() -> argparse.ArgumentParser:
                    help="re-open same incident if bad again within N s (default 300)")
     p.add_argument("--stale-polls", type=int, default=6,
                    help="missing polls before auto-resolving (default 6)")
+    p.add_argument("--maintenance", action="store_true",
+                   help="predictive maintenance: read robot_telemetry, "
+                        "write maintenance_findings")
+    p.add_argument("--window-hours", type=float, default=6.0,
+                   help="telemetry window for --maintenance (default 6)")
     return p
+
+
+def run_maintenance(args: argparse.Namespace,
+                    client: httpx.Client | None = None,
+                    max_polls: int | None = None) -> int:
+    """--maintenance mode: telemetry window -> maintenance_findings."""
+    source = MaintenanceSink(args.url, args.key, client=client)
+    sink = DryRunSink() if args.dry_run else source
+    engine = MaintenanceEngine()
+    if not args.dry_run:
+        engine.seed(source.fetch_open_findings())
+
+    polls = 0
+    try:
+        while True:
+            try:
+                samples = source.fetch_telemetry(args.window_hours)
+            except (httpx.HTTPError, ValueError) as exc:
+                log.warning("telemetry poll failed: %s", exc)
+                samples = None
+            if samples is not None:
+                actions = engine.observe(samples)
+                if actions:
+                    sink.apply(actions)
+                log.info("maintenance poll: %d samples, %d actions",
+                         len(samples), len(actions))
+            polls += 1
+            if args.once or (max_polls is not None and polls >= max_polls):
+                return 0
+            time.sleep(args.interval)
+    except KeyboardInterrupt:  # pragma: no cover - interactive only
+        return 0
+    finally:
+        source.close()
 
 
 def run(argv: list[str] | None = None,
@@ -53,6 +95,9 @@ def run(argv: list[str] | None = None,
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
+
+    if args.maintenance:
+        return run_maintenance(args, client=client, max_polls=max_polls)
 
     source = PostgRESTSink(args.url, args.key, client=client)
     sink = DryRunSink() if args.dry_run else source

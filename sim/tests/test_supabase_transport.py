@@ -124,3 +124,40 @@ def test_resolve_config_env_override(monkeypatch):
     monkeypatch.delenv("SUPABASE_URL")
     monkeypatch.delenv("SUPABASE_KEY")
     assert resolve_config() == (DEFAULT_URL, DEFAULT_KEY)
+
+
+def test_missions_rows_upserted(recorder):
+    requests, client = recorder
+    fleet = FleetSim(seed=7)
+    t = SupabaseTransport(client=client, writer_id=fleet.writer_id)
+    t.publish(fleet.tick(dt_s=10.0, now=FIXED_NOW))
+
+    by_table = _bodies_by_table(requests)
+    assert "missions" in by_table
+    req, rows = by_table["missions"][0]
+    # Upsert semantics: on_conflict=id, merge so progress updates overwrite.
+    assert req.url.path == "/rest/v1/missions"
+    assert req.url.params["on_conflict"] == "id"
+    assert "resolution=merge-duplicates" in req.headers["Prefer"]
+    assert "return=minimal" in req.headers["Prefer"]
+    # Rows match the missions table columns.
+    assert 2 <= len(rows) <= 3
+    for r in rows:
+        assert set(r) == {"id", "name", "robots", "state", "prog", "eta",
+                          "created_at"}
+        assert r["id"].startswith("M-")
+        assert isinstance(r["robots"], list)
+        assert r["state"] in ("Queued", "Running", "Done")
+        assert isinstance(r["prog"], int)
+
+
+def test_missions_progress_reaches_supabase_over_time(recorder):
+    requests, client = recorder
+    fleet = FleetSim(seed=7)
+    t = SupabaseTransport(client=client)
+    out = None
+    for _ in range(60):
+        out = fleet.tick(dt_s=10.0, now=FIXED_NOW)
+    t.publish(out)
+    _, rows = _bodies_by_table(requests)["missions"][-1]
+    assert any(r["prog"] > 0 for r in rows)

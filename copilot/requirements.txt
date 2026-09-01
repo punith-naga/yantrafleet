@@ -8,5 +8,8 @@ pydantic>=2.6
 # need the offline tier — the import is lazy.
 litellm>=1.40
 
+# MCP surface (sarathi.mcp_server) — official Model Context Protocol SDK.
+mcp>=1.9
+
 # Tests
 pytest>=8.0

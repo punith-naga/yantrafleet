@@ -66,6 +66,11 @@ class SupabaseTransport:
             self._post("alerts", alerts, on_conflict="id", merge=False)
         meta = fleet_meta_row(self.writer_id, out.sim_time_s, out.throughput_per_h, ts)
         self._post("fleet_meta", [meta], on_conflict="id", merge=True)
+        # v0.5: missions snapshot — rows are already table-shaped
+        # (id,name,robots,state,prog,eta,created_at); merge keeps progress
+        # updates idempotent under retries.
+        if out.missions:
+            self._post("missions", out.missions, on_conflict="id", merge=True)
         # v0.3: downsampled history for replay/analytics (every Nth tick).
         if self.history_every and out.tick % self.history_every == 0:
             samples = [telemetry_row(s, out.extras[self._rid(s, out)], ts)

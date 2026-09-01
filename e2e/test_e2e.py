@@ -303,3 +303,153 @@ def test_detector_incident_roundtrip() -> None:
     finally:
         sink.close()
         fake.stop()
+
+
+# --------------------------------------------------------------------------
+# 5. Missions (v0.5): sim publishes missions rows through the same transport
+# --------------------------------------------------------------------------
+
+def test_sim_publishes_missions_rows(world: World) -> None:
+    """The sim's rolling mission pool lands in the ``missions`` table with
+    exactly the 0001_init.sql shape the console reads."""
+    # The transport really POSTed missions (upsert on id), from the sim side.
+    posts = [p for m, p in world.fake.requests
+             if m == "POST" and p.startswith("/rest/v1/missions")]
+    assert posts, "sim transport never POSTed the missions table"
+    assert all("on_conflict=id" in p for p in posts), \
+        "missions writes must be idempotent upserts on id"
+
+    rows = _rows(world, "missions", order="id.asc")
+    assert rows, "rolling pool must keep missions in flight"
+    ids = [r["id"] for r in rows]
+    assert len(ids) == len(set(ids)), "merge-duplicates must keep 1 row per id"
+    assert sum(1 for r in rows if r["state"] != "Done") <= 3  # target pool
+
+    robot_ids = {r["id"] for r in _rows(world, "robots")}
+    for r in rows:
+        # 0001_init.sql: id,name,robots,state,prog,eta,created_at
+        assert set(r) >= {"id", "name", "robots", "state", "prog", "eta",
+                          "created_at"}
+        assert r["id"].startswith("M-") and r["name"]
+        assert r["state"] in ("Queued", "Running", "Done")
+        assert isinstance(r["robots"], list) and 2 <= len(r["robots"]) <= 4
+        assert set(r["robots"]) <= robot_ids, "mission crew must be real robots"
+        assert isinstance(r["prog"], int) and 0 <= r["prog"] <= 100
+        assert isinstance(r["eta"], str) and r["eta"]
+        assert r["created_at"], "created_at stamped at first snapshot"
+
+
+def test_mission_progress_advances_and_upserts(world: World) -> None:
+    """More ticks -> task credits -> prog moves; the table still has one
+    row per mission id (upsert, not append)."""
+    before = {r["id"]: r["prog"] for r in _rows(world, "missions")}
+    for _ in range(12):
+        world.transport.publish(world.sim.tick())
+    rows = _rows(world, "missions")
+    assert len({r["id"] for r in rows}) == len(rows)
+    after = {r["id"]: r["prog"] for r in rows}
+    shared = set(before) & set(after)
+    assert shared, "some missions must persist across the extra ticks"
+    assert all(after[i] >= before[i] for i in shared), "prog never regresses"
+    assert (any(after[i] > before[i] for i in shared)
+            or set(after) - set(before)), \
+        "12 ticks must complete tasks (or roll new missions)"
+    assert any(r["state"] == "Running" for r in rows) or \
+           any(r["state"] == "Done" for r in rows)
+
+
+# --------------------------------------------------------------------------
+# 6. Predictive maintenance (v0.5): telemetry -> finding -> clear round-trip
+# --------------------------------------------------------------------------
+
+def _telemetry_window(t0: datetime, temp_of, *, robots=("AMR-01", "AMR-02",
+                                                        "AMR-03", "AMR-04")):
+    """13 samples/robot over 2 h (every 10 min), all active; equal battery
+    drain and constant speed so ONLY the motor-temp heuristic can fire."""
+    from datetime import timedelta
+    rows = []
+    for rid in robots:
+        for i in range(13):
+            ts = t0 + timedelta(minutes=10 * i)
+            hours = i / 6.0
+            rows.append({
+                "robot_id": rid,
+                "ts": ts.isoformat(),
+                "battery": 90.0 - 3.0 * hours,   # same drain rate fleet-wide
+                "speed": 1.0,
+                "motor_temp": temp_of(rid, hours),
+                "status": "active",
+            })
+    return rows
+
+
+def test_maintenance_engine_roundtrip() -> None:
+    """MaintenanceEngine + MaintenanceSink against the fake: a motor-temp
+    trend opens a ``maintenance_findings`` row shaped exactly like the
+    0004 migration; a healthy window later clears (never deletes) it."""
+    from datetime import timedelta
+
+    from yantradetect.maintenance import MaintenanceEngine, MaintenanceSink
+
+    fake = FakePostgREST()
+    base = fake.start()
+    sink = MaintenanceSink(url=base, key="test-key")
+    eng = MaintenanceEngine()
+    t0 = datetime(2026, 9, 1, 6, 0, tzinfo=timezone.utc)
+
+    hot = lambda rid, h: 50.0 + 3.0 * h if rid == "AMR-03" else 45.0  # noqa: E731
+    with httpx.Client(base_url=f"{base}/rest/v1",
+                      headers={"apikey": "k", "Content-Type": "application/json"},
+                      timeout=5.0) as c:
+        try:
+            c.post("/robot_telemetry",
+                   json=_telemetry_window(t0, hot)).raise_for_status()
+
+            # Poll 1: read the window back THROUGH the sink, open the finding.
+            now1 = t0 + timedelta(hours=2)
+            window = sink.fetch_telemetry(window_hours=6.0, now=now1)
+            assert len(window) == 4 * 13, "sink must read the seeded window"
+            assert sink.apply(eng.observe(window, now=now1)) == 1
+
+            rows = c.get("/maintenance_findings").json()
+            assert len(rows) == 1
+            row = rows[0]
+            # Every 0004_maintenance.sql column, with its constraints.
+            assert set(row) >= {"id", "robot_id", "component", "finding",
+                                "rul_days", "confidence", "action", "state",
+                                "created_at"}
+            assert row["id"].startswith("MF-")
+            assert row["robot_id"] == "AMR-03"
+            assert row["component"] in ("drive motor", "battery", "drivetrain")
+            assert row["component"] == "drive motor"
+            assert "°C/hr" in row["finding"]
+            assert row["rul_days"] >= 0.5
+            assert 0.0 <= row["confidence"] <= 1.0
+            assert row["action"]
+            assert row["state"] == "Open"
+            assert row["created_at"] == now1.isoformat()
+
+            # Retry determinism: re-observing a fresh-but-seeded engine
+            # dedups against the open row instead of double-opening.
+            eng2 = MaintenanceEngine()
+            eng2.seed(sink.fetch_open_findings())
+            assert eng2.observe(window, now=now1) == []
+
+            # Poll 2: a healthy window (flat temps) clears the finding.
+            t1 = t0 + timedelta(hours=4)
+            cool = lambda rid, h: 45.0  # noqa: E731
+            c.post("/robot_telemetry",
+                   json=_telemetry_window(t1, cool)).raise_for_status()
+            now2 = t1 + timedelta(hours=2)
+            window2 = [s for s in sink.fetch_telemetry(window_hours=3.0, now=now2)
+                       if s["ts"] >= t1.isoformat()]
+            assert sink.apply(eng.observe(window2, now=now2)) == 1
+
+            rows = c.get("/maintenance_findings").json()
+            assert len(rows) == 1, "clear must PATCH, never delete"
+            assert rows[0]["state"] == "Cleared"
+            assert rows[0]["cleared_at"] == now2.isoformat()
+            assert eng.open_findings == {}
+        finally:
+            sink.close()
+            fake.stop()

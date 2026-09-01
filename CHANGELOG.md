@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.5.0 — 2026-09-01
+- **Missions** (`sim/yantrasim`): the simulator keeps a rolling pool of up to
+  3 concurrent missions (2–4 robots each, 10–20 planned tasks, deterministic
+  rolling names like "Outbound wave #1"); task completions credit the owning
+  mission (`Queued → Running → Done`, integer `prog` percent, clock-string
+  ETA). Each tick the snapshot is upserted into the existing `missions`
+  table (`on_conflict=id`, merge) so retries are idempotent; `Done` missions
+  linger 6 ticks in the snapshot and persist forever in the table.
+- **Predictive maintenance** (`detector/yantradetect`): new pure
+  `MaintenanceEngine` reads a mixed-robot `robot_telemetry` window and emits
+  open/clear actions for three heuristics — motor-temp linear trend
+  (≥1.5 °C/hr, r²≥0.5, ≥6 samples → *drive motor*), battery drain per
+  active-minute ≥1.5× fleet median (*battery*), late-vs-early active-speed
+  decline ≥15% (*drivetrain*). Deterministic `MF-XXXX` ids, one open finding
+  per (robot, component), clears PATCH `state=Cleared` (never delete).
+  `MaintenanceSink` writes the new `maintenance_findings` table
+  (`supabase/0004_maintenance.sql`); run with `python -m yantradetect
+  --maintenance [--window-hours 6]`.
+- **Notifier** (`notifier/`, package `yantranotify`): polls unacked
+  `crit`/`serious` alerts and `Open` incidents and pushes them through
+  console/webhook/WhatsApp (Twilio) channels with per-event dedup, optional
+  `--state-file` persistence, digest batching, and `--dry-run`.
+  `python -m yantranotify --interval 10`. Channels without credentials
+  print instead of send — no secrets required.
+- **MCP server** (`copilot/sarathi/mcp_server.py`): Sarathi's Toolbox
+  exposed over the Model Context Protocol (official `mcp` SDK, stdio) as
+  `sarathi-fleet` — tools `fleet_summary`, `query_robots`, `query_alerts`,
+  `query_incidents`, `query_commands`, `robot_history`; every result is the
+  full `ToolResult` JSON including the `source_id` citation key. See
+  `copilot/README-MCP.md`. `python -m sarathi.mcp_server`.
+- **Console**: Missions view goes live (pulls `missions` every ~6 s, local +
+  POST insert for new missions), and the Maintenance view renders real
+  `maintenance_findings` rows when present.
+- **E2E**: fake PostgREST gains `missions` and `maintenance_findings`
+  tables; 3 new tests prove the sim publishes schema-shaped mission rows
+  (idempotent upserts, progress never regresses) and the maintenance
+  engine round-trips open → dedup-seed → clear against real localhost HTTP.
+
 ## v0.4.0 — 2026-09-01
 - **Incident detector** (`detector/`, package `yantradetect`): polls the
   `robots` table and maintains the `incidents` table with industry patterns —
