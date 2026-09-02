@@ -320,3 +320,9 @@ def test_cli_audit_security_subcommand(fake_backend, capsys):
     assert doc["mode"] == "demo"
     assert any(c["name"] == "anon-write" and c["status"] == "FAIL"
                for c in doc["checks"])
+
+
+def test_classify_no_schema():
+    from yantraops.audit import classify_mode
+    probe = {"read_status": 404, "write_status": 404, "read_rows": []}
+    assert classify_mode(probe) == "no-schema"

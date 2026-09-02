@@ -77,6 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
                           "(see supabase/README.md)")
     mig.add_argument("--dir", type=Path, default=None, metavar="DIR",
                      help="migrations directory (default: <repo>/supabase)")
+    mig.add_argument("--include-opt-in", action="store_true",
+                     help="also apply OPT-IN lockdown migrations (0006/0007)")
     mig.add_argument("--dry-run", action="store_true",
                      help="connect, list what would be applied, change nothing")
     mig.add_argument("--force", action="store_true",
@@ -167,7 +169,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "migrate":
         from .migrate import run_migrate  # lazy: --print-order needs zero deps
         return run_migrate(args.db_url, args.dir, dry_run=args.dry_run,
-                           force=args.force, print_order=args.print_order)
+                           force=args.force, print_order=args.print_order,
+                           include_opt_in=args.include_opt_in)
     if args.command == "doctor":
         from .doctor import run_doctor
         return run_doctor()

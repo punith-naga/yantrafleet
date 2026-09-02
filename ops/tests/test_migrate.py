@@ -149,3 +149,23 @@ def test_cli_print_order_on_real_repo(capsys):
     out = capsys.readouterr().out
     assert "0001_init.sql" in out and "0005_sites.sql" in out
     assert out.index("0001_init.sql") < out.index("0005_sites.sql")
+
+
+def test_opt_in_migrations_gated_by_default(tmp_path):
+    from yantraops.migrate import discover_migrations
+    (tmp_path / "0001_base.sql").write_text("create table t(x int);")
+    (tmp_path / "0006_lock.sql").write_text("-- Something OPT-IN lockdown\nselect 1;")
+    names = [p.name for p in discover_migrations(tmp_path)]
+    assert names == ["0001_base.sql"]
+    names_all = [p.name for p in discover_migrations(tmp_path, include_opt_in=True)]
+    assert names_all == ["0001_base.sql", "0006_lock.sql"]
+
+
+def test_repo_opt_in_files_detected():
+    from yantraops.migrate import default_migrations_dir, discover_migrations
+    d = default_migrations_dir()
+    base = {p.name for p in discover_migrations(d)}
+    every = {p.name for p in discover_migrations(d, include_opt_in=True)}
+    assert "0006_harden.sql" in every - base
+    assert "0007_rbac.sql" in every - base
+    assert "0001_init.sql" in base

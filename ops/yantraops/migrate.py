@@ -56,11 +56,33 @@ def default_migrations_dir() -> Path:
     return repo_root() / "supabase"
 
 
-def discover_migrations(directory: Path) -> list[Path]:
-    """All ``*.sql`` files in ``directory``, sorted by filename."""
-    return sorted(
+OPT_IN_MARKER = "OPT-IN"
+
+
+def is_opt_in(path: Path) -> bool:
+    """A migration whose first 400 bytes carry the OPT-IN marker.
+
+    0006 (hardening) and 0007 (RBAC) intentionally lock the project down;
+    applying them by accident locks a demo user out before any Auth user
+    exists. They are skipped unless --include-opt-in is passed.
+    """
+    try:
+        head = path.read_text(encoding="utf-8", errors="replace")[:400]
+    except OSError:
+        return False
+    return OPT_IN_MARKER in head
+
+
+def discover_migrations(directory: Path,
+                        include_opt_in: bool = False) -> list[Path]:
+    """``*.sql`` files sorted by filename; opt-in files gated by flag."""
+    files = sorted(
         (p for p in Path(directory).glob("*.sql") if p.is_file()),
         key=lambda p: p.name)
+    if include_opt_in:
+        return files
+    kept = [p for p in files if not is_opt_in(p)]
+    return kept
 
 
 def checksum_sql(sql: str) -> str:
@@ -184,6 +206,7 @@ def run_migrate(
     dry_run: bool = False,
     force: bool = False,
     print_order: bool = False,
+    include_opt_in: bool = False,
     backend_factory: Callable[[str], Any] | None = None,
 ) -> int:
     """Entry point for ``python -m yantraops migrate``. Returns an exit code."""
@@ -192,7 +215,12 @@ def run_migrate(
         print(f"yantraops migrate: no such migrations directory: {directory}",
               file=sys.stderr)
         return 1
-    files = discover_migrations(directory)
+    files = discover_migrations(directory, include_opt_in=include_opt_in)
+    skipped = [p.name for p in discover_migrations(directory, include_opt_in=True)
+               if p.name not in {f.name for f in files}]
+    if skipped:
+        print("skipping OPT-IN migrations (pass --include-opt-in to apply): "
+              + ", ".join(skipped))
     if not files:
         print(f"yantraops migrate: no *.sql files found in {directory}",
               file=sys.stderr)

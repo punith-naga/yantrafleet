@@ -152,7 +152,12 @@ def _probe_backend(base_url: str, key: str, client: Any) -> dict[str, Any]:
 
 
 def classify_mode(probe: dict[str, Any]) -> str:
-    """demo / hardened-read / rbac — from what the anon key could do."""
+    """demo / hardened-read / rbac / no-schema — from the anon key's view."""
+    if probe["read_status"] == 404 and probe["write_status"] == 404:
+        # PostgREST 404 = relation does not exist: the project has no
+        # YantraFleet schema at all (migrations never applied). Distinct
+        # from RLS lockdown, which answers 200-empty/401/403.
+        return "no-schema"
     if probe["write_status"] in (200, 201, 204):
         return "demo"
     read = probe["read_status"]
@@ -186,16 +191,23 @@ def _remote_checks(base_url: str, key: str, client: Any) -> tuple[str, list[Chec
     mode = classify_mode(probe)
     checks = [Check(PASS, "backend", f"{base_url} reachable")]
     checks.append(Check(
-        PASS, "rls-mode",
+        FAIL if mode == "no-schema" else PASS, "rls-mode",
         {"demo": "demo (anon key can read AND write — open by design)",
          "hardened-read": "hardened-read (anon reads work, writes refused — "
                           "0006 Option B posture)",
+         "no-schema": "no schema — the robots table does not exist; run the "
+                      "migrations first (yantraops migrate)",
          "rbac": "rbac/hardened (anon key gets nothing — 0006 strict or "
                  "0007 applied)"}[mode]))
 
     # Anon write probe.
     ws = probe["write_status"]
-    if mode == "demo":
+    if mode == "no-schema":
+        checks.append(Check(FAIL, "anon-write",
+                            "cannot probe — tables do not exist yet",
+                            fix="apply the baseline migrations, then re-run "
+                                "audit-security"))
+    elif mode == "demo":
         checks.append(Check(
             FAIL, "anon-write",
             f"anon key INSERT into alerts succeeded (HTTP {ws}) — "
@@ -215,7 +227,12 @@ def _remote_checks(base_url: str, key: str, client: Any) -> tuple[str, list[Chec
 
     # Anon read probe — meaning depends on intent.
     rs = probe["read_status"]
-    if mode == "demo":
+    if mode == "no-schema":
+        checks.append(Check(FAIL, "anon-read",
+                            "cannot probe — tables do not exist yet",
+                            fix="apply the baseline migrations, then re-run "
+                                "audit-security"))
+    elif mode == "demo":
         checks.append(Check(PASS, "anon-read",
                             f"anon can read robots (HTTP {rs}) — expected in "
                             "demo mode"))
