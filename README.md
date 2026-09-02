@@ -38,7 +38,21 @@ maintenance_findings(id, robot_id, component, finding, rul_days, confidence,
 | `notifier/`  | `yantranotify`| Notification fan-out: polls unacked `crit`/`serious` alerts and `Open` incidents, dedups per event, and pushes through console / webhook (`WEBHOOK_URL`) / WhatsApp (Twilio env vars) channels. `python -m yantranotify --interval 10` (or `--once`, `--dry-run`, `--state-file`). |
 | `e2e/`       | —             | Offline end-to-end suite: `fakerest.py` (in-process fake PostgREST on 127.0.0.1) + `test_e2e.py` driving sim transport → command gate → copilot toolbox → detector sink over real localhost HTTP, zero network egress. |
 
-## Quickstart (Windows)
+## Quickstart — 60 seconds, zero config
+
+```bash
+pip install -e core -e sim -e connector -e detector -e notifier -e ops
+pip install -r copilot/requirements.txt
+python -m yantraops up --loopback
+```
+Open the console URL printed in the banner. That is the FULL platform —
+simulated fleet, auto-incidents, predictive maintenance, notifier, Sarathi
+copilot — running against an embedded in-memory backend. No Supabase, no
+keys, no robots. Add `--supabase` (plus the migrations in supabase/) to run
+against your real project. `python -m yantraops status` health-checks a
+running stack.
+
+## Manual quickstart (Windows)
 
 Prereqs: Python 3.11+, a modern browser. From the repo root:
 

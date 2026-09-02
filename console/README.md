@@ -117,12 +117,34 @@ All config lives in `index.html` (documented in the comment block at the top):
   console runs its local simulation and shows "Local sim (offline)" in the
   header.
 
+The sync backend is also configurable per-tab via URL query params (defaults
+unchanged when absent), so the same file can point at any PostgREST-compatible
+endpoint — e.g. a local fake for testing:
+
+```
+index.html?supa=<PostgREST base url>&key=<anon key>&site=<site id>
+```
+
+- `supa` overrides `SUPA_URL`, `key` overrides `SUPA_KEY`
+- `site` is exposed as `window.SITE` (reserved for per-site filtering; the
+  console does not filter by it yet)
+
 ## Tests
 
-Offline pytest suite (no network, no browser) verifies the file structure, the
-sarathi bridge wiring, the untouched fallback engine, and that the inline
-script parses under `node --check`:
+Two pytest suites live in `tests/`:
+
+- `test_console_static.py` — offline checks (no network, no browser): file
+  structure, sarathi bridge wiring, the untouched fallback engine, and that
+  the inline script parses under `node --check`.
+- `test_console.py` — real-browser suite: headless Chromium (Python
+  Playwright) drives the console against the in-process fake PostgREST from
+  `e2e/fakerest.py` (seeded robots / alerts / commands / incidents; everything
+  on localhost sockets). Covers boot without JS errors, the cloud chip going
+  LIVE, backend rows rendering, alert acks and command approve PATCHing the
+  backend, `cmdRobot()` queuing pending commands, and the offline fallback to
+  the local sim. Skips itself cleanly when no Chromium binary is available.
 
 ```bash
-pytest tests/ -v
+pip install playwright pytest-playwright   # browser suite deps
+PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers pytest tests/ -v   # if preinstalled there
 ```

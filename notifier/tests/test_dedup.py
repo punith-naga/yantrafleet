@@ -72,8 +72,9 @@ def test_corrupt_state_file_is_tolerated(tmp_path):
     assert notifier.seen == set()
 
 
-def test_source_query_filters(rest: FakeRest):
-    """The poll asks PostgREST only for notifiable rows."""
+def test_source_query_filters(rest: FakeRest, monkeypatch):
+    """The poll asks PostgREST only for notifiable rows — of this site."""
+    monkeypatch.delenv("YANTRA_SITE_ID", raising=False)
     source = AlertSource(url=URL, key="k", client=rest.client())
     source.fetch_events()
     alert_req = next(r for r in rest.requests if r.url.path.endswith("/alerts"))
@@ -81,5 +82,24 @@ def test_source_query_filters(rest: FakeRest):
     assert alert_req.url.params["ack"] == "eq.false"
     assert alert_req.url.params["sev"] == "in.(crit,serious)"
     assert inc_req.url.params["state"] == "eq.Open"
+    # v0.5.x multi-site: both queries pin site_id (default site).
+    assert alert_req.url.params["site_id"] == "eq.BLR-DC1"
+    assert inc_req.url.params["site_id"] == "eq.BLR-DC1"
     assert alert_req.headers["apikey"] == "k"
     assert alert_req.headers["authorization"] == "Bearer k"
+
+
+def test_source_site_filter_from_env(rest: FakeRest, monkeypatch):
+    monkeypatch.setenv("YANTRA_SITE_ID", "PNQ-DC2")
+    source = AlertSource(url=URL, key="k", client=rest.client())
+    source.fetch_events()
+    for req in rest.requests:
+        assert req.url.params["site_id"] == "eq.PNQ-DC2"
+
+
+def test_source_all_sites_drops_site_filter(rest: FakeRest):
+    source = AlertSource(url=URL, key="k", client=rest.client(),
+                         all_sites=True)
+    source.fetch_events()
+    for req in rest.requests:
+        assert "site_id" not in req.url.params

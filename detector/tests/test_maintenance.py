@@ -65,6 +65,7 @@ def test_rising_motor_temp_opens_drive_motor_finding():
     # 55 + 6*2 = 67 °C now; (85-67)/6 = 3 hrs -> clamped to 0.5 days min
     assert 0.5 <= a.row["rul_days"] <= 60.0
     assert a.row["action"]
+    assert a.row["site_id"] == "BLR-DC1"  # yantracore.site_id() default
     assert a.row["created_at"] == NOW.isoformat()
     assert a.incident_id == a.row["id"] == finding_id("AMR-01", "drive motor", NOW)
 

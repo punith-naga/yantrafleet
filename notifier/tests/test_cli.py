@@ -32,6 +32,28 @@ def test_multiple_polls_dedup_across_loop(rest: FakeRest, monkeypatch, capsys):
     assert len(rest.webhook_posts) == 2
 
 
+def test_cli_site_filter_default_and_all_sites(rest: FakeRest, monkeypatch):
+    """Default runs filter by this site; --all-sites drops the filter."""
+    monkeypatch.delenv("YANTRA_SITE_ID", raising=False)
+    for var in ("WEBHOOK_URL", "TWILIO_SID", "TWILIO_TOKEN",
+                "TWILIO_FROM", "TWILIO_TO"):
+        monkeypatch.delenv(var, raising=False)
+
+    args = build_parser().parse_args(
+        ["--once", "--dry-run", "--url", URL, "--key", "k"])
+    assert args.all_sites is False
+    assert run(args, client=rest.client()) == 0
+    assert all(r.url.params.get("site_id") == "eq.BLR-DC1"
+               for r in rest.requests)
+
+    rest2 = FakeRest()
+    args = build_parser().parse_args(
+        ["--once", "--dry-run", "--all-sites", "--url", URL, "--key", "k"])
+    assert args.all_sites is True
+    assert run(args, client=rest2.client()) == 0
+    assert all("site_id" not in r.url.params for r in rest2.requests)
+
+
 def test_poll_error_does_not_crash(monkeypatch):
     import httpx
 

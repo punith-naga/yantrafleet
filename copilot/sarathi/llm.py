@@ -15,9 +15,20 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 
 from .tools import TOOL_SPECS, Toolbox, ToolResult
+
+# Injection seam: anything with litellm.completion's calling convention.
+# ``None`` means "use the real litellm.completion" (imported lazily so the
+# offline tier-3 path never needs litellm installed).
+CompletionFn = Callable[..., Any]
+
+
+def _default_completion_fn() -> CompletionFn:
+    import litellm
+
+    return litellm.completion
 
 
 class LLMError(RuntimeError):
@@ -72,13 +83,18 @@ def tier1_answer(
     model: str,
     timeout_s: float = 30.0,
     max_turns: int = 6,
+    completion_fn: CompletionFn | None = None,
 ) -> tuple[str, list[ToolResult]]:
     """Run the tool-grounded agent loop. Returns (answer, tool_log).
+
+    ``completion_fn`` is the LLM seam (litellm.completion by default);
+    tests inject a scripted fake so nothing goes over the network.
 
     Raises LLMError on provider failure; propagates TransportError when the
     data backend is down (the service then degrades to tier 2).
     """
-    import litellm
+    if completion_fn is None:
+        completion_fn = _default_completion_fn()
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": TIER1_SYSTEM},
@@ -86,7 +102,7 @@ def tier1_answer(
     ]
     for _ in range(max_turns):
         try:
-            resp = litellm.completion(
+            resp = completion_fn(
                 model=model,
                 messages=messages,
                 tools=TOOL_SPECS,
@@ -148,12 +164,18 @@ def tier1_answer(
     raise LLMError(f"agent loop exceeded {max_turns} turns without an answer")
 
 
-def tier2_answer(question: str, model: str, timeout_s: float = 30.0) -> str:
+def tier2_answer(
+    question: str,
+    model: str,
+    timeout_s: float = 30.0,
+    completion_fn: CompletionFn | None = None,
+) -> str:
     """Direct LLM answer, no tools. Flagged as lower-confidence."""
-    import litellm
+    if completion_fn is None:
+        completion_fn = _default_completion_fn()
 
     try:
-        resp = litellm.completion(
+        resp = completion_fn(
             model=model,
             messages=[
                 {"role": "system", "content": TIER2_SYSTEM},

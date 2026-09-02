@@ -5,6 +5,12 @@ Only rows worth waking a human for are fetched:
 * alerts   — ``ack=eq.false`` and ``sev=in.(crit,serious)``
 * incidents — ``state=eq.Open``
 
+Both queries additionally filter ``site_id=eq.<site>`` (v0.5.x
+multi-site groundwork) unless the source is built site-less
+(``python -m yantranotify --all-sites``). The ``site_id`` column
+defaults to the site value server-side (0005_sites.sql), so legacy rows
+still match.
+
 An injectable :class:`httpx.Client` keeps every test offline
 (``httpx.MockTransport``), mirroring the other YantraFleet components.
 """
@@ -15,6 +21,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+from yantracore import site_id as _default_site_id
 
 DEFAULT_URL = "https://flwyvhsmgrrqpmhcqlzd.supabase.co"
 DEFAULT_KEY = "sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf"
@@ -74,9 +82,15 @@ class AlertSource:
         key: str | None = None,
         client: httpx.Client | None = None,
         timeout_s: float = 10.0,
+        site: str | None = None,
+        all_sites: bool = False,
     ) -> None:
+        """``site`` pins the queries to one site (default: this
+        process's ``yantracore.site_id()``); ``all_sites=True`` drops
+        the site filter entirely (``--all-sites``)."""
         self.base_url, self.key = resolve_config(url, key)
         self.rest = f"{self.base_url}/rest/v1"
+        self.site: str | None = None if all_sites else (site or _default_site_id())
         self._client = client or httpx.Client(timeout=timeout_s)
 
     @property
@@ -90,6 +104,7 @@ class AlertSource:
         """One poll: unacked crit/serious alerts + Open incidents."""
         events: list[Event] = []
         sev_in = ",".join(NOTIFY_SEVERITIES)
+        site_filter = {} if self.site is None else {"site_id": f"eq.{self.site}"}
 
         resp = self._client.get(
             f"{self.rest}/alerts",
@@ -97,6 +112,7 @@ class AlertSource:
                 "ack": "eq.false",
                 "sev": f"in.({sev_in})",
                 "order": "created_at.asc",
+                **site_filter,
             },
             headers=self._headers,
         )
@@ -105,7 +121,8 @@ class AlertSource:
 
         resp = self._client.get(
             f"{self.rest}/incidents",
-            params={"state": "eq.Open", "order": "created_at.asc"},
+            params={"state": "eq.Open", "order": "created_at.asc",
+                    **site_filter},
             headers=self._headers,
         )
         resp.raise_for_status()

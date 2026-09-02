@@ -6,9 +6,10 @@ from conftest import FIXED_NOW
 
 ROBOTS_COLUMNS = {
     "id", "vendor", "status", "battery", "pos", "speed", "task_kind",
-    "health", "motor_temp", "tasks_done", "fault_msg", "updated_at",
+    "health", "motor_temp", "tasks_done", "fault_msg", "site_id", "updated_at",
 }
-ALERTS_COLUMNS = {"id", "sev", "msg", "src", "tlabel", "ack", "created_at"}
+ALERTS_COLUMNS = {"id", "sev", "msg", "src", "tlabel", "ack", "site_id",
+                  "created_at"}
 
 
 def _state(**over):
@@ -57,6 +58,7 @@ def test_robot_row_shape_and_values():
     assert row["pos"] == [4.0, 8.0]       # jsonb [x, y]
     assert row["speed"] == 1.5            # hypot(0.9, 1.2)
     assert row["fault_msg"] is None
+    assert row["site_id"] == "BLR-DC1"    # yantracore.site_id() default
     assert row["updated_at"] == "2026-08-26T10:15:32.512Z"
 
 
@@ -76,6 +78,7 @@ def test_alert_row_deterministic_id():
     assert row["tlabel"] == "10:15:32"
     assert row["ack"] is False
     assert row["sev"] == "crit"
+    assert row["site_id"] == "BLR-DC1"
 
 
 def test_fleet_meta_row():

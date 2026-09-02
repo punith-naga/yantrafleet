@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.6.0 — 2026-08-26
+- **`yantraops` one-command orchestrator**: `python -m yantraops up --loopback`
+  boots the entire platform (fakerest backend, sim, detector, notifier,
+  Sarathi, console server) with zero cloud/config — the 60-second demo;
+  `--supabase` for the real backend; `status` subcommand; graceful shutdown.
+- **Real browser tests**: 10 Playwright/Chromium tests drive the actual
+  console against the fake backend (live chip, ack flow, command → approval
+  round trip, offline fallback) + 9 preserved static tests.
+- **LLM hardening**: injection seam + scripted-fake tests for tiers 1-2
+  (agent loop, bounded tool calls, degradation on failure); **grounding
+  guard** — numbers in LLM answers verified against tool payloads, responses
+  carry grounding=verified|unverified|computed; richer /health.
+- **Multi-site groundwork**: migration 0005 adds site_id (+indexes) across
+  all data tables; writers stamp it via yantracore.site_id() (env
+  YANTRA_SITE_ID); notifier filters per-site with --all-sites escape;
+  console accepts ?site= (and ?supa=/&key= backend overrides).
+- 278 tests green across 9 suites.
+
 ## v0.5.0 — 2026-09-01
 - **Missions** (`sim/yantrasim`): the simulator keeps a rolling pool of up to
   3 concurrent missions (2–4 robots each, 10–20 planned tasks, deterministic

@@ -1160,8 +1160,14 @@ const Copilot={
 };
 
 /* ================= Supabase sync (polling PostgREST, leader-elected sim) ================= */
-const SUPA_URL='https://flwyvhsmgrrqpmhcqlzd.supabase.co';
-const SUPA_KEY='sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf'; // publishable anon key — safe client-side
+/* Backend is configurable via URL query params (defaults unchanged):
+     ?supa=<PostgREST base url>  overrides SUPA_URL
+     ?key=<anon key>             overrides SUPA_KEY
+     ?site=<site id>             exposed as window.SITE (no filtering yet)   */
+const _cfg=new URLSearchParams(location.search);
+const SUPA_URL=_cfg.get('supa')||'https://flwyvhsmgrrqpmhcqlzd.supabase.co';
+const SUPA_KEY=_cfg.get('key')||'sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf'; // publishable anon key — safe client-side
+window.SITE=_cfg.get('site')||null;
 const Sync={
   mode:'connecting',            // connecting | leader | follower | local
   me:'w-'+Math.random().toString(36).slice(2,10),

@@ -20,8 +20,11 @@ def test_ask_offline_tier(transport: StaticTransport) -> None:
     resp = client.post("/ask", json={"question": "Which robots are low on battery?"})
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"answer", "evidence", "tier", "latency_ms"}
+    assert set(body) == {
+        "answer", "evidence", "tier", "grounding", "meta", "latency_ms",
+    }
     assert body["tier"] == "offline"
+    assert body["grounding"] == "computed"
     assert isinstance(body["latency_ms"], int) and body["latency_ms"] >= 0
     assert body["evidence"] and all(set(e) == {"label", "ref"} for e in body["evidence"])
     assert "R-004" in body["answer"]
@@ -64,6 +67,53 @@ def test_health_reports_best_tier(transport: StaticTransport) -> None:
     assert h["llm_configured"] is False
     assert h["data_backend_ok"] is True
     assert h["best_tier"] == "offline"
+
+
+def test_health_new_shape_offline_only(transport: StaticTransport) -> None:
+    """v0.5 health contract: tiers_available / model / transport_ok."""
+    client = TestClient(create_app(transport=transport, settings=_settings()))
+    h = client.get("/health").json()
+    assert h["tiers_available"] == ["offline"]
+    assert h["model"] == "none"
+    assert h["transport_ok"] is True
+
+
+def test_health_all_tiers_when_llm_configured(transport: StaticTransport) -> None:
+    client = TestClient(
+        create_app(transport=transport, settings=_settings(model="fake/model"))
+    )
+    h = client.get("/health").json()
+    assert h["tiers_available"] == ["grounded", "llm_only", "offline"]
+    assert h["model"] == "fake/model"
+    assert h["transport_ok"] is True
+    assert h["best_tier"] == "grounded"
+
+
+def test_health_transport_down_never_crashes() -> None:
+    client = TestClient(
+        create_app(transport=FailingTransport(), settings=_settings(model="fake/model"))
+    )
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    h = resp.json()
+    assert h["transport_ok"] is False
+    assert h["tiers_available"] == ["llm_only", "offline"]
+    assert h["best_tier"] == "llm_only"
+
+
+def test_health_survives_non_transport_errors() -> None:
+    """A misbehaving transport raising a foreign exception must not 500."""
+
+    class ExplodingTransport(FailingTransport):
+        def get(self, table, params):  # type: ignore[override]
+            raise ValueError("totally unexpected")
+
+    client = TestClient(
+        create_app(transport=ExplodingTransport(), settings=_settings())
+    )
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["transport_ok"] is False
 
 
 def test_ground_check_flags_invented_numbers() -> None:

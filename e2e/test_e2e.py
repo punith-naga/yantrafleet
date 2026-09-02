@@ -104,6 +104,7 @@ def test_robots_upserted_with_canonical_statuses(world: World) -> None:
         assert 0.0 <= r["battery"] <= 100.0
         assert isinstance(r["pos"], list) and len(r["pos"]) == 2
         assert r["vendor"] in ("nexomotion", "agilus", "boturo")
+        assert r["site_id"] == "BLR-DC1"  # v0.5.x: writers stamp the site
         assert r["updated_at"]  # ISO timestamp from the last tick
 
 
@@ -115,6 +116,7 @@ def test_telemetry_accumulates_downsampled(world: World) -> None:
     assert len({t["ts"] for t in telem}) == TICKS // HISTORY_EVERY
     for t in telem:
         assert t["status"] in CANONICAL
+        assert t["site_id"] == "BLR-DC1"
     # eq. + in. filters work on history reads (replay windowing shape).
     one = _rows(world, "robot_telemetry", robot_id="eq.AMR-01")
     assert len(one) == TICKS // HISTORY_EVERY
@@ -133,6 +135,7 @@ def test_alerts_present_and_idempotent(world: World) -> None:
     for a in alerts:
         assert a["sev"] in ("info", "warn", "crit")
         assert a["ack"] is False
+        assert a["site_id"] == "BLR-DC1"
     # ignore-duplicates: re-posting the same deterministic ids is a no-op.
     world.http.post("/alerts", params={"on_conflict": "id"},
                     headers={"Prefer": "resolution=ignore-duplicates"},
@@ -160,7 +163,7 @@ def test_command_approved_then_executed(world: World) -> None:
     world.http.post("/commands", json=[{
         "id": cmd_id, "robot_id": "AMR-01", "cmd": "pause",
         "status": "pending", "requested_by": "e2e-console",
-        "note": None, "created_at": now,
+        "site_id": "BLR-DC1", "note": None, "created_at": now,
     }]).raise_for_status()
     # ...the sim must NOT execute it while merely pending.
     assert world.transport.poll_commands(
@@ -212,6 +215,7 @@ def test_copilot_sees_pending_approval(world: World, engine) -> None:
     world.http.post("/commands", json=[{
         "id": str(uuid.uuid4()), "robot_id": "AMR-02", "cmd": "charge",
         "status": "pending", "requested_by": "e2e-console",
+        "site_id": "BLR-DC1",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }]).raise_for_status()
 
@@ -293,8 +297,9 @@ def test_detector_incident_roundtrip() -> None:
         # every column the console's incidents reader consumes (rca/fix are
         # nullable; the console falls back to placeholder copy for them)
         for col in ("id", "sev", "title", "src", "tlabel", "state",
-                    "impact", "dur", "created_at"):
+                    "impact", "dur", "site_id", "created_at"):
             assert col in row, f"incidents row missing {col}"
+        assert row["site_id"] == "BLR-DC1"
         assert row["id"].startswith("INC-")
         assert row["sev"] == "crit"                 # fault -> crit
         assert row["state"] == "Resolved"
@@ -327,9 +332,11 @@ def test_sim_publishes_missions_rows(world: World) -> None:
 
     robot_ids = {r["id"] for r in _rows(world, "robots")}
     for r in rows:
-        # 0001_init.sql: id,name,robots,state,prog,eta,created_at
+        # 0001_init.sql + 0005_sites.sql:
+        # id,name,robots,state,prog,eta,site_id,created_at
         assert set(r) >= {"id", "name", "robots", "state", "prog", "eta",
-                          "created_at"}
+                          "site_id", "created_at"}
+        assert r["site_id"] == "BLR-DC1"
         assert r["id"].startswith("M-") and r["name"]
         assert r["state"] in ("Queued", "Running", "Done")
         assert isinstance(r["robots"], list) and 2 <= len(r["robots"]) <= 4
@@ -379,6 +386,7 @@ def _telemetry_window(t0: datetime, temp_of, *, robots=("AMR-01", "AMR-02",
                 "speed": 1.0,
                 "motor_temp": temp_of(rid, hours),
                 "status": "active",
+                "site_id": "BLR-DC1",
             })
     return rows
 
@@ -417,7 +425,8 @@ def test_maintenance_engine_roundtrip() -> None:
             # Every 0004_maintenance.sql column, with its constraints.
             assert set(row) >= {"id", "robot_id", "component", "finding",
                                 "rul_days", "confidence", "action", "state",
-                                "created_at"}
+                                "site_id", "created_at"}
+            assert row["site_id"] == "BLR-DC1"
             assert row["id"].startswith("MF-")
             assert row["robot_id"] == "AMR-03"
             assert row["component"] in ("drive motor", "battery", "drivetrain")

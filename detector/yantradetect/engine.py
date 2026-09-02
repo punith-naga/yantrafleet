@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable, Literal
 
-from yantracore import NOT_OPERATING, normalize
+from yantracore import NOT_OPERATING, normalize, site_id
 
 __all__ = ["Action", "IncidentEngine", "OpenIncident"]
 
@@ -238,6 +238,7 @@ class IncidentEngine:
             "state": "Open",
             "impact": _impact_open(0),
             "dur": 0,
+            "site_id": site_id(),
             # console orders incidents by created_at.desc and seed() restores
             # opened_at from it after a restart — always send it explicitly
             # rather than relying on a DB column default.

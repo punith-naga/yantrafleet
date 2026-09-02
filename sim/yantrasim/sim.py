@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from yantracore import site_id
+
 from . import vda, world
 
 # --------------------------------------------------------------------------
@@ -498,6 +500,7 @@ class FleetSim:
                 "state": m.state,
                 "prog": m.prog,
                 "eta": self._mission_eta(m, now_dt),
+                "site_id": site_id(),
                 "created_at": m.created_ts,
             })
         return rows

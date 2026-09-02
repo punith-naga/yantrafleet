@@ -7,13 +7,15 @@ The connection topic is network-level only, so status never depends on it.
 
 Columns written match the existing tables:
   robots(id, vendor, status, battery, pos jsonb [x,y], speed, task_kind,
-         health, motor_temp, tasks_done, fault_msg, updated_at)
-  alerts(id, sev, msg, src, tlabel, ack, created_at)
+         health, motor_temp, tasks_done, fault_msg, site_id, updated_at)
+  alerts(id, sev, msg, src, tlabel, ack, site_id, created_at)
   fleet_meta(id=1, writer_id, sim_min, throughput, updated_at)
 """
 from __future__ import annotations
 
 from typing import Any, Mapping
+
+from yantracore import site_id
 
 from .sim import Event
 
@@ -68,6 +70,7 @@ def robot_row(state: Mapping[str, Any], extras: Mapping[str, Any]) -> dict[str, 
         "motor_temp": extras["motor_temp"],
         "tasks_done": extras["tasks_done"],
         "fault_msg": fault_msg,
+        "site_id": site_id(),
         "updated_at": state["timestamp"],
     }
 
@@ -87,6 +90,7 @@ def alert_row(event: Event, timestamp: str) -> dict[str, Any]:
         "src": event.robot_id,
         "tlabel": tlabel,
         "ack": False,
+        "site_id": site_id(),
         "created_at": timestamp,
     }
 
@@ -118,4 +122,5 @@ def telemetry_row(state, extras, timestamp: str):
         "motor_temp": row["motor_temp"],
         "status": row["status"],
         "pos": row["pos"],
+        "site_id": row["site_id"],
     }

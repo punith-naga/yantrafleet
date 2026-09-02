@@ -41,7 +41,7 @@ from typing import Any, Iterable
 
 import httpx
 
-from yantracore import normalize
+from yantracore import normalize, site_id
 
 from .engine import Action, _parse_ts
 from .sink import resolve_config
@@ -197,6 +197,7 @@ class MaintenanceEngine:
                 "confidence": round(_clamp(m.confidence, 0.0, 1.0), 2),
                 "action": ACTIONS[comp],
                 "state": "Open",
+                "site_id": site_id(),
                 "created_at": now.isoformat(),
             }
             return [Action("open", f.id, row)]

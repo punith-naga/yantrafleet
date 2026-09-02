@@ -44,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--state-file", default=None,
                    help="JSON file remembering already-notified ids "
                         "(default: in-memory only)")
+    p.add_argument("--all-sites", action="store_true",
+                   help="notify for every site (default: only rows whose "
+                        "site_id matches this process's site, env "
+                        "YANTRA_SITE_ID / 'BLR-DC1')")
     return p
 
 
@@ -60,7 +64,8 @@ def run(args: argparse.Namespace,
         client: httpx.Client | None = None,
         max_polls: int | None = None) -> int:
     """Poll loop; ``client``/``max_polls`` are injection points for tests."""
-    source = AlertSource(args.url, args.key, client=client)
+    source = AlertSource(args.url, args.key, client=client,
+                         all_sites=getattr(args, "all_sites", False))
     notifier = Notifier(build_channels(args, client=client),
                         state_path=args.state_file)
 

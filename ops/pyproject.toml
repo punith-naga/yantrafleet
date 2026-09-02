@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yantraops"
+version = "0.1.0"
+description = "One-command orchestrator for the YantraFleet demo stack"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.24",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["yantraops*"]

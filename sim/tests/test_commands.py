@@ -122,7 +122,7 @@ class TestTelemetryHistory:
         hist = [rows for path, rows in posts if path.endswith("/robot_telemetry")]
         assert len(hist) == 2                      # ticks 2 and 4
         sample = hist[0][0]
-        assert set(sample) == {"robot_id", "ts", "battery", "speed",
+        assert set(sample) == {"robot_id", "ts", "battery", "speed", "site_id",
                                "motor_temp", "status", "pos"}
         assert sample["status"] in ("active", "idle", "charging", "paused",
                                     "estop", "degraded", "fault")

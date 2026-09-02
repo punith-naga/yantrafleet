@@ -67,6 +67,28 @@ class SupabaseTransport(Transport):
             raise TransportError(f"unexpected payload for {table}")
         return data
 
+    def probe(self, timeout_s: float = 3.0) -> None:
+        """Cheap reachability check: fleet_meta, one id, short timeout.
+
+        Raises TransportError when the backend is unreachable or errors.
+        Used by the /health endpoint so a hung backend can't stall it for
+        the full data-path timeout.
+        """
+        import httpx
+
+        try:
+            resp = self._client.get(
+                "/fleet_meta",
+                params=[("select", "id"), ("limit", "1")],
+                timeout=timeout_s,
+            )
+        except httpx.HTTPError as exc:
+            raise TransportError(f"supabase unreachable: {exc}") from exc
+        if resp.status_code >= 400:
+            raise TransportError(
+                f"supabase error {resp.status_code} on fleet_meta probe"
+            )
+
     def close(self) -> None:
         self._client.close()
 

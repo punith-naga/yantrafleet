@@ -32,19 +32,24 @@ class AskResponse(BaseModel):
     answer: str
     evidence: list[EvidenceItem]
     tier: str
+    grounding: str
+    meta: dict
     latency_ms: int
 
 
 def create_app(
     transport: Transport | None = None,
     settings: Settings | None = None,
+    completion_fn=None,
 ) -> FastAPI:
-    """App factory. Tests pass a StaticTransport; production uses Supabase."""
+    """App factory. Tests pass a StaticTransport (and optionally a fake
+    ``completion_fn`` for the LLM seam); production uses Supabase +
+    litellm."""
     settings = settings or load_settings()
     transport = transport or SupabaseTransport(
         settings.supabase_url, settings.supabase_key
     )
-    service = CopilotService(settings, transport)
+    service = CopilotService(settings, transport, completion_fn=completion_fn)
 
     app = FastAPI(title="sarathi", version=__version__)
     app.state.service = service
@@ -67,6 +72,8 @@ def create_app(
             answer=result.answer,
             evidence=[EvidenceItem(**e) for e in result.evidence],
             tier=result.tier,
+            grounding=result.grounding,
+            meta=result.meta,
             latency_ms=int((time.perf_counter() - t0) * 1000),
         )
 

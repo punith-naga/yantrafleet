@@ -31,6 +31,12 @@ TABLES: tuple[str, ...] = (
     "missions", "maintenance_findings",
 )
 
+#: Tables that carry a ``site_id`` column with a server-side default
+#: (supabase/0005_sites.sql). The fake mirrors that default so rows from
+#: writers that do not stamp site_id still match site-filtered reads.
+SITE_TABLES: frozenset[str] = frozenset(TABLES) - {"fleet_meta"}
+DEFAULT_SITE_ID = "BLR-DC1"
+
 Row = dict[str, Any]
 
 
@@ -117,7 +123,11 @@ class FakePostgREST:
         self.tables: dict[str, list[Row]] = {t: [] for t in TABLES}
         if tables:
             for name, rows in tables.items():
-                self.tables[name] = [dict(r) for r in rows]
+                seeded = [dict(r) for r in rows]
+                if name in SITE_TABLES:
+                    for r in seeded:  # column default (0005_sites.sql)
+                        r.setdefault("site_id", DEFAULT_SITE_ID)
+                self.tables[name] = seeded
         self.lock = threading.Lock()
         self.requests: list[tuple[str, str]] = []  # (method, path) audit log
         self._serial = 0
@@ -158,6 +168,8 @@ class FakePostgREST:
         existing = self.tables[table]
         for row in rows:
             row = dict(row)
+            if table in SITE_TABLES and "site_id" not in row:
+                row["site_id"] = DEFAULT_SITE_ID  # column default (0005)
             if on_conflict:
                 key = row.get(on_conflict)
                 hit = next((r for r in existing

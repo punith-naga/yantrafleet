@@ -144,7 +144,7 @@ def test_missions_rows_upserted(recorder):
     assert 2 <= len(rows) <= 3
     for r in rows:
         assert set(r) == {"id", "name", "robots", "state", "prog", "eta",
-                          "created_at"}
+                          "site_id", "created_at"}
         assert r["id"].startswith("M-")
         assert isinstance(r["robots"], list)
         assert r["state"] in ("Queued", "Running", "Done")

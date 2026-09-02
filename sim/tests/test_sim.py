@@ -157,7 +157,7 @@ def test_missions_snapshot_shape_on_tick_output():
     assert out.missions, "TickOutput must expose a missions snapshot"
     for row in out.missions:
         assert set(row) == {"id", "name", "robots", "state", "prog", "eta",
-                            "created_at"}
+                            "site_id", "created_at"}
         assert row["state"] in ("Queued", "Running", "Done")
         assert isinstance(row["robots"], list) and row["robots"]
         assert isinstance(row["prog"], int) and 0 <= row["prog"] <= 100

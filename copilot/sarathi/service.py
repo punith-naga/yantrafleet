@@ -14,7 +14,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .config import Settings
-from .llm import LLMError, tier1_answer, tier2_answer
+from .grounding import (
+    GROUNDING_COMPUTED,
+    verify_grounding,
+)
+from .llm import CompletionFn, LLMError, tier1_answer, tier2_answer
 from .offline import OfflineEngine
 from .tools import Toolbox, ToolResult
 from .transport import Transport, TransportError
@@ -28,11 +32,19 @@ TIER_OFFLINE = "offline"
 
 @dataclass
 class Answer:
-    """Service-level answer, tier-tagged, with citation evidence."""
+    """Service-level answer, tier-tagged, with citation evidence.
+
+    ``grounding`` is the output-rail verdict: ``verified`` (every figure
+    backed by tool data), ``unverified`` (at least one unsupported figure —
+    listed in ``meta["unsupported_numbers"]``), or ``computed`` (tier 3:
+    rendered from tool data by construction).
+    """
 
     answer: str
     evidence: list[dict[str, str]] = field(default_factory=list)
     tier: str = TIER_OFFLINE
+    grounding: str = GROUNDING_COMPUTED
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 def _evidence(tool_log: list[ToolResult]) -> list[dict[str, str]]:
@@ -42,9 +54,16 @@ def _evidence(tool_log: list[ToolResult]) -> list[dict[str, str]]:
 class CopilotService:
     """One instance per app; holds the transport and the degradation logic."""
 
-    def __init__(self, settings: Settings, transport: Transport) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        transport: Transport,
+        completion_fn: CompletionFn | None = None,
+    ) -> None:
         self.settings = settings
         self.transport = transport
+        # LLM seam: None -> real litellm.completion; tests inject a fake.
+        self.completion_fn = completion_fn
         self._toolbox_factory: Callable[[], Toolbox] = lambda: Toolbox(
             transport=self.transport, row_limit=settings.tool_row_limit
         )
@@ -73,8 +92,16 @@ class CopilotService:
                 model=self.settings.model or "",
                 timeout_s=self.settings.llm_timeout_s,
                 max_turns=self.settings.max_agent_turns,
+                completion_fn=self.completion_fn,
             )
-            return Answer(answer=answer, evidence=_evidence(tool_log), tier=TIER_GROUNDED)
+            grounding, offending = verify_grounding(answer, tool_log)
+            return Answer(
+                answer=answer,
+                evidence=_evidence(tool_log),
+                tier=TIER_GROUNDED,
+                grounding=grounding,
+                meta={"unsupported_numbers": offending} if offending else {},
+            )
         except TransportError as exc:
             log.warning("tier1 -> tier2 (data backend down): %s", exc)
             return self._tier2(question)
@@ -93,33 +120,64 @@ class CopilotService:
                 question,
                 model=self.settings.model or "",
                 timeout_s=self.settings.llm_timeout_s,
+                completion_fn=self.completion_fn,
             )
-            return Answer(answer=text, evidence=[], tier=TIER_LLM_ONLY)
+            # Tier 2 has no tool data at all, so *any* figure the model
+            # states is unsupported — verify against an empty tool log.
+            grounding, offending = verify_grounding(text, [])
+            return Answer(
+                answer=text,
+                evidence=[],
+                tier=TIER_LLM_ONLY,
+                grounding=grounding,
+                meta={"unsupported_numbers": offending} if offending else {},
+            )
         except LLMError as exc:
             log.warning("tier2 -> tier3 (LLM failed too): %s", exc)
             return self._tier3(question)
 
     def _tier3(self, question: str) -> Answer:
         off = self._offline.answer(question)
-        return Answer(answer=off.answer, evidence=off.evidence, tier=TIER_OFFLINE)
+        return Answer(
+            answer=off.answer,
+            evidence=off.evidence,
+            tier=TIER_OFFLINE,
+            grounding=GROUNDING_COMPUTED,
+        )
 
     # -- misc --------------------------------------------------------------
 
     def health(self) -> dict[str, Any]:
-        """Cheap health probe: which tiers are currently plausible."""
-        backend_ok = True
+        """Cheap health probe: which tiers are currently plausible.
+
+        ``transport_ok`` comes from a minimal fleet_meta query (with a short
+        timeout when the transport supports one); the probe never raises —
+        any failure just reports False.
+        """
+        transport_ok = True
         try:
-            self.transport.get("fleet_meta", [("select", "id"), ("limit", "1")])
-        except TransportError:
-            backend_ok = False
+            probe = getattr(self.transport, "probe", None)
+            if callable(probe):
+                probe()  # short-timeout fleet_meta query
+            else:
+                self.transport.get(
+                    "fleet_meta", [("select", "id"), ("limit", "1")]
+                )
+        except Exception:  # unreachable/misbehaving backend must not crash
+            transport_ok = False
+
+        tiers_available = [TIER_OFFLINE]
+        if self.llm_available:
+            tiers_available.insert(0, TIER_LLM_ONLY)
+            if transport_ok:
+                tiers_available.insert(0, TIER_GROUNDED)
         return {
             "ok": True,
             "llm_configured": self.llm_available,
-            "model": self.settings.model,
-            "data_backend_ok": backend_ok,
-            "best_tier": (
-                TIER_GROUNDED if (self.llm_available and backend_ok)
-                else TIER_LLM_ONLY if self.llm_available
-                else TIER_OFFLINE
-            ),
+            "model": self.settings.model or "none",
+            "tiers_available": tiers_available,
+            "transport_ok": transport_ok,
+            # Back-compat aliases (pre-v0.5 health shape).
+            "data_backend_ok": transport_ok,
+            "best_tier": tiers_available[0],
         }

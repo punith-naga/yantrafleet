@@ -74,6 +74,7 @@ def test_open_row_fault():
     assert row["dur"] == 0
     assert "localization loss" in row["title"]
     assert row["created_at"] == at(5).isoformat()  # console orders by it; seed() restores from it
+    assert row["site_id"] == "BLR-DC1"  # yantracore.site_id() default (v0.5.x)
     assert acts[0].incident_id == row["id"]
 
 
