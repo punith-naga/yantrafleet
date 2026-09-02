@@ -17,13 +17,18 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Protocol
+from typing import Protocol, Sequence
 
 import httpx
+
+from .formats import (DEFAULT_FORMAT, digest_payload_for, payload_for,
+                      render_digest_grouped)
+from .source import Event
 
 log = logging.getLogger("yantranotify")
 
 TWILIO_API = "https://api.twilio.com"
+WEBHOOK_TIMEOUT_S = 5.0
 
 
 class Channel(Protocol):
@@ -42,9 +47,23 @@ class ConsoleChannel:
         log.info("NOTIFY %s", text)
         return True
 
+    def send_event(self, event: Event) -> bool:
+        return self.send(event.render())
+
+    def send_digest(self, events: Sequence[Event]) -> bool:
+        return self.send(render_digest_grouped(events))
+
 
 class WebhookChannel:
-    """POST ``{"text": <message>}`` to a Slack-compatible webhook."""
+    """POST notifications to a webhook, in one of three payload formats.
+
+    * ``json`` (default) — ``{"text": <message>}``, the original
+      Slack-compatible generic contract.
+    * ``slack`` — Slack Block Kit (via :func:`~yantranotify.formats.payload_for`).
+    * ``discord`` — Discord embeds.
+
+    Format precedence: ``fmt`` arg > ``WEBHOOK_FORMAT`` env > ``json``.
+    """
 
     name = "webhook"
 
@@ -53,14 +72,16 @@ class WebhookChannel:
         url: str | None = None,
         client: httpx.Client | None = None,
         dry_run: bool = False,
-        timeout_s: float = 10.0,
+        timeout_s: float = WEBHOOK_TIMEOUT_S,
+        fmt: str | None = None,
     ) -> None:
         self.url = url or os.environ.get("WEBHOOK_URL") or None
         self.dry_run = dry_run
+        self.fmt = (fmt or os.environ.get("WEBHOOK_FORMAT")
+                    or DEFAULT_FORMAT).lower()
         self._client = client or httpx.Client(timeout=timeout_s)
 
-    def send(self, text: str) -> bool:
-        payload = {"text": text}
+    def _post(self, payload: dict) -> bool:
         if self.dry_run or not self.url:
             reason = "dry-run" if self.dry_run else "WEBHOOK_URL unset"
             print(f"[webhook {reason}] would POST {payload!r}")
@@ -72,6 +93,15 @@ class WebhookChannel:
         except httpx.HTTPError as exc:
             log.warning("webhook send failed: %s", exc)
             return False
+
+    def send(self, text: str) -> bool:
+        return self._post({"text": text})
+
+    def send_event(self, event: Event) -> bool:
+        return self._post(payload_for(event, self.fmt))
+
+    def send_digest(self, events: Sequence[Event]) -> bool:
+        return self._post(digest_payload_for(events, self.fmt))
 
 
 class WhatsAppChannel:

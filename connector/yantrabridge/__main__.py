@@ -13,6 +13,14 @@ Replay a JSONL file into Supabase::
 Live MQTT bridge (requires paho-mqtt)::
 
     python -m yantrabridge --mqtt-host broker.local --mqtt-port 1883
+
+Import a recording (bring-your-own-recording; requires the ``import`` extra
+for MCAP files)::
+
+    python -m yantrabridge import --mcap run.mcap --dry-run
+    python -m yantrabridge import --mcap run.mcap --topic-map map.json
+    python -m yantrabridge import --mcap run.mcap --rate 4     # 4x replay
+    python -m yantrabridge import --jsonl sample.jsonl
 """
 
 from __future__ import annotations
@@ -56,6 +64,119 @@ def build_parser() -> argparse.ArgumentParser:
                      default=BATTERY_ALERT_THRESHOLD,
                      help="low-battery alert threshold in %% (default: %(default)s)")
     return p
+
+
+def build_import_parser() -> argparse.ArgumentParser:
+    from yantrabridge.importer import TOPIC_MAP_DOC
+
+    p = argparse.ArgumentParser(
+        prog="yantrabridge import",
+        description="Import a recording (MCAP or JSONL) into Supabase: "
+                    "robots final state, robot_telemetry history with the "
+                    "original timestamps, and alerts from VDA errors[].",
+        epilog=TOPIC_MAP_DOC,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    src = p.add_argument_group("recording")
+    src.add_argument("--mcap", help="MCAP recording (raw JSON channels; "
+                                    "needs the 'import' extra: pip install "
+                                    "'yantrabridge[import]')")
+    src.add_argument("--jsonl", help="JSONL file of VDA 5050 state messages")
+    src.add_argument("--topic-map",
+                     help="JSON spec mapping non-VDA topics/fields to "
+                          "{robot_id, battery, pos.x, pos.y, speed, status} "
+                          "(MCAP only; see below)")
+
+    mode = p.add_argument_group("mode")
+    mode.add_argument("--rate", type=float, default=0.0,
+                      help="0 = bulk import as fast as possible (default); "
+                           "N = replay at Nx real time, updating robots live")
+    mode.add_argument("--dry-run", action="store_true",
+                      help="print a summary (topics, counts, time range, "
+                           "rows that would be written); no network")
+
+    out = p.add_argument_group("output")
+    out.add_argument("--supabase-url", help="override SUPABASE_URL")
+    out.add_argument("--supabase-key", help="override SUPABASE_KEY")
+    out.add_argument("--battery-threshold", type=float,
+                     default=BATTERY_ALERT_THRESHOLD,
+                     help="low-battery alert threshold in %% "
+                          "(default: %(default)s)")
+    return p
+
+
+def run_import(argv: list[str]) -> int:
+    from yantrabridge import importer
+
+    args = build_import_parser().parse_args(argv)
+    if bool(args.mcap) == bool(args.jsonl):
+        print("error: choose exactly one recording: --mcap <file> or "
+              "--jsonl <file>", file=sys.stderr)
+        return 2
+    if args.rate < 0:
+        print("error: --rate must be >= 0", file=sys.stderr)
+        return 2
+
+    topic_map = None
+    if args.topic_map:
+        if args.jsonl:
+            print("warning: --topic-map only applies to --mcap (JSONL has "
+                  "no topics); ignoring", file=sys.stderr)
+        else:
+            topic_map = importer.TopicMap.load(args.topic_map)
+
+    def records() -> Any:
+        if args.mcap:
+            return importer.read_mcap(args.mcap)
+        return importer.jsonl_records(read_jsonl(args.jsonl))
+
+    try:
+        # ----- replay mode: Nx real time, robots update live ---------------
+        if args.rate > 0 and not args.dry_run:
+            with SupabaseSink(args.supabase_url, args.supabase_key) as sink:
+                def on_event(ev: "importer.ImportEvent") -> None:
+                    if ev.robot_row is not None:
+                        sink.upsert_robots([ev.robot_row])
+                    if ev.telemetry_row is not None:
+                        sink.insert_telemetry([ev.telemetry_row])
+                    if ev.alert_rows:
+                        sink.insert_alerts(ev.alert_rows)
+                    if ev.robot_row is not None:
+                        print(f"[{ev.robot_row['id']}] "
+                              f"ts={ev.telemetry_row['ts']} "
+                              f"alerts+={len(ev.alert_rows)}")
+
+                summary = importer.replay(
+                    records(), rate=args.rate, on_event=on_event,
+                    topic_map=topic_map,
+                    battery_threshold=args.battery_threshold)
+                sink.heartbeat()
+            print(importer.format_summary(summary, dry_run=False))
+            return 0
+
+        # ----- bulk / dry-run ----------------------------------------------
+        robots, telemetry, alerts, summary = importer.collect(
+            records(), topic_map=topic_map,
+            battery_threshold=args.battery_threshold)
+
+        if args.dry_run:
+            print(importer.format_summary(summary, dry_run=True))
+            _print_rows("robots (upsert)", robots)
+            _print_rows("alerts (insert, deduped)", alerts)
+            print(f"-- robot_telemetry: {len(telemetry)} rows "
+                  "(omitted from dry-run output) --")
+            return 0
+
+        with SupabaseSink(args.supabase_url, args.supabase_key) as sink:
+            sink.upsert_robots(robots)
+            sink.insert_telemetry(telemetry)
+            sink.insert_alerts(alerts)
+            sink.heartbeat()
+        print(importer.format_summary(summary, dry_run=False))
+        return 0
+    except (RuntimeError, importer.TopicMapError, OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 def run_file(args: argparse.Namespace) -> int:
@@ -114,6 +235,10 @@ def run_mqtt(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "import":
+        return run_import(argv[1:])
     args = build_parser().parse_args(argv)
     if bool(args.file) == bool(args.mqtt_host):
         print("error: choose exactly one source: --file <path> or --mqtt-host <host>",

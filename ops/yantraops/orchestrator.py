@@ -13,6 +13,14 @@ Children (start order; shutdown is the reverse):
 4. ``uvicorn sarathi.app:app``   — the copilot API (skipped by --no-copilot)
 5. ``http.server``               — static console on an ephemeral port
 
+MQTT mode (``--mqtt``) swaps the robot-data path for the real VDA 5050
+wire: an MQTT broker (embedded amqtt on an ephemeral port, or an external
+``--broker host:port``), ``yantrasim --mqtt`` publishing per-vehicle VDA
+topics to it (skipped by ``--no-sim`` when real robots publish), and
+``python -m yantrabridge --mqtt-host ...`` subscribing and writing the
+same Supabase rows the sim would have written. Detector/notifier/copilot/
+console are unchanged, and so is the readiness probe (robots rows).
+
 Every port is ephemeral; the startup banner prints the console URL with
 ``?supa=...&key=...`` query params so the browser talks to the same backend.
 """
@@ -158,6 +166,8 @@ class StackInfo:
     console_url: str
     copilot_url: str | None
     services: list[dict[str, Any]] = field(default_factory=list)
+    mqtt_url: str | None = None       # mqtt://host:port when --mqtt is active
+    mqtt_embedded: bool = False       # True when yantraops owns the broker
 
 
 class FleetStack:
@@ -176,9 +186,15 @@ class FleetStack:
         quiet: bool = False,
         verbose: bool = False,
         open_browser: bool = True,
+        mqtt: bool = False,
+        mqtt_broker: str | None = None,
+        sim: bool = True,
     ) -> None:
         self.loopback = loopback
         self.copilot = copilot
+        self.mqtt = mqtt
+        self.mqtt_broker = mqtt_broker  # external "host[:port]", None=embedded
+        self.sim = sim
         self.url = url
         self.key = key
         self.sim_interval = sim_interval
@@ -191,6 +207,7 @@ class FleetStack:
 
         self.root = repo_root()
         self.fake: Any = None            # FakePostgREST instance in loopback mode
+        self.broker: Any = None          # EmbeddedBroker when --mqtt w/o --broker
         self.services: list[Service] = []
         self.info: StackInfo | None = None
         self._stopping = False
@@ -227,12 +244,38 @@ class FleetStack:
             self.services.append(svc)
             return svc
 
+        # MQTT wire (broker first — the sim and the bridge connect to it).
+        mqtt_host: str | None = None
+        mqtt_port: int | None = None
         try:
-            spawn("yantrasim", [
-                py, "-m", "yantrasim", "--supabase",
-                "--url", base_url, "--key", key,
-                "--interval", str(self.sim_interval),
-            ])
+            if self.mqtt:
+                from .broker import EmbeddedBroker, parse_broker
+                if self.mqtt_broker:
+                    mqtt_host, mqtt_port = parse_broker(self.mqtt_broker)
+                else:
+                    self.broker = EmbeddedBroker()
+                    mqtt_host, mqtt_port = self.broker.start()
+
+            if self.sim:
+                if self.mqtt:
+                    spawn("yantrasim", [
+                        py, "-m", "yantrasim", "--mqtt",
+                        "--broker", str(mqtt_host), "--port", str(mqtt_port),
+                        "--interval", str(self.sim_interval),
+                    ])
+                else:
+                    spawn("yantrasim", [
+                        py, "-m", "yantrasim", "--supabase",
+                        "--url", base_url, "--key", key,
+                        "--interval", str(self.sim_interval),
+                    ])
+            if self.mqtt:
+                spawn("yantrabridge", [
+                    py, "-m", "yantrabridge",
+                    "--mqtt-host", str(mqtt_host),
+                    "--mqtt-port", str(mqtt_port),
+                    "--supabase-url", base_url, "--supabase-key", key,
+                ], url=f"mqtt://{mqtt_host}:{mqtt_port}")
             spawn("yantradetect", [
                 py, "-m", "yantradetect", "--interval", str(self.detect_interval),
             ])
@@ -275,6 +318,8 @@ class FleetStack:
             base_url=base_url, key=key,
             console_url=console_url, copilot_url=copilot_url,
             services=[s.as_dict() for s in self.services],
+            mqtt_url=(f"mqtt://{mqtt_host}:{mqtt_port}" if self.mqtt else None),
+            mqtt_embedded=self.broker is not None,
         )
         self._write_state()
         self._t0 = time.time()
@@ -296,6 +341,9 @@ class FleetStack:
             except subprocess.TimeoutExpired:
                 svc.proc.kill()
                 svc.proc.wait(timeout=5)
+        if self.broker is not None:  # after the clients, before the backend
+            self.broker.stop()
+            self.broker = None
         if self.fake is not None:
             self.fake.stop()
             self.fake = None
@@ -355,6 +403,7 @@ class FleetStack:
             "key": self.info.key,
             "console_url": self.info.console_url,
             "copilot_url": self.info.copilot_url,
+            "mqtt_url": self.info.mqtt_url,
             "services": self.info.services,
         }, indent=2))
 
@@ -419,6 +468,10 @@ class FleetStack:
             "=" * 72,
             f"  {'backend':<{width}}{i.base_url}  (data API \u2014 not the UI; key: {key_label})",
         ]
+        if i.mqtt_url:
+            kind = "embedded" if i.mqtt_embedded else "external"
+            lines.append(f"  {'broker':<{width}}{i.mqtt_url}  ({kind})")
+            lines.append(f"  {'':<{width}}MQTT: VDA 5050 wire active")
         for svc in self.services:
             where = svc.url or "-"
             lines.append(f"  {svc.name:<{width}}pid {svc.proc.pid:<8}{where}")

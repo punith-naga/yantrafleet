@@ -1,4 +1,4 @@
-# YantraFleet — Test Report (v0.7.0)
+# YantraFleet — Test Report (v0.8.0)
 
 All suites executed offline in the build container, 2026-08-26.
 
@@ -6,14 +6,14 @@ All suites executed offline in the build container, 2026-08-26.
 |---|---|---|
 | core | 8 | canonical statuses + site_id helper |
 | sim | 59 | VDA translation, commands, telemetry, missions |
-| connector | 32 | untouched, no regression |
+| connector | 51 | untouched, no regression |
 | detector | 60 | incidents + maintenance engines |
-| notifier | 28 | dedup/digest + per-site filtering |
+| notifier | 59 | dedup/digest + per-site filtering |
 | copilot | 57 | incl. fake-LLM tier tests + grounding guard |
-| e2e | 13 | full-stack loopback vs fake PostgREST |
-| ops | 34 | orchestrator loopback smoke + subprocess run |
+| e2e | 16 | full-stack loopback vs fake PostgREST |
+| ops | 43 | orchestrator loopback smoke + subprocess run |
 | console (browser) | 27 | 10 Playwright/Chromium + 9 static |
-| **Total** | **318** | 0 failed |
+| **Total** | **380** | 0 failed |
 
 `node scripts/check_console.mjs` — clean.
 

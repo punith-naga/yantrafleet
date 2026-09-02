@@ -2,6 +2,8 @@
 
     python -m yantraops up                       # zero-cloud loopback demo
     python -m yantraops up --supabase            # against real Supabase
+    python -m yantraops up --mqtt                # real VDA 5050 MQTT wire
+    python -m yantraops up --supabase --mqtt --broker host:1883 --no-sim
     python -m yantraops up --no-copilot          # skip the sarathi API
     python -m yantraops up --duration 30         # exit cleanly after 30 s
     python -m yantraops status                   # ping the running stack
@@ -33,6 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
                       help="use real Supabase (flags/env/package defaults)")
     up.add_argument("--no-copilot", action="store_true",
                     help="skip the sarathi copilot API")
+    up.add_argument("--mqtt", action="store_true",
+                    help="robot data over a real MQTT VDA 5050 wire: broker + "
+                         "yantrasim --mqtt + yantrabridge (needs ops[mqtt])")
+    up.add_argument("--broker", default=None, metavar="HOST[:PORT]",
+                    help="external MQTT broker, e.g. a customer mosquitto "
+                         "(default with --mqtt: embedded broker on an "
+                         "ephemeral port)")
+    up.add_argument("--no-sim", action="store_true",
+                    help="do not start the simulator — real robots publish "
+                         "VDA 5050 to the broker (requires --mqtt)")
     up.add_argument("--duration", type=float, default=None, metavar="N",
                     help="exit cleanly after N seconds (default: run until Ctrl-C)")
     up.add_argument("--url", default=None, help="Supabase URL (supabase mode)")
@@ -83,6 +95,26 @@ MIGRATE_CMD = ('python -m yantraops migrate --db-url '
 
 
 def cmd_up(args: argparse.Namespace) -> int:
+    if args.broker and not args.mqtt:
+        print("yantraops: --broker requires --mqtt", file=sys.stderr)
+        return 2
+    if args.no_sim and not args.mqtt:
+        print("yantraops: --no-sim requires --mqtt (without the sim the only "
+              "robot-data source is a VDA 5050 broker)", file=sys.stderr)
+        return 2
+    if args.mqtt:
+        from .broker import mqtt_preflight, parse_broker
+        err = mqtt_preflight(embedded=args.broker is None)
+        if err:
+            print(f"yantraops: {err}", file=sys.stderr)
+            return 2
+        if args.broker:
+            try:
+                parse_broker(args.broker)
+            except ValueError as exc:
+                print(f"yantraops: {exc}", file=sys.stderr)
+                return 2
+
     if args.supabase:
         base_url, key = resolve_supabase(args.url, args.key)
         state, detail = preflight_supabase_schema(base_url, key)
@@ -113,6 +145,9 @@ def cmd_up(args: argparse.Namespace) -> int:
         quiet=args.quiet,
         verbose=args.verbose,
         open_browser=not args.no_open and not args.quiet,
+        mqtt=args.mqtt,
+        mqtt_broker=args.broker,
+        sim=not args.no_sim,
     )
     stack.start()
     if not args.quiet:

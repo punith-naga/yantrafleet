@@ -71,27 +71,52 @@ class Notifier:
 
     # -- dispatch -----------------------------------------------------------
 
-    def _broadcast(self, text: str) -> None:
+    def _each_channel(self, deliver) -> None:
         for ch in self.channels:
             try:
-                ch.send(text)
+                deliver(ch)
             except Exception as exc:  # defence in depth; channels shouldn't raise
                 log.warning("channel %s failed: %s", getattr(ch, "name", ch), exc)
+
+    def _broadcast_event(self, event: Event) -> None:
+        """Prefer a channel's structured ``send_event``; else plain text."""
+        def deliver(ch):
+            fn = getattr(ch, "send_event", None)
+            fn(event) if fn else ch.send(event.render())
+        self._each_channel(deliver)
+
+    def _broadcast_digest(self, events: Sequence[Event]) -> None:
+        """Prefer a channel's structured ``send_digest``; else plain text."""
+        def deliver(ch):
+            fn = getattr(ch, "send_digest", None)
+            fn(events) if fn else ch.send(render_digest(events))
+        self._each_channel(deliver)
+
+    def flush_channels(self) -> None:
+        """Give reliable channels a chance to retry queued items."""
+        def deliver(ch):
+            fn = getattr(ch, "flush", None)
+            if fn:
+                fn()
+        self._each_channel(deliver)
 
     def dispatch(self, events: Iterable[Event]) -> list[Event]:
         """Filter already-seen events, notify the rest, return what was new.
 
         More than :data:`DIGEST_THRESHOLD` new events -> one digest
-        message; otherwise one message per event.
+        message; otherwise one message per event. Channels wrapped in
+        :class:`~yantranotify.reliability.ReliableChannel` keep failed
+        items queued; every dispatch retries those first (no loss).
         """
+        self.flush_channels()
         new = [e for e in events if e.dedup_key not in self.seen]
         if not new:
             return []
         self.seen.update(e.dedup_key for e in new)
         if len(new) > DIGEST_THRESHOLD:
-            self._broadcast(render_digest(new))
+            self._broadcast_digest(new)
         else:
             for e in new:
-                self._broadcast(e.render())
+                self._broadcast_event(e)
         self._save_state()
         return new

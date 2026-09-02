@@ -113,6 +113,26 @@ class SupabaseSink:
                            resolution="ignore-duplicates")
         return len(rows)
 
+    def insert_telemetry(
+        self, rows: Iterable[dict[str, Any]], *, chunk_size: int = 500
+    ) -> int:
+        """Bulk-insert ``robot_telemetry`` history rows. Returns rows sent.
+
+        The table's primary key is a generated identity, so this is a plain
+        insert (no on_conflict); rows are chunked to keep request bodies
+        small on large imports.
+        """
+        rows = list(rows)
+        for group in _group_by_keyset(rows):
+            for i in range(0, len(group), chunk_size):
+                resp = self._client.post(
+                    "/robot_telemetry",
+                    json=group[i:i + chunk_size],
+                    headers={"Prefer": "return=minimal"},
+                )
+                resp.raise_for_status()
+        return len(rows)
+
     def heartbeat(self) -> None:
         """Upsert fleet_meta row 1 with our writer id + timestamp.
 

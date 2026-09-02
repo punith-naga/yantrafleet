@@ -46,6 +46,13 @@ class Event:
     id: str
     sev: str
     text: str  # rendered one-line human message (without severity tag)
+    # Structured extras for rich payload formats (Slack Block Kit, Discord
+    # embeds). All optional — plain-text rendering only uses ``text``.
+    msg: str | None = None     # alert message / incident title
+    src: str | None = None     # robot / source, e.g. "AMR-03"
+    site: str | None = None    # site_id, e.g. "BLR-DC1"
+    tlabel: str | None = None  # human time label, e.g. "14:07"
+    impact: str | None = None  # incidents only
 
     @property
     def dedup_key(self) -> str:
@@ -62,7 +69,11 @@ def _alert_event(row: dict[str, Any]) -> Event:
     if row.get("tlabel"):
         bits.append(f"at {row['tlabel']}")
     return Event("alert", str(row.get("id")), str(row.get("sev") or "crit"),
-                 " · ".join(bits))
+                 " · ".join(bits),
+                 msg=str(row.get("msg")) if row.get("msg") else None,
+                 src=str(row.get("src")) if row.get("src") else None,
+                 site=str(row.get("site_id")) if row.get("site_id") else None,
+                 tlabel=str(row.get("tlabel")) if row.get("tlabel") else None)
 
 
 def _incident_event(row: dict[str, Any]) -> Event:
@@ -70,7 +81,12 @@ def _incident_event(row: dict[str, Any]) -> Event:
     if row.get("impact"):
         bits.append(str(row["impact"]))
     return Event("incident", str(row.get("id")), str(row.get("sev") or "crit"),
-                 " · ".join(bits))
+                 " · ".join(bits),
+                 msg=str(row.get("title")) if row.get("title") else None,
+                 src=str(row.get("src")) if row.get("src") else None,
+                 site=str(row.get("site_id")) if row.get("site_id") else None,
+                 tlabel=str(row.get("tlabel")) if row.get("tlabel") else None,
+                 impact=str(row.get("impact")) if row.get("impact") else None)
 
 
 class AlertSource:

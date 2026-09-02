@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.8.0 — 2026-09-02
+- **MQTT VDA 5050 end-to-end**: `yantraops up --loopback --mqtt` runs an
+  embedded broker (amqtt) with sim publishing real VDA topics and the
+  connector bridging them in; `--supabase --mqtt --broker host:port
+  [--no-sim]` targets a customer's mosquitto with real robots.
+  Install extra: `pip install -e ops[mqtt]`.
+- **Deal-grade notifications**: Slack Block Kit / Discord embed / JSON
+  webhook formats, retry+backoff with no-loss pending queue, per-channel
+  circuit breaker, severity-grouped digests, and `yantranotify test`
+  to verify a webhook in 10 seconds.
+- **Bring-your-own-recording**: `yantrabridge import --mcap file.mcap`
+  (or --jsonl) imports any robot recording — VDA auto-detected or mapped
+  via --topic-map — into robots/telemetry/alerts with original
+  timestamps; --rate N live replay, --dry-run summary.
+  Install extra: `pip install -e connector[import]`.
+- 380 tests green across 9 suites.
+
 ## v0.7.0 — 2026-09-02
 - **One-command real-Supabase onboarding**: `yantraops migrate --db-url ...`
   applies supabase/*.sql in order with tracking/checksums/dry-run;
