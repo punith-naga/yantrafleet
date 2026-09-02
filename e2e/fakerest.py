@@ -133,6 +133,9 @@ class FakePostgREST:
         self._serial = 0
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        #: Set by an orchestrator so a human who opens the backend URL in a
+        #: browser gets bounced to the actual UI instead of a JSON 404.
+        self.console_url: str | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -235,6 +238,19 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
         table, params = self._route()
         if table is None:
+            # A browser landed on the DATA backend by mistake.
+            bare = self.path.split("?", 1)[0]
+            if bare in ("/", "/index.html", "/console", "/ui"):
+                if self.fake.console_url:
+                    self.send_response(302)
+                    self.send_header("Location", self.fake.console_url)
+                    self.end_headers()
+                    return None
+                return self._reply(200, {
+                    "service": "yantrafleet data backend (fake PostgREST)",
+                    "hint": "this is the API, not the UI — open the console "
+                            "URL from the READY line of `yantraops up`",
+                })
             return self._reply(404, {"message": f"unknown route {self.path}"})
         with self.fake.lock:
             self.fake.requests.append(("GET", self.path))

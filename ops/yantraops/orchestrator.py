@@ -135,6 +135,7 @@ class FleetStack:
         state_file: Path | str | None = None,
         quiet: bool = False,
         verbose: bool = False,
+        open_browser: bool = True,
     ) -> None:
         self.loopback = loopback
         self.copilot = copilot
@@ -146,6 +147,7 @@ class FleetStack:
         self.state_file = Path(state_file) if state_file else DEFAULT_STATE_FILE
         self.quiet = quiet
         self.verbose = verbose
+        self.open_browser = open_browser
 
         self.root = repo_root()
         self.fake: Any = None            # FakePostgREST instance in loopback mode
@@ -226,6 +228,8 @@ class FleetStack:
             self.stop()
             raise
 
+        if self.fake is not None:
+            self.fake.console_url = console_url  # browser-mistake redirect
         self.info = StackInfo(
             mode="loopback" if self.loopback else "supabase",
             base_url=base_url, key=key,
@@ -351,6 +355,12 @@ class FleetStack:
         state = "READY" if (robots_ok and sarathi_ok) else "PARTIAL (still warming up)"
         print(f"\n  \u2714 {state} in {took:.1f}s \u2014 open:  "
               f"{self.info.console_url}\n", flush=True)
+        if self.open_browser and robots_ok:
+            try:  # best-effort; headless/CI environments just skip
+                import webbrowser
+                webbrowser.open(self.info.console_url)
+            except Exception:
+                pass
         return took
 
     def _say(self, msg: str) -> None:
@@ -367,7 +377,7 @@ class FleetStack:
             "=" * 72,
             f"YantraFleet up — mode: {i.mode}",
             "=" * 72,
-            f"  {'backend':<{width}}{i.base_url}  (key: {key_label})",
+            f"  {'backend':<{width}}{i.base_url}  (data API \u2014 not the UI; key: {key_label})",
         ]
         for svc in self.services:
             where = svc.url or "-"
