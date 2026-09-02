@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import socket
 import threading
 import time
@@ -209,6 +210,17 @@ def console_url(console_server: str, fake) -> str:
             f"?supa={base}&key=test&site=BLR-DC1")
 
 
+@pytest.fixture(autouse=True)
+def _tour_already_seen(page: Page):
+    """Pre-mark the first-run tour as seen so it never overlays other tests.
+
+    The tour test below uses ``context.new_page()`` (a page *without* this
+    init script) to exercise the real first-visit behaviour.
+    """
+    page.add_init_script(
+        "try{localStorage.setItem('yf_tour_done','1')}catch(e){}")
+
+
 # -------------------------------------------------------------------- helpers
 
 def rows(fake_store: ConsoleFake, table: str) -> list[dict[str, Any]]:
@@ -364,3 +376,170 @@ def test_defaults_unchanged_without_params(page: Page, console_server: str) -> N
     assert page.evaluate("SUPA_URL") == "https://flwyvhsmgrrqpmhcqlzd.supabase.co"
     assert page.evaluate("SUPA_KEY").startswith("sb_publishable_")
     assert page.evaluate("window.SITE") is None
+
+
+# ------------------------------------------------- command palette / shortcuts
+
+def test_palette_opens_and_navigates(page: Page, console_url: str) -> None:
+    """Ctrl+K opens the palette; fuzzy-typing a view + Enter navigates to it."""
+    open_live(page, console_url)
+    page.keyboard.press("Control+k")
+    expect(page.locator("#palette")).to_be_visible()
+    expect(page.locator("#pal-in")).to_be_focused()
+    # every view is offered as an entry
+    expect(page.locator("#pal-list")).to_contain_text("Go to Maintenance")
+    page.locator("#pal-in").fill("maintenance")
+    expect(page.locator("#pal-list .pal-it.sel")).to_contain_text("Go to Maintenance")
+    page.keyboard.press("Enter")
+    expect(page.locator("#palette")).to_be_hidden()
+    expect(page.locator("#v-maint")).to_be_visible()
+    expect(page.locator("#v-maint h1")).to_have_text("Maintenance")
+    # Esc closes a re-opened palette
+    page.keyboard.press("Control+k")
+    expect(page.locator("#palette")).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(page.locator("#palette")).to_be_hidden()
+
+
+def test_palette_jumps_to_robot_drawer(page: Page, console_url: str) -> None:
+    """A robot entry in the palette opens that robot's telemetry drawer."""
+    open_live(page, console_url)
+    page.keyboard.press("Control+k")
+    page.locator("#pal-in").fill("amr-05")
+    expect(page.locator("#pal-list .pal-it.sel")).to_contain_text("AMR-05")
+    page.keyboard.press("Enter")
+    drawer = page.locator("#drawer")
+    expect(drawer).to_have_class(re.compile(r"\bopen\b"))
+    expect(drawer.locator(".dh h2")).to_have_text("AMR-05")
+
+
+def test_palette_ask_sarathi_routes_to_copilot(page: Page, console_url: str) -> None:
+    """Free text becomes an 'Ask Sarathi' entry that lands in Copilot.ask()."""
+    open_live(page, console_url)
+    page.keyboard.press("Control+k")
+    page.locator("#pal-in").fill("how is the fleet doing right now?")
+    ask = page.locator("#pal-list .pal-it", has_text="Ask Sarathi")
+    expect(ask).to_be_visible()
+    ask.click()
+    expect(page.locator("#palette")).to_be_hidden()
+    expect(page.locator("#copilot")).to_have_class(re.compile(r"\bopen\b"))
+    expect(page.locator("#cp-body .msg.user")).to_contain_text(
+        "how is the fleet doing right now?")
+    # sarathi is unreachable in tests -> the local engine must still answer
+    expect(page.locator("#cp-body .msg.ai").last).to_contain_text(
+        "Fleet is", timeout=15_000)
+
+
+def test_copilot_toggle_moved_to_ctrl_j(page: Page, console_url: str) -> None:
+    """Ctrl+J now toggles the copilot; Ctrl+K opens the palette instead."""
+    open_live(page, console_url)
+    copilot = page.locator("#copilot")
+    page.keyboard.press("Control+j")
+    expect(copilot).to_have_class(re.compile(r"\bopen\b"))
+    page.keyboard.press("Control+j")
+    expect(copilot).not_to_have_class(re.compile(r"\bopen\b"))
+    page.keyboard.press("Control+k")
+    expect(page.locator("#palette")).to_be_visible()
+    expect(copilot).not_to_have_class(re.compile(r"\bopen\b"))
+    # header button hint updated to the new shortcut
+    expect(page.locator("#btn-copilot")).to_contain_text("J")
+
+
+def test_ack_all_info_alerts_patches_backend(
+        page: Page, console_url: str, fake) -> None:
+    """'Ack all info alerts' acks only info alerts and PATCHes the backend."""
+    _, store = fake
+    with store.lock:
+        store.tables["alerts"].append({
+            "id": "AL-T9", "sev": "info",
+            "msg": "Seeded firmware notice for the whole fleet",
+            "src": "fleet", "tlabel": "13:22", "ack": False,
+            "created_at": _now_iso(),
+        })
+    open_live(page, console_url)
+    page.wait_for_function("store.alerts.some(a=>a.id==='AL-T9' && !a.ack)")
+    page.keyboard.press("Control+k")
+    page.locator("#pal-in").fill("ack all info")
+    expect(page.locator("#pal-list .pal-it.sel")).to_contain_text(
+        "Ack all info alerts")
+    page.keyboard.press("Enter")
+    wait_until(
+        lambda: any(r["id"] == "AL-T9" and r.get("ack") is True
+                    for r in rows(store, "alerts")),
+        "info alert AL-T9 to be PATCHed to ack=true")
+    # the critical alert must NOT have been acked
+    assert any(r["id"] == "AL-T1" and not r.get("ack")
+               for r in rows(store, "alerts")), "crit alert was wrongly acked"
+
+
+# ----------------------------------------------------------- shift report
+
+def test_shift_report_window_opens_with_kpis(
+        page: Page, console_url: str, context) -> None:
+    """The Overview button opens a printable report window with live KPIs."""
+    open_live(page, console_url)
+    # wait for the first alerts pull so the report compiles backend state
+    expect(page.locator("#ov-alerts")).to_contain_text(SEED_ALERT_MSG,
+                                                       timeout=15_000)
+    with context.expect_page() as popup_info:
+        page.locator("#btn-shift-report").click()
+    report = popup_info.value
+    body = report.locator("body")
+    expect(body).to_contain_text("Shift report — BLR-DC1", timeout=15_000)
+    expect(body).to_contain_text("KPI summary")
+    expect(body).to_contain_text("Fleet health")
+    expect(body).to_contain_text("Unacknowledged alerts")
+    expect(body).to_contain_text(SEED_ALERT_MSG)     # live alert made it in
+    expect(body).to_contain_text(SEED_INC_TITLE)     # live incident made it in
+    expect(body).to_contain_text("Mission summary")
+    expect(body).to_contain_text("Generated by YantraFleet")
+    # print-CSS + both toolbar actions are present
+    expect(report.locator("#sr-print")).to_be_visible()
+    expect(report.locator("#sr-copy")).to_be_visible()
+    assert "@media print" in report.content()
+    report.close()
+
+
+def test_shift_report_in_palette(page: Page, console_url: str, context) -> None:
+    """'Shift report' is also a palette entry."""
+    open_live(page, console_url)
+    page.keyboard.press("Control+k")
+    page.locator("#pal-in").fill("shift report")
+    expect(page.locator("#pal-list .pal-it.sel")).to_contain_text("Shift report")
+    with context.expect_page() as popup_info:
+        page.keyboard.press("Enter")
+    report = popup_info.value
+    expect(report.locator("body")).to_contain_text(
+        "Generated by YantraFleet", timeout=15_000)
+    report.close()
+
+
+# ----------------------------------------------------------- first-run tour
+
+def test_tour_shows_on_first_visit_not_after_dismissal(
+        context, console_url: str) -> None:
+    """The 5-step tour overlays a fresh browser profile once; skipping it sets
+    the localStorage flag and it never comes back — the ? button replays it."""
+    p2 = context.new_page()          # no init script -> genuine first visit
+    p2.goto(console_url)
+    card = p2.locator("#tour-card")
+    expect(card).to_be_visible(timeout=15_000)
+    expect(card).to_contain_text("Live map")
+    expect(card).to_contain_text("1 / 5")
+    p2.locator("#tour-next").click()
+    expect(card).to_contain_text("Alerts & acknowledge")
+    expect(card).to_contain_text("2 / 5")
+    p2.locator("#tour-skip").click()
+    expect(card).to_be_hidden()
+    assert p2.evaluate("localStorage.getItem('yf_tour_done')") == "1"
+    # reload: same origin + storage -> the tour must NOT reappear
+    p2.goto(console_url)
+    expect(p2.locator("#ov-health")).to_be_visible(timeout=15_000)
+    p2.wait_for_timeout(1500)        # past the 600 ms first-run delay
+    expect(card).to_be_hidden()
+    # ...but the header ? button replays it on demand
+    p2.locator("#btn-tour").click()
+    expect(card).to_be_visible()
+    expect(card).to_contain_text("1 / 5")
+    p2.locator("#tour-skip").click()
+    p2.close()

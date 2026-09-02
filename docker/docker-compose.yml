@@ -1,0 +1,23 @@
+# YantraFleet loopback demo — single service.
+#
+#   docker compose -f docker/docker-compose.yml up --build
+#
+# Uses host networking because the orchestrator binds 127.0.0.1 on ephemeral
+# ports (no fixed ports to publish). Host networking is fully supported on
+# Linux; on Docker Desktop (macOS/Windows) it needs the "host networking"
+# feature enabled (Docker Desktop 4.34+) — see docker/README.md for details
+# and alternatives.
+services:
+  yantrafleet:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: yantrafleet
+    network_mode: host
+    init: true            # reap the orchestrator's child processes
+    stop_grace_period: 15s  # yantraops needs a few seconds to stop children
+    # Optional: run against a real Supabase project instead of loopback.
+    # environment:
+    #   SUPABASE_URL: https://YOURPROJECT.supabase.co
+    #   SUPABASE_KEY: your-anon-key
+    # command: ["python", "-m", "yantraops", "up", "--supabase", "--no-open"]

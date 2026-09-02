@@ -41,6 +41,15 @@ maintenance_findings(id, robot_id, component, finding, rul_days, confidence,
 ## Quickstart — 60 seconds, zero config
 
 ```bash
+./install.sh --run              # Linux/macOS: venv + install + start
+```
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -Run   # Windows
+```
+
+Or by hand (any OS, in a venv of your choosing):
+
+```bash
 pip install -e core -e sim -e connector -e detector -e notifier -e ops
 pip install -r copilot/requirements.txt
 python -m yantraops up --loopback
@@ -51,6 +60,48 @@ copilot — running against an embedded in-memory backend. No Supabase, no
 keys, no robots. Add `--supabase` (plus the migrations in supabase/) to run
 against your real project. `python -m yantraops status` health-checks a
 running stack.
+
+## Install
+
+The one-shot installers create a `.venv` in the repo root, install the six
+Python packages editable plus the copilot requirements, and print the exact
+command to start the demo. Both are idempotent — re-run them any time to
+refresh an install. Python 3.10+ is required (the scripts find one for you
+or tell you where to get it).
+
+```bash
+# Linux/macOS
+./install.sh            # install only
+./install.sh --run      # install, then start the loopback demo
+```
+
+```powershell
+# Windows (PowerShell 5.1+; no venv activation needed)
+powershell -ExecutionPolicy Bypass -File install.ps1        # install only
+powershell -ExecutionPolicy Bypass -File install.ps1 -Run   # install + start
+```
+
+Afterwards, start the demo any time with:
+
+```bash
+.venv/bin/python -m yantraops up --loopback          # Linux/macOS
+```
+```bat
+.venv\Scripts\python.exe -m yantraops up --loopback  :: Windows
+```
+
+## Docker
+
+```bash
+docker build -f docker/Dockerfile -t yantrafleet .
+docker run --rm --init --network host yantrafleet     # Linux
+```
+
+or `docker compose -f docker/docker-compose.yml up --build`. Open the
+console URL from the `✔ READY` line. The stack binds 127.0.0.1 on ephemeral
+ports, so `-p` port publishing cannot reach it — host networking is the
+supported path (Linux; Docker Desktop needs its host-networking option).
+Details, headless/CI usage, and the macOS/Windows story: `docker/README.md`.
 
 ## Manual quickstart (Windows)
 

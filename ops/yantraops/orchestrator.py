@@ -90,6 +90,46 @@ def resolve_supabase(url: str | None, key: str | None) -> tuple[str, str]:
         return resolved_url.rstrip("/"), resolved_key
 
 
+def preflight_supabase_schema(
+    base_url: str, key: str, transport: Any = None,
+) -> tuple[str, str]:
+    """Probe ``{url}/rest/v1/robots?limit=1`` before spawning any children.
+
+    Returns ``(status, detail)`` where status is one of:
+
+    * ``"ok"``             — robots table answered 200
+    * ``"schema-missing"`` — 404-ish / PostgREST "relation does not exist"
+    * ``"auth"``           — 401/403 (bad or missing key)
+    * ``"unreachable"``    — network-level failure
+    * ``"unknown"``        — anything else
+
+    ``transport`` is handed to ``httpx.Client`` so tests can inject a
+    ``httpx.MockTransport`` — no network needed.
+    """
+    import httpx
+    headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+    try:
+        with httpx.Client(timeout=5.0, transport=transport) as client:
+            resp = client.get(f"{base_url}/rest/v1/robots",
+                              params={"limit": "1"}, headers=headers)
+    except Exception as exc:
+        return "unreachable", f"{type(exc).__name__}: {exc}"
+    if resp.status_code == 200:
+        return "ok", "robots table found"
+    body = resp.text[:300]
+    table_missing = (
+        resp.status_code == 404
+        or "PGRST205" in body          # PostgREST: table not in schema cache
+        or "42P01" in body             # Postgres: undefined_table
+        or "does not exist" in body
+    )
+    if table_missing:
+        return "schema-missing", f"HTTP {resp.status_code}: {body}"
+    if resp.status_code in (401, 403):
+        return "auth", f"HTTP {resp.status_code}: {body}"
+    return "unknown", f"HTTP {resp.status_code}: {body}"
+
+
 # --------------------------------------------------------------------------
 # Stack
 # --------------------------------------------------------------------------

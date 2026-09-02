@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.7.0 — 2026-09-02
+- **One-command real-Supabase onboarding**: `yantraops migrate --db-url ...`
+  applies supabase/*.sql in order with tracking/checksums/dry-run;
+  `up --supabase` preflights the schema and tells you exactly what to run.
+- **`yantraops doctor`**: PASS/WARN/FAIL environment preflight ending in the
+  exact next command.
+- **Installers**: `install.ps1` (Windows, PS 5.1-safe) and `install.sh` —
+  venv + all packages + doctor in one run (`-Run` starts the demo);
+  `docker/` packaging for Linux/CI.
+- **Console**: printable **Shift Report** (Print/Save-as-PDF + copy-as-
+  Markdown), **command palette** (Ctrl/Cmd+K: navigate, jump to robot,
+  ask Sarathi, ack all info; copilot moved to Ctrl/Cmd+J), **first-run
+  guided tour** (5 steps, replay via ?).
+- 318 tests green across 9 suites (27 console incl. 18 real-browser).
+
 ## v0.6.0 — 2026-08-26
 - **`yantraops` one-command orchestrator**: `python -m yantraops up --loopback`
   boots the entire platform (fakerest backend, sim, detector, notifier,

@@ -4,8 +4,10 @@ One-command orchestrator for the YantraFleet demo stack.
 
 ```bash
 pip install -e ops/
+python -m yantraops doctor        # environment preflight (PASS/WARN/FAIL)
 python -m yantraops up            # full zero-cloud demo (loopback backend)
 python -m yantraops status        # ping the running stack, print a table
+python -m yantraops migrate --db-url "postgresql://..."   # apply supabase/*.sql
 ```
 
 ## What `up` starts
@@ -33,12 +35,18 @@ python -m yantraops up [--loopback|--supabase] [--no-copilot] [--duration N]
                        [--sim-interval S] [--detect-interval S] [--notify-interval S]
                        [--state-file PATH] [--quiet]
 python -m yantraops status [--state-file PATH]
+python -m yantraops doctor
+python -m yantraops migrate --db-url URL [--dir DIR] [--dry-run] [--force]
+                            [--print-order]
 ```
 
 * `--loopback` (default): zero-cloud demo against the in-process fake PostgREST.
 * `--supabase`: real Supabase; config precedence is flag > env
   (`SUPABASE_URL`/`SUPABASE_KEY`) > the client-safe defaults embedded in the
-  packages.
+  packages. Before spawning anything, `up --supabase` probes
+  `{url}/rest/v1/robots?limit=1`; if the answer says the table is missing it
+  prints `schema missing — run: python -m yantraops migrate --db-url ...`
+  and exits with code 2 (a bad key also exits 2, with a key hint).
 * `--no-copilot`: skip the sarathi FastAPI service.
 * `--duration N`: shut the stack down cleanly after N seconds (handy for
   demos and CI).
@@ -46,6 +54,31 @@ python -m yantraops status [--state-file PATH]
   `~/.yantraops-state.json`, override with `YANTRAOPS_STATE`). `status` reads
   the same file, pings every port, and exits non-zero if anything is down.
   The file only ever contains the client-safe anon key.
+
+## `doctor` — environment preflight
+
+Prints a `PASS`/`WARN`/`FAIL` line for every prerequisite: Python >= 3.10,
+each yantra package importable (`yantracore`, `yantrasim`, `yantrabridge`,
+`yantradetect`, `yantranotify`, plus `sarathi` found via `copilot/`),
+`httpx`/`fastapi`/`uvicorn` installed, `console/index.html` present,
+Supabase reachability (only if `SUPABASE_URL` is set; a blocked network is a
+WARN, not a FAIL), and that ephemeral-port allocation works. Ends with a
+one-line verdict plus the exact next command — `python -m yantraops up
+--loopback` when green, or the `pip install ...` line that fixes whatever
+failed. Exit code is 0 only when nothing FAILed.
+
+## `migrate` — apply the Supabase schema
+
+Applies `supabase/*.sql` in filename order over a direct Postgres
+connection (psycopg, installed with `pip install -e ops/`). Tracks applied
+files in `_yf_migrations` (filename, applied_at, checksum), skips
+already-applied files, warns when a file changed after being applied
+(`--force` reapplies it), and runs **each file in its own transaction** so a
+failure never leaves a half-applied file — the error names the failing file
+and gives a `psql` hint. `--dry-run` lists what would run; `--print-order`
+just prints the file order and needs neither a database nor psycopg. See
+[`supabase/README.md`](../supabase/README.md) for where the `--db-url`
+comes from and the SQL-editor fallback.
 
 ## Shutdown
 
@@ -63,3 +96,9 @@ The loopback smoke test starts the whole stack on ephemeral ports, polls the
 fake backend until robot rows and an alert/incident exist, asks sarathi a
 question and asserts an offline-tier grounded answer, then asserts every
 child exited cleanly. No hardcoded ports anywhere.
+
+The `migrate` planner/tracker is tested offline against a fake backend that
+records executed files (no postgres needed); `doctor`'s checks run against
+monkeypatched importers/sockets/HTTP; and the `up --supabase` preflight is
+tested with an `httpx.MockTransport` plus a tiny local HTTP stub that
+answers like PostgREST with no schema.

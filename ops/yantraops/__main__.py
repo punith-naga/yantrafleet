@@ -1,10 +1,12 @@
-"""CLI: ``python -m yantraops up|status``.
+"""CLI: ``python -m yantraops up|status|migrate|doctor``.
 
     python -m yantraops up                       # zero-cloud loopback demo
     python -m yantraops up --supabase            # against real Supabase
     python -m yantraops up --no-copilot          # skip the sarathi API
     python -m yantraops up --duration 30         # exit cleanly after 30 s
     python -m yantraops status                   # ping the running stack
+    python -m yantraops doctor                   # environment preflight
+    python -m yantraops migrate --db-url URL     # apply supabase/*.sql
 """
 from __future__ import annotations
 
@@ -12,7 +14,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from .orchestrator import DEFAULT_STATE_FILE, FleetStack
+from .orchestrator import (DEFAULT_STATE_FILE, FleetStack,
+                           preflight_supabase_schema, resolve_supabase)
 from .status import run_status
 
 
@@ -52,10 +55,52 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("status", help="ping the ports of a running stack")
     st.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE,
                     help=f"state file written by `up` (default {DEFAULT_STATE_FILE})")
+
+    mig = sub.add_parser(
+        "migrate", help="apply supabase/*.sql migrations to a real database")
+    mig.add_argument("--db-url", default=None, metavar="URL",
+                     help='Postgres connection string, e.g. "postgresql://'
+                          'postgres:<password>@db.<ref>.supabase.co:5432/postgres" '
+                          "(see supabase/README.md)")
+    mig.add_argument("--dir", type=Path, default=None, metavar="DIR",
+                     help="migrations directory (default: <repo>/supabase)")
+    mig.add_argument("--dry-run", action="store_true",
+                     help="connect, list what would be applied, change nothing")
+    mig.add_argument("--force", action="store_true",
+                     help="reapply migrations whose checksum changed since "
+                          "they were first applied")
+    mig.add_argument("--print-order", action="store_true",
+                     help="just print the filename order (no DB, no psycopg)")
+
+    sub.add_parser(
+        "doctor", help="environment preflight: PASS/WARN/FAIL checks")
     return p
 
 
+MIGRATE_CMD = ('python -m yantraops migrate --db-url '
+               '"postgresql://postgres:<password>@db.<project-ref>'
+               '.supabase.co:5432/postgres"')
+
+
 def cmd_up(args: argparse.Namespace) -> int:
+    if args.supabase:
+        base_url, key = resolve_supabase(args.url, args.key)
+        state, detail = preflight_supabase_schema(base_url, key)
+        if state == "schema-missing":
+            print(f"yantraops: schema missing — run: {MIGRATE_CMD}\n"
+                  f"  (probe of {base_url}/rest/v1/robots said: {detail};\n"
+                  "   see supabase/README.md for where to find the db-url)",
+                  file=sys.stderr)
+            return 2
+        if state == "auth":
+            print("yantraops: Supabase rejected the key "
+                  f"({detail}) — check --key / SUPABASE_KEY (use the anon key "
+                  "from Settings -> API in the dashboard)", file=sys.stderr)
+            return 2
+        if state != "ok":
+            print(f"yantraops: WARNING supabase preflight inconclusive "
+                  f"({state}: {detail}); starting anyway", file=sys.stderr)
+
     stack = FleetStack(
         loopback=not args.supabase,
         copilot=not args.no_copilot,
@@ -80,6 +125,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "up":
         return cmd_up(args)
+    if args.command == "migrate":
+        from .migrate import run_migrate  # lazy: --print-order needs zero deps
+        return run_migrate(args.db_url, args.dir, dry_run=args.dry_run,
+                           force=args.force, print_order=args.print_order)
+    if args.command == "doctor":
+        from .doctor import run_doctor
+        return run_doctor()
     return run_status(args.state_file)
 
 
