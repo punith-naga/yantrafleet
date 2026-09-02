@@ -14,6 +14,12 @@ Live MQTT bridge (requires paho-mqtt)::
 
     python -m yantrabridge --mqtt-host broker.local --mqtt-port 1883
 
+Live MQTT bridge that also executes operator commands (polls approved
+``commands`` rows, publishes VDA 5050 instantActions, closes rows from
+the actionStates in the robots' state messages)::
+
+    python -m yantrabridge --mqtt-host broker.local --commands
+
 Import a recording (bring-your-own-recording; requires the ``import`` extra
 for MCAP files)::
 
@@ -63,6 +69,17 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--battery-threshold", type=float,
                      default=BATTERY_ALERT_THRESHOLD,
                      help="low-battery alert threshold in %% (default: %(default)s)")
+    out.add_argument("--site", help="stamp site_id on written rows and only "
+                                    "poll commands for this site")
+
+    cmds = p.add_argument_group("commands (MQTT mode)")
+    cmds.add_argument("--commands", action="store_true",
+                      help="poll approved operator commands and publish them "
+                           "as VDA 5050 instantActions; command rows are "
+                           "closed (executed/failed) from the actionStates "
+                           "in the robots' state messages")
+    cmds.add_argument("--commands-interval", type=float, default=2.0,
+                      help="seconds between command polls (default: %(default)s)")
     return p
 
 
@@ -179,9 +196,18 @@ def run_import(argv: list[str]) -> int:
         return 1
 
 
+def _stamp_site(rows: list[dict[str, Any]], site: str | None) -> None:
+    """Stamp ``site_id`` on outgoing rows when --site was given."""
+    if site:
+        for row in rows:
+            row["site_id"] = site
+
+
 def run_file(args: argparse.Namespace) -> int:
     translator = Translator(battery_threshold=args.battery_threshold)
     robots, alerts = translator.feed_many(read_jsonl(args.file))
+    _stamp_site(robots, args.site)
+    _stamp_site(alerts, args.site)
 
     if args.dry_run:
         _print_rows("robots (upsert)", robots)
@@ -197,13 +223,20 @@ def run_file(args: argparse.Namespace) -> int:
 
 
 def run_mqtt(args: argparse.Namespace) -> int:
+    import threading
+
     translator = Translator(battery_threshold=args.battery_threshold)
     sink: SupabaseSink | None = None
     if not args.dry_run:
         sink = SupabaseSink(args.supabase_url, args.supabase_key)
+    publisher = None  # set below when --commands; on_state reads the closure
 
     def on_state(msg: dict[str, Any]) -> None:
+        if publisher is not None:
+            publisher.handle_state(msg)  # learn identity + close acked cmds
         robot, alerts = translator.feed(msg)
+        _stamp_site([robot], args.site)
+        _stamp_site(alerts, args.site)
         if args.dry_run:
             _print_rows("robot", [robot])
             if alerts:
@@ -222,6 +255,26 @@ def run_mqtt(args: argparse.Namespace) -> int:
         username=args.mqtt_username,
         password=args.mqtt_password,
     )
+
+    stop_polling = threading.Event()
+    poll_thread: threading.Thread | None = None
+    if args.commands:
+        from yantrabridge.commands import CommandPublisher
+
+        publisher = CommandPublisher(
+            source.publish, args.supabase_url, args.supabase_key,
+            site=args.site)
+
+        def _poll_loop() -> None:
+            while not stop_polling.wait(args.commands_interval):
+                publisher.poll()
+
+        poll_thread = threading.Thread(
+            target=_poll_loop, name="yantrabridge-commands", daemon=True)
+        poll_thread.start()
+        print(f"command gate: polling approved commands every "
+              f"{args.commands_interval}s -> instantActions")
+
     print(f"connecting to mqtt://{args.mqtt_host}:{args.mqtt_port} "
           f"topic '{args.mqtt_topic}' (ctrl-c to stop)")
     try:
@@ -229,6 +282,11 @@ def run_mqtt(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         source.stop()
     finally:
+        stop_polling.set()
+        if poll_thread is not None:
+            poll_thread.join(timeout=5)
+        if publisher is not None:
+            publisher.close()
         if sink is not None:
             sink.close()
     return 0
@@ -243,6 +301,10 @@ def main(argv: list[str] | None = None) -> int:
     if bool(args.file) == bool(args.mqtt_host):
         print("error: choose exactly one source: --file <path> or --mqtt-host <host>",
               file=sys.stderr)
+        return 2
+    if args.commands and (not args.mqtt_host or args.dry_run):
+        print("error: --commands needs live MQTT mode "
+              "(--mqtt-host, without --dry-run)", file=sys.stderr)
         return 2
     return run_file(args) if args.file else run_mqtt(args)
 

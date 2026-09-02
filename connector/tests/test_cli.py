@@ -62,3 +62,21 @@ class TestCliDryRun:
         assert main([]) == 2
         assert main(["--file", "x.jsonl", "--mqtt-host", "h"]) == 2
         assert "exactly one source" in capsys.readouterr().err
+
+    def test_commands_requires_live_mqtt_mode(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # file source can't execute commands; dry-run can't PATCH acks
+        assert main(["--file", str(SAMPLE), "--commands"]) == 2
+        assert main(["--mqtt-host", "h", "--commands", "--dry-run"]) == 2
+        err = capsys.readouterr().err
+        assert "--commands needs live MQTT mode" in err
+
+    def test_site_flag_stamps_rows(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        rc = main(["--file", str(SAMPLE), "--dry-run", "--site", "PNQ-DC2"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        rows = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
+        assert rows and all(r["site_id"] == "PNQ-DC2" for r in rows)

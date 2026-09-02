@@ -97,6 +97,17 @@ class MqttSource:
         except Exception as exc:  # never let one bad message kill the loop
             print(f"[yantrabridge] error handling state message: {exc}")
 
+    # publishing ------------------------------------------------------------
+
+    def publish(self, topic: str, payload: str, qos: int = 0) -> None:
+        """Publish one message on this source's client (thread-safe in paho).
+
+        Used by :class:`yantrabridge.commands.CommandPublisher` to send
+        VDA instantActions over the same broker connection the bridge is
+        already consuming state from.
+        """
+        self._client.publish(topic, payload, qos=qos)
+
     # lifecycle -------------------------------------------------------------
 
     def run_forever(self) -> None:

@@ -63,6 +63,7 @@ class MqttWorld:
 
     def __init__(self) -> None:
         from yantraops.broker import EmbeddedBroker
+        from yantrabridge.commands import CommandPublisher
         from yantrabridge.sink import SupabaseSink
         from yantrabridge.sources import MqttSource
         from yantrabridge.translate import Translator
@@ -78,8 +79,15 @@ class MqttWorld:
         self.translator = Translator()
         self.sink = SupabaseSink(self.base_url, "test-key")
         self.pushed = 0
+        # command gate: approved rows -> instantActions; acked by the
+        # actionStates the sim's state messages carry back (v0.9).
+        # source.publish is bound lazily via self — source exists below.
+        self.publisher = CommandPublisher(
+            lambda topic, payload: self.source.publish(topic, payload),
+            self.base_url, "test-key")
 
         def on_state(msg: dict[str, Any]) -> None:
+            self.publisher.handle_state(msg)
             robot, alerts = self.translator.feed(msg)
             self.sink.push([robot], alerts)
             self.pushed += 1
@@ -128,6 +136,7 @@ class MqttWorld:
         self.transport.close()
         self.source.stop()
         self.source_thread.join(timeout=10)
+        self.publisher.close()
         self.sink.close()
         self.broker.stop()
         self.fake.stop()
@@ -199,3 +208,60 @@ def test_fault_alert_flows_through(world: MqttWorld) -> None:
     fault_alerts = [a for a in alerts if a["src"] == "AMR_09"]
     world.sink.push([], fault_alerts)
     assert len(world.rows("alerts")) == before
+
+
+# --------------------------------------------------------------------------
+# 3. Operator command round trip: commands table -> instantActions over the
+#    real broker -> sim applies -> actionStates in the next state message ->
+#    bridge PATCHes the row executed. The full VDA 5050 loop, v0.9.
+# --------------------------------------------------------------------------
+
+def test_command_round_trip_over_mqtt(world: MqttWorld) -> None:
+    import uuid
+
+    from yantrasim.commands import apply_command
+
+    # pick a robot the pause verb is guaranteed to succeed on
+    robot = next(r for r in world.sim.robots
+                 if r.status in ("idle", "moving", "working",
+                                 "to_charger", "charging"))
+    serial = robot.robot_id.replace("-", "_")
+    cid = str(uuid.uuid4())
+
+    # console wrote pending, a human approved -> approved row in the table
+    resp = world.http.post("/commands", json=[{
+        "id": cid, "robot_id": serial, "cmd": "pause",
+        "status": "approved", "requested_by": "console",
+        "decided_by": "e2e-human", "created_at": "2026-09-02T10:00:00Z"}])
+    resp.raise_for_status()
+
+    # bridge publishes it exactly once as VDA instantActions
+    assert world.publisher.poll() == 1, "approved command was not published"
+    assert world.publisher.poll() == 0, "in-memory dedupe must hold"
+
+    # sim receives it over the real broker and applies it on its own thread
+    applied = world.wait_for(
+        lambda: world.transport.poll_commands(
+            lambda rid, cmd: apply_command(world.sim, rid, cmd)),
+        FLOW_BUDGET_S)
+    assert applied == 1, "instantActions never reached the simulator"
+    assert robot.status == "paused"
+
+    # the next state messages carry the actionState ack; the bridge sees it
+    # and closes the command row — keep ticking until the PATCH lands.
+    def executed() -> list[dict[str, Any]]:
+        world.transport.publish(world.sim.tick())
+        rows = world.rows("commands", id=f"eq.{cid}")
+        return rows if rows and rows[0]["status"] == "executed" else []
+
+    rows = world.wait_for(executed, FLOW_BUDGET_S)
+    assert rows, "command row never reached status=executed"
+    assert "paused" in (rows[0]["note"] or "")
+    assert rows[0]["executed_at"]
+
+    # and the robots table converges on the commanded state via the bridge
+    paused = world.wait_for(
+        lambda: [r for r in world.rows("robots", id=f"eq.{serial}")
+                 if r["status"] == "paused"],
+        FLOW_BUDGET_S)
+    assert paused, "robots table never showed the commanded 'paused' status"
