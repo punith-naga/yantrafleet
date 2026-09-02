@@ -462,3 +462,47 @@ def test_maintenance_engine_roundtrip() -> None:
         finally:
             sink.close()
             fake.stop()
+
+
+# --------------------------------------------------------------------------
+# 7. Ops stack serves the academy alongside the console (v0.9.x)
+# --------------------------------------------------------------------------
+
+def test_ops_stack_serves_academy() -> None:
+    """`yantraops up --loopback` exposes the academy on the same static
+    server as the console: GET the academy URL -> 200, page names the
+    product. Skips cleanly when academy/ has not been built yet."""
+    import tempfile
+    import time
+
+    pytest.importorskip("yantraops")
+    from yantraops.orchestrator import FleetStack
+
+    if not (REPO / "academy" / "index.html").is_file():
+        pytest.skip("academy/index.html not present in this checkout")
+
+    with tempfile.TemporaryDirectory() as td:
+        stack = FleetStack(
+            loopback=True, copilot=False, sim=False,  # just backend + statics
+            state_file=Path(td) / "state.json",
+            quiet=True, open_browser=False,
+        )
+        try:
+            info = stack.start()
+            assert info.academy_url, "academy/ exists but academy_url is unset"
+            assert "supa=" in info.academy_url and "key=" in info.academy_url
+
+            resp = None
+            deadline = time.time() + 15.0
+            with httpx.Client(timeout=5.0) as client:
+                while time.time() < deadline:
+                    try:
+                        resp = client.get(info.academy_url)
+                        break
+                    except httpx.HTTPError:
+                        time.sleep(0.3)   # static server still booting
+            assert resp is not None, "academy URL never became reachable"
+            assert resp.status_code == 200
+            assert "YantraFleet" in resp.text
+        finally:
+            stack.stop()

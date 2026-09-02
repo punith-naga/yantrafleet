@@ -1,0 +1,937 @@
+{
+  "pack": {
+    "id": "pack-physical-ai",
+    "title": "Physical AI Operations",
+    "version": "1.0.0",
+    "tracks": [
+      {
+        "id": "operator",
+        "title": "Operator",
+        "role": "Fleet operator — watches the floor, acks alarms, works incidents, approves commands",
+        "lesson_ids": [
+          "lesson-01-what-is-physical-ai",
+          "lesson-02-reading-a-fleet",
+          "lesson-03-alarm-discipline",
+          "lesson-04-incidents-and-replay",
+          "lesson-05-the-command-gate"
+        ]
+      },
+      {
+        "id": "fleet-admin",
+        "title": "Fleet Admin",
+        "role": "Fleet administrator — owns interop, telemetry, throughput SLAs, and site security posture",
+        "lesson_ids": [
+          "lesson-06-vda5050-and-interop",
+          "lesson-07-telemetry-and-predictive-maintenance",
+          "lesson-08-missions-and-throughput",
+          "lesson-09-multisite-and-security"
+        ]
+      },
+      {
+        "id": "integrator",
+        "title": "Integrator",
+        "role": "Systems integrator — connects real robots, extends the platform, wires in copilots",
+        "lesson_ids": [
+          "lesson-10-architecture-tour",
+          "lesson-11-connecting-real-robots",
+          "lesson-12-copilots-and-grounding"
+        ]
+      }
+    ],
+    "lessons": [
+      {
+        "id": "lesson-01-what-is-physical-ai",
+        "title": "What is Physical AI?",
+        "minutes": 15,
+        "track": "operator",
+        "body_html": "<h3>Robots, plus AI, plus operations</h3><p>Physical AI is what happens when autonomous machines — here, AMRs (autonomous mobile robots) — do real work in real buildings, and software has to keep them productive, safe, and observable. It is not one thing but three layers stacked together: the robots themselves (navigation, batteries, motors, safety fields), the AI that assists the humans running them (an incident detector, predictive-maintenance trends, a fleet copilot), and the operations discipline that makes the whole thing trustworthy (alarm hygiene, human approval of commands, audit trails, incident review).</p><h3>Hype versus reality</h3><p>The hype says robots run themselves. The reality on any production floor is different, and this platform is honest about it:</p><ul><li>Robots fault. In the bundled simulator, robot AMR-07 deterministically loses localization — the message reads: Localization lost: LiDAR scan does not match map. Real fleets see the same class of failure every week.</li><li>AI here is decision <em>support</em>, not decision <em>making</em>. The detector opens incidents automatically, but a human resolves the root cause. The copilot (Sarathi) answers questions with cited evidence — and when it has no LLM key it degrades to computed template answers rather than guessing.</li><li>Commands to robots pass through a human approval gate. Pause, resume, send-to-charge and e-stop are queued as pending rows and executed only after an operator approves — with a full audit of who asked and who decided.</li></ul><h3>The platform you will train on</h3><p>YantraFleet is an end-to-end fleet-operations platform for multi-vendor AMR fleets. Robots (or the bundled deterministic simulator: 10 AMRs from 3 vendors on an 8x5 waypoint grid with chargers) speak VDA 5050 v2.1; everything lands in one shared backend with a small set of tables you will use throughout this course: <code>robots</code>, <code>alerts</code>, <code>incidents</code>, <code>commands</code>, <code>missions</code>, <code>robot_telemetry</code>, and <code>maintenance_findings</code>.</p><p>You can run the entire stack with zero cloud accounts: <code>python -m yantraops up --loopback</code> starts an embedded in-memory backend, the simulator, the incident detector, the notifier (in dry-run), the Sarathi copilot, and a live web console — all on localhost.</p><h3>What good operators actually do</h3><p>An operator's value is judgment under noise: knowing which of thirty alerts matters, whether a fault needs a technician or a re-init, when to pause a robot and when to leave it alone. This track teaches the exact vocabulary and workflows the platform enforces — canonical statuses, alarm acknowledgment, incident reading, and the command gate — so your judgment operates on precise, shared terms rather than vibes.</p>",
+        "key_points": [
+          "Physical AI = robots + AI decision support + operations discipline; none of the three works alone.",
+          "AI on this platform assists humans (detection, trends, grounded answers); it does not command robots autonomously.",
+          "All robot commands pass a human approval gate with a full audit trail.",
+          "The whole platform runs locally with one command: python -m yantraops up --loopback.",
+          "Seven backend tables carry everything: robots, alerts, incidents, commands, missions, robot_telemetry, maintenance_findings.",
+          "The simulator is deterministic — AMR-07 always loses localization, so training scenarios are repeatable."
+        ],
+        "quiz": [
+          {
+            "q": "On this platform, who ultimately executes a pause or e-stop command on a robot?",
+            "options": [
+              "The AI copilot decides and executes autonomously",
+              "The command is queued and only executes after a human approves it",
+              "Commands execute immediately when any console button is clicked",
+              "Only the robot vendor's own software can command robots"
+            ],
+            "answer_idx": 1,
+            "explain": "Robot actions queue as pending rows in the commands table; an operator approves or rejects each one, and only approved commands are executed. This human-in-the-loop gate is a core design principle."
+          },
+          {
+            "q": "What does the loopback demo (yantraops up --loopback) require you to set up first?",
+            "options": [
+              "A Supabase cloud account and API keys",
+              "An MQTT broker on your network",
+              "Nothing — it runs an embedded in-memory backend with zero config",
+              "A physical robot connected over USB"
+            ],
+            "answer_idx": 2,
+            "explain": "Loopback mode starts an embedded in-memory backend plus the simulator, detector, notifier, copilot, and console — no cloud, no keys, no robots."
+          },
+          {
+            "q": "Which statement best matches the honest reality of Physical AI operations?",
+            "options": [
+              "Modern AMR fleets run unattended; operators are being phased out",
+              "AI predicts every fault before it happens, so incidents are rare",
+              "Robots fault regularly; AI helps humans detect, diagnose, and respond faster",
+              "Robots only fault when misconfigured by integrators"
+            ],
+            "answer_idx": 2,
+            "explain": "Faults are routine (the simulator scripts one on AMR-07 on purpose). The platform's AI shortens detection and diagnosis; humans still own the response."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Start the full platform locally and see your fleet come alive.</p><ul><li>From the repo root, run <code>python -m yantraops up --loopback</code> (use the .venv interpreter if you installed via install.sh / install.ps1).</li><li>Wait for the READY banner and open the console URL it prints.</li><li>Watch the live map for a minute: 10 simulated AMRs from 3 vendors picking, dropping, moving, and charging.</li></ul><p>Verification passes once the simulator has written at least one robot row to the backend.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "robots",
+            "filter": "select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: What is Physical AI. Platform: YantraFleet v0.9.0, fleet-operations platform for multi-vendor AMR fleets. Stack: robots or bundled simulator speak VDA 5050 v2.1 (over MQTT in real deployments); connector (yantrabridge) translates to a shared Supabase/PostgREST schema; on top: web console with human approval gate, automatic incident detector (yantradetect), predictive maintenance, notifier (yantranotify), Sarathi copilot grounded in live fleet data. Tables: robots, alerts, incidents, commands, missions, robot_telemetry, maintenance_findings, fleet_meta. Zero-config demo: python -m yantraops up --loopback runs embedded in-memory backend (fakerest) + sim + detector + notifier (dry-run) + sarathi + console on localhost; READY banner prints console URL. Simulator: deterministic, 10 AMRs, vendors nexomotion/agilus/boturo, 8x5 waypoint grid, chargers, random faults plus scripted fault: AMR-07 loses localization at sim tick 20 for 12 ticks (FATAL, message: Localization lost: LiDAR scan does not match map). Key philosophy: AI assists (detection, trends, cited answers), humans decide (command gate: pause/resume/charge/estop queued pending, operator approves/rejects, full audit). Copilot degrades gracefully: grounded -> llm_only -> offline template answers. Honest framing: robots fault routinely; operator judgment is the product."
+      },
+      {
+        "id": "lesson-02-reading-a-fleet",
+        "title": "Reading a Fleet: Statuses, Battery, Health",
+        "minutes": 15,
+        "track": "operator",
+        "body_html": "<h3>One vocabulary, everywhere</h3><p>Early versions of this platform had three diverging status vocabularies (the simulator said working/moving/safety_stop, the connector said estop/active, the console said fault/paused). v0.2 fixed that at the source: every component now writes and reads exactly seven canonical statuses, and the database enforces it with a CHECK constraint. Learn them cold — they are the shared language of every alarm, incident, and shift handover:</p><ul><li><code>active</code> — doing useful work or driving to it</li><li><code>idle</code> — powered, healthy, no task</li><li><code>charging</code> — at a charger, charging</li><li><code>paused</code> — deliberately held by an operator (resumable)</li><li><code>estop</code> — emergency/safety stop (operator or safety field)</li><li><code>degraded</code> — running, but with WARNING-level errors</li><li><code>fault</code> — FATAL error; not operating</li></ul><p>Two of these — <code>fault</code> and <code>estop</code> — count as not-operating for analytics and copilot purposes. Note the semantic difference between <code>paused</code> (a human chose this; it is safe and resumable) and <code>estop</code> (a safety event; treat with urgency). Legacy spellings like working, safety_stop, or offline are normalized on write; an unknown status becomes <code>idle</code> — readers never crash on a stranger's string.</p><h3>The robot row</h3><p>Each robot is one row in the <code>robots</code> table: <code>id</code>, <code>vendor</code>, <code>status</code>, <code>battery</code> (percent), <code>pos</code> (an [x, y] pair), <code>speed</code>, <code>task_kind</code> (pick, drop, move, inventory — or transit), <code>health</code> (a 0-100 heuristic), <code>motor_temp</code>, <code>tasks_done</code>, <code>fault_msg</code>, and <code>updated_at</code>. Reading a fleet means scanning these fields fast:</p><ul><li>Battery: below 20 percent raises a warn alert; below 10 percent, crit. Robots route themselves to chargers, so a low battery on an <code>active</code> robot is normal — a low battery on an <code>idle</code> robot that never charges is not.</li><li>Health: a heuristic score docked for fatal errors, warnings, safety stops, and low battery. It is a triage aid, not a diagnosis.</li><li><code>fault_msg</code>: when status is <code>fault</code>, this carries the first fatal error's description — read it before doing anything else.</li><li><code>updated_at</code>: a stale timestamp means the robot (or its data path) went quiet — which is itself a finding.</li></ul><h3>Reading patterns, not snapshots</h3><p>A single glance tells you little. Fleets breathe: robots cycle active, idle, and charging all day. What you are looking for is deviation — one robot charging far more often than its peers, a vendor's robots all degraded at once, speeds trending down. The console's live map updates continuously; make a habit of scanning status distribution first, then outliers.</p>",
+        "key_points": [
+          "Exactly seven canonical statuses: active, idle, charging, paused, estop, degraded, fault — enforced by a DB CHECK constraint.",
+          "paused means an operator deliberately held the robot (safe, resumable); estop is a safety event.",
+          "fault and estop are the two not-operating statuses; degraded means running with WARNING-level errors.",
+          "Battery alerts: warn at 20 percent or less, crit at 10 percent or less.",
+          "health is a 0-100 triage heuristic; fault_msg carries the first fatal error's description.",
+          "Read patterns and deviations, not snapshots — a stale updated_at is itself a signal."
+        ],
+        "quiz": [
+          {
+            "q": "A robot shows status degraded. What does that mean?",
+            "options": [
+              "It is stopped with a fatal error",
+              "It is running, but with WARNING-level errors",
+              "An operator paused it",
+              "Its battery is below 10 percent"
+            ],
+            "answer_idx": 1,
+            "explain": "degraded is the canonical status for a robot that keeps operating while carrying WARNING-level errors. Fatal errors produce fault, which stops operation."
+          },
+          {
+            "q": "What is the key difference between paused and estop?",
+            "options": [
+              "They are synonyms in the canonical vocabulary",
+              "paused is set by the robot; estop is set by the console",
+              "paused is a deliberate, resumable operator hold; estop is an emergency/safety stop",
+              "estop robots keep moving slowly; paused robots stop"
+            ],
+            "answer_idx": 2,
+            "explain": "paused means a human chose to hold the robot and it can be resumed; estop means an emergency or safety-field stop and is treated as not-operating, with urgency."
+          },
+          {
+            "q": "The connector receives a status string it has never seen. What happens?",
+            "options": [
+              "The row is rejected by the database",
+              "The reader crashes with a validation error",
+              "It is normalized to idle — the least alarming guess",
+              "It is stored verbatim for later cleanup"
+            ],
+            "answer_idx": 2,
+            "explain": "The canonical-status contract maps known legacy spellings to canon and turns anything unknown into idle, so no reader ever crashes on a stranger's status string, and the DB constraint is never violated."
+          },
+          {
+            "q": "At what battery levels do alerts fire?",
+            "options": [
+              "warn at 50 percent, crit at 25 percent",
+              "warn at 20 percent or less, crit at 10 percent or less",
+              "A single crit alert at 5 percent",
+              "Battery never raises alerts; robots self-manage charging"
+            ],
+            "answer_idx": 1,
+            "explain": "Low battery fires a warn alert at 20 percent or below and crit at 10 percent or below, with hysteresis (reset only above 25 percent) to prevent flapping."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>With the loopback platform running, practice reading the fleet.</p><ul><li>On the console's live map, identify one robot in each of at least three different statuses (for example active, idle, charging).</li><li>Open one robot's detail view and read its battery, health, motor temperature, and task.</li><li>Find a robot that is charging or heading to a charger, and note its battery percentage — is it consistent with the 20 percent warn threshold?</li></ul><p>Verification passes once at least one charging sample exists in the telemetry history — which happens naturally as the simulated fleet cycles.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "robot_telemetry",
+            "filter": "status=eq.charging&select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: Reading a fleet. Canonical status vocabulary (core/yantracore/status.py, enforced by DB CHECK in 0002_commands.sql): active (doing useful work or driving to it), idle (powered, healthy, no task), charging (at charger), paused (deliberately held by operator, resumable), estop (emergency/safety stop), degraded (running with WARNING-level errors), fault (FATAL error, not operating). NOT_OPERATING = {fault, estop}. Legacy map: working/moving/to_charger/driving -> active; safety_stop/estopped/e-stop -> estop; error/faulted/offline -> fault; unknown -> idle (readers never crash). robots row: id, vendor, status, battery (numeric percent), pos jsonb [x,y], speed, task_kind (pick/drop/move/inventory, or transit), health (0-100 heuristic: -40 per fatal, -10 per warning, -15 safety stop, -10 low battery), motor_temp, tasks_done, fault_msg (first fatal error description), updated_at, site_id. Battery alerts: warn at <=20 percent, crit at <=10 percent, resets only above 25 percent (5-point hysteresis, no flapping). Sim vendors: nexomotion, agilus, boturo; 10 robots; 8x5 waypoint grid with chargers. Teaching emphasis: paused vs estop distinction; degraded still operates; stale updated_at = data path or robot silent; read distributions and deviations, not snapshots."
+      },
+      {
+        "id": "lesson-03-alarm-discipline",
+        "title": "Alarm Discipline",
+        "minutes": 15,
+        "track": "operator",
+        "body_html": "<h3>Why alarm discipline exists</h3><p>Industrial operations learned the hard way that alarm systems fail by succeeding too much: floods of low-value alarms train operators to ignore everything, including the one that matters. The process industry codified the answer in ISA-18.2 — alarm management as a lifecycle: every alarm must be meaningful, prioritized, acknowledged by a person, and rationalized over time. This platform applies that spirit to AMR fleets.</p><h3>Severity tiers</h3><p>Alerts in the <code>alerts</code> table carry a severity: <code>info</code>, <code>warn</code>, and <code>crit</code> from the simulator and connector (a fatal VDA error maps to crit, a WARNING-level error to warn), and incidents add a <code>serious</code> tier (e-stop conditions). Severity determines urgency of response and who gets notified: the notifier only pushes <em>unacked</em> <code>crit</code> and <code>serious</code> events to external channels. Everything else stays on the console — by design.</p><h3>The ack workflow</h3><p>Acknowledging an alert (<code>ack</code> flips from false to true) is a professional act with a precise meaning: <em>a human has seen this and owns the response</em>. It does not mean fixed. The workflow:</p><ul><li>Triage by severity first, then by recency. Crit before warn, always.</li><li>Read the message and source. Every alert carries <code>msg</code>, <code>src</code>, and a time label.</li><li>Ack it — this stops repeated external notification and tells your teammates it is being handled.</li><li>Act or escalate. Ack without follow-through is worse than no ack: it silences the alarm while the condition persists.</li></ul><h3>Alarm budgets and dedup</h3><p>The platform fights alarm floods at the source. The connector deduplicates: a VDA error raises exactly one alert on its inactive-to-active transition and stays silent while the error persists; when the error clears and later recurs, that is a genuinely new alert. Low-battery alerts use 5-point hysteresis — fire at 20 percent, reset only above 25 percent — so a battery hovering at the threshold cannot flap. Treat your remaining alert volume as a budget: if operators see more than a handful of crit alerts per shift, that is an engineering problem to fix (bad thresholds, a flapping robot, a missing dedup), not a fact of life to endure. Chronic unacked alerts are a red flag in either direction: real problems being ignored, or noise that should be rationalized away.</p><h3>What ack is not</h3><p>Ack is not resolution (incidents track that, next lesson), not silencing forever, and not a group activity — one person acks and owns. If you ack something you cannot handle, say so and hand it off explicitly.</p>",
+        "key_points": [
+          "ISA-18.2 spirit: every alarm should be meaningful, prioritized, acknowledged, and rationalized — floods destroy operator trust.",
+          "Severity tiers: info / warn / crit on alerts; incidents add serious (e-stop). Crit and serious drive external notification.",
+          "The notifier only pushes unacked crit/serious events — acking stops repeat notification.",
+          "Ack means a human has seen it and owns the response — not that it is fixed.",
+          "Dedup at the source: one alert per error activation edge; low-battery uses 5-point hysteresis (fire at 20, reset above 25).",
+          "Treat alert volume as a budget: chronic floods are an engineering defect to rationalize, not background noise."
+        ],
+        "quiz": [
+          {
+            "q": "What does acknowledging an alert mean on this platform?",
+            "options": [
+              "The underlying condition is fixed",
+              "The alert was a false positive",
+              "A human has seen it and owns the response",
+              "The alert is deleted from the table"
+            ],
+            "answer_idx": 2,
+            "explain": "Ack flips the ack flag to true: it signals ownership and stops repeat external notification. Resolution is tracked separately, on incidents."
+          },
+          {
+            "q": "Which events does the notifier push to external channels (webhook/WhatsApp)?",
+            "options": [
+              "Every alert, regardless of severity",
+              "Only unacked crit and serious events, plus Open incidents",
+              "Only info alerts, to avoid alarm fatigue",
+              "Nothing — the notifier is console-only"
+            ],
+            "answer_idx": 1,
+            "explain": "The notifier polls unacked crit/serious alerts and Open incidents, dedups per event, and fans out. Lower severities stay on the console by design — that is the alarm budget at work."
+          },
+          {
+            "q": "A robot's battery hovers around 20 percent for ten minutes. How many low-battery alerts fire?",
+            "options": [
+              "One per state message — potentially dozens",
+              "One per minute",
+              "Exactly one, until battery recovers above 25 percent",
+              "None — battery alerts only fire below 10 percent"
+            ],
+            "answer_idx": 2,
+            "explain": "Low-battery alerting uses 5-point hysteresis: it fires once at 20 percent or below and can only re-fire after recovery above 25 percent. This prevents threshold flapping."
+          },
+          {
+            "q": "Per ISA-18.2 thinking, a fleet where operators see hundreds of alarms per shift is:",
+            "options": [
+              "Well-instrumented — more visibility is always better",
+              "An engineering defect: floods train operators to ignore the alarm that matters",
+              "Normal for any robot fleet over 5 robots",
+              "Only a problem if the alarms are crit severity"
+            ],
+            "answer_idx": 1,
+            "explain": "Alarm floods destroy the signal value of every alarm. The fix is rationalization — better thresholds, dedup, and severity discipline — not operator endurance."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Work a live alert end to end.</p><ul><li>With the loopback platform running, open the console's alerts view. Faults and low batteries in the simulated fleet generate alerts continuously.</li><li>Triage: find the highest-severity unacked alert. Read its message, source, and time label.</li><li>Acknowledge it from the console.</li><li>Say out loud (or write down) what your next action would be on a real floor: dispatch, monitor, or escalate.</li></ul><p>Verification passes once at least one alert in the backend is acked.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "alerts",
+            "filter": "ack=eq.true&select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: Alarm discipline, ISA-18.2 spirit (alarm lifecycle: meaningful, prioritized, acknowledged, rationalized; floods destroy trust). alerts table: id, sev, msg, src, tlabel, ack boolean (default false), created_at, site_id. Severities: sim emits info/warn/crit; connector maps VDA WARNING -> warn, FATAL -> crit (v3.0 CRITICAL/URGENT also -> crit); detector incidents use crit (fault) and serious (estop). Notifier (yantranotify): polls UNACKED crit/serious alerts + Open incidents every ~10s, dedups per event, fans out console/webhook (WEBHOOK_URL)/WhatsApp (Twilio env); channels without creds print payloads. Acking stops repeat notification. Dedup at source (yantrabridge AlertDeduper): alert fires only on inactive->active edge per (serial, errorType, errorLevel); persisting error silent; cleared-then-recurring = new alert with new id; deterministic ids + ignore-duplicates insert = retry-safe. Low battery: warn <=20, crit <=10, reset only above 25 (5-point hysteresis). Ack semantics: human owns response, NOT resolution (incidents track that), one owner, follow through or hand off explicitly. Alarm budget: crit alerts per shift should be countable on one hand; chronic floods = engineering defect to rationalize."
+      },
+      {
+        "id": "lesson-04-incidents-and-replay",
+        "title": "Incidents and Replay",
+        "minutes": 15,
+        "track": "operator",
+        "body_html": "<h3>From alert to incident</h3><p>Alerts are events; incidents are managed problems. The incident detector (<code>yantradetect</code>) polls the <code>robots</code> table on an interval (default 5 seconds) and opens an incident when a robot is seen in <code>fault</code> or <code>estop</code> for two consecutive polls — the pending window that filters out one-poll blips, in the spirit of how mature monitoring systems avoid paging on transients. Severity follows the condition: fault opens a <code>crit</code> incident, estop opens <code>serious</code>.</p><h3>Reading an incident</h3><p>An incident row carries: <code>id</code> (deterministic INC-style ids, so retried writes are idempotent), <code>sev</code>, <code>title</code>, <code>src</code> (the robot id), <code>state</code> (Open or Resolved), <code>impact</code>, <code>dur</code> (minutes), and two fields a human or copilot fills in afterward: <code>rca</code> (root-cause analysis) and <code>fix</code>. When the robot recovers, the detector resolves the incident automatically with its final duration and impact. Three behaviors matter for how you read them:</p><ul><li><em>Re-open window:</em> if the same robot goes bad again shortly after resolution, the existing incident re-opens rather than spawning a duplicate — with a flap counter. An incident marked flapping is telling you the fix did not hold.</li><li><em>Stale auto-resolve:</em> incidents do not linger forever on dead data.</li><li><em>Idempotency:</em> deterministic ids mean the detector can crash, restart, and re-seed from open incidents without double-counting.</li></ul><h3>Replay: see what the robot saw</h3><p>Opening an incident in the console fetches the robot's <code>robot_telemetry</code> rows in a window around the incident's creation time and drives a replay: the map shows the robot's actual recorded path, a scrubber moves through time, and battery/speed charts render from real samples. Alerts inside the window appear as event dots on the timeline. This is the operator's flight recorder — you can watch the minutes before the fault: was the robot slowing down? Was motor temperature climbing? Did an obstacle alert precede the fault?</p><p>One honest caveat: with fewer than 10 recorded samples the console falls back to a scripted demo replay (INC-1042) and says so with a note. Know the difference between real replay and the demo.</p><h3>RCA is a narrative, not a checkbox</h3><p>A good RCA answers three questions: what happened (mechanism, not symptom), why it happened (the condition that allowed it), and what prevents recurrence. The <code>fix</code> field should be concrete enough that a flapping re-open would prove it wrong. When you review a resolved incident, read rca and fix critically — the flap counter is the system grading your team's fixes.</p>",
+        "key_points": [
+          "The detector opens an incident after a robot is in fault/estop for two consecutive polls — the pending window filters blips.",
+          "Severity mapping: fault opens crit, estop opens serious.",
+          "Incidents auto-resolve on recovery with duration and impact; rca and fix are filled in by humans or the copilot.",
+          "Re-open window + flap counting: a recurring incident re-opens (marked flapping) instead of duplicating — flapping means the fix did not hold.",
+          "Replay drives the map, scrubber, and battery/speed charts from real robot_telemetry samples around the incident; alerts become event dots.",
+          "Fewer than 10 recorded samples triggers the scripted INC-1042 demo replay, clearly noted — know real from demo."
+        ],
+        "quiz": [
+          {
+            "q": "Why does the detector wait for two consecutive polls before opening an incident?",
+            "options": [
+              "The database is too slow for single-poll writes",
+              "It is a pending window that filters one-poll transients so blips do not open incidents",
+              "Two polls are needed to compute severity",
+              "The robot must confirm the fault itself"
+            ],
+            "answer_idx": 1,
+            "explain": "A robot must be seen in fault/estop for 2 consecutive polls before an incident opens — the same flap-guard idea mature monitoring systems use to avoid paging on transients."
+          },
+          {
+            "q": "An incident's impact field reads flapping. What is the system telling you?",
+            "options": [
+              "The robot's position sensor is oscillating",
+              "The incident re-opened repeatedly shortly after being resolved — the fix is not holding",
+              "The detector is misconfigured",
+              "Telemetry samples are arriving out of order"
+            ],
+            "answer_idx": 1,
+            "explain": "The re-open window merges a quick recurrence into the same incident and increments a flap counter; past the threshold the incident is marked flapping. It is the system grading the durability of your fixes."
+          },
+          {
+            "q": "What data drives the console's incident replay?",
+            "options": [
+              "A physics re-simulation of the fleet",
+              "The robot's recorded robot_telemetry rows in a window around the incident, with alerts as event dots",
+              "Live current positions of all robots",
+              "The incident's rca text, rendered as an animation"
+            ],
+            "answer_idx": 1,
+            "explain": "Replay fetches real recorded telemetry around the incident's created_at and drives the map, scrubber, and battery/speed charts from those samples. Under 10 samples, a clearly-noted scripted demo (INC-1042) is shown instead."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Read a real incident end to end.</p><ul><li>With the loopback platform running, wait for the simulated fleet to fault (AMR-07's scripted localization fault guarantees at least one incident early in the run).</li><li>Open the console's incidents view and open the most recent incident.</li><li>Identify: the source robot, severity, state, and duration. If it resolved, read how long it lasted.</li><li>Run the replay: scrub through the timeline and watch the battery/speed charts. Note whether you are seeing real telemetry or the demo fallback (the console tells you).</li></ul><p>Verification passes once the detector has written at least one incident.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "incidents",
+            "filter": "select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: Incidents and replay. Detector (yantradetect): polls robots every N s (default 5; also --once/--dry-run), opens incident when robot in fault/estop for 2 consecutive polls (pending window, flap guard). Severity: fault -> crit, estop -> serious. Incident row: id (deterministic INC-XXXX, idempotent retried writes), sev, title, src = robot id, tlabel, state Open/Resolved, impact, rca, fix (nullable, patched by console/copilot), dur (minutes), created_at, site_id. Auto-resolve on recovery with duration+impact; stale auto-resolve; restart re-seeds from GET incidents?state=eq.Open. Re-open window: same robot bad again shortly after resolution re-opens the SAME incident, flap_count increments; past flap_threshold, impact gains flapping marker — signals fix did not hold. Replay: console fetches robot_telemetry rows in window around incident created_at; drives map path, scrubber, battery/speed charts; alerts in window = event dots. Fewer than 10 samples -> scripted INC-1042 demo replay with a note. robot_telemetry: ~1 sample/robot per ~6s sim time, 72h retention via purge_old_telemetry(). RCA guidance: mechanism, enabling condition, prevention; fix should be falsifiable by a flap. Scripted AMR-07 localization fault (tick 20, 12 ticks) guarantees a teachable incident."
+      },
+      {
+        "id": "lesson-05-the-command-gate",
+        "title": "The Command Gate: Human-in-the-Loop Control",
+        "minutes": 15,
+        "track": "operator",
+        "body_html": "<h3>Why a gate at all</h3><p>Software that can move multi-hundred-kilogram machines around a building shared with people should not act on a single click — or on an AI's judgment. The command gate turns every robot action into a two-step, two-human-capable workflow: someone requests, someone approves, and everything is recorded. This is deliberate friction. It converts what would be an instantaneous, unaccountable action into an auditable decision.</p><h3>The four verbs</h3><p>The platform supports exactly four commands, matching a CHECK constraint in the database: <code>pause</code> (hold the robot; resumable), <code>resume</code> (release a pause), <code>charge</code> (send to a charger), and <code>estop</code> (emergency stop). That small vocabulary is a feature: every operator on every shift knows the complete action space.</p><h3>Life of a command</h3><p>When you click pause on a robot in the console (with a live backend connected), nothing happens to the robot yet. Instead a row is inserted into the <code>commands</code> table with <code>status=pending</code>, recording <code>robot_id</code>, <code>cmd</code>, and <code>requested_by</code>. Then:</p><ul><li>The Pending approvals card on the console's Overview lists it. An operator approves or rejects; the row moves to <code>approved</code> or <code>rejected</code>, stamping <code>decided_by</code> and <code>decided_at</code>.</li><li>The executor — the running simulator, or a live robot bridge — polls for approved commands, applies them in the world, and marks each <code>executed</code> or <code>failed</code>, with a reason in <code>note</code>.</li><li>The full lifecycle is therefore: pending, then approved or rejected, then executed or failed. There is deliberately no intermediate sent state — a published-but-unconfirmed command stays approved and is deduplicated in memory so it is never re-sent.</li></ul><h3>Approve/reject is a responsibility</h3><p>When you approve, you are the accountable human. Before approving, check: is the robot's current status consistent with the command (pausing a robot already in fault does little; resuming an estopped robot is not what resume is for)? Is there a reason someone requested this? Rejection is not rude — it is the gate doing its job; use <code>note</code> to say why. Never approve what you do not understand.</p><h3>The audit trail</h3><p>Every command row permanently records who asked (<code>requested_by</code>), who decided (<code>decided_by</code>), when (<code>created_at</code>, <code>decided_at</code>, <code>executed_at</code>), the outcome, and a free-text note. In a real deployment this is your answer to the question every safety review asks: who told the robot to do that, and on whose authority? On live MQTT fleets there is one honest caveat: commands are published once; a command sent while the robot is offline is lost and needs a fresh request and approval — the table will show it stuck at approved.</p>",
+        "key_points": [
+          "Four command verbs only: pause, resume, charge, estop — enforced by a DB CHECK constraint.",
+          "Console actions insert pending rows; nothing touches the robot until a human approves.",
+          "Lifecycle: pending -> approved/rejected -> executed/failed. No intermediate sent state, by design.",
+          "The executor (simulator or robot bridge) polls approved commands, applies them, and records executed/failed with a note.",
+          "Approving makes you the accountable human — verify status and intent first; reject with a note when unsure.",
+          "Full audit per command: requested_by, decided_by, created/decided/executed timestamps, outcome, note."
+        ],
+        "quiz": [
+          {
+            "q": "You click pause on a robot in the console (live backend connected). What happens immediately?",
+            "options": [
+              "The robot pauses within one control cycle",
+              "A pending row is inserted into the commands table; the robot is untouched until approval",
+              "The copilot evaluates the request and decides",
+              "The robot pauses only if its battery is low"
+            ],
+            "answer_idx": 1,
+            "explain": "Console actions queue as pending command rows. Only after a human approves does the executor apply the command in the world. That two-step flow is the human-in-the-loop gate."
+          },
+          {
+            "q": "Which is the complete, valid status lifecycle of a command row?",
+            "options": [
+              "queued -> sent -> done",
+              "pending -> approved or rejected -> executed or failed",
+              "pending -> executing -> archived",
+              "requested -> validated -> committed"
+            ],
+            "answer_idx": 1,
+            "explain": "Commands start pending; a human moves them to approved or rejected; the executor then marks approved commands executed or failed. There is deliberately no sent state."
+          },
+          {
+            "q": "Why does the audit trail record both requested_by and decided_by?",
+            "options": [
+              "For load-balancing across operators",
+              "So safety reviews can answer who asked for the action and who authorized it",
+              "Because the database requires two non-null columns",
+              "To compute operator performance bonuses"
+            ],
+            "answer_idx": 1,
+            "explain": "Separating requester from approver is the core of accountable control: any action on a robot can be traced to the human who requested it and the human who authorized it, with timestamps and outcome."
+          },
+          {
+            "q": "On a live MQTT fleet, a command is approved while the robot is offline. What does the table show?",
+            "options": [
+              "The command retries forever until the robot returns",
+              "The command auto-fails after 60 seconds",
+              "The command stays approved; it was published once and lost, so a human must re-request and re-approve",
+              "The command is silently deleted"
+            ],
+            "answer_idx": 2,
+            "explain": "Instant actions are published exactly once; a command published to an offline robot is lost and the row remains approved. The documented remedy is a fresh row through the gate — not silent retry."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Run a command through the full gate.</p><ul><li>With the loopback platform running, open a robot's detail view in the console and request a <code>pause</code>.</li><li>Go to the Pending approvals card on Overview. Find your command; note who requested it.</li><li>Approve it, and watch the robot's status change to <code>paused</code> on the map as the simulator executes it.</li><li>Then request and approve a <code>resume</code> to release the robot, and check the command rows record the whole story.</li></ul><p>Verification passes once at least one pause command has been approved (or already executed).</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "commands",
+            "filter": "cmd=eq.pause&status=in.(approved,executed)&select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: Command gate. commands table (0002_commands.sql): id uuid, robot_id, cmd CHECK in (pause,resume,charge,estop), params jsonb, status CHECK in (pending,approved,rejected,executed,failed), requested_by (default console), decided_by, note, created_at, decided_at, executed_at, site_id. Flow: console inserts pending row (no direct robot action with live backend); Pending approvals card on Overview lets operator approve/reject (stamps decided_by/decided_at); executor (yantrasim --supabase in demo, or yantrabridge --commands on live MQTT) polls approved rows, executes, marks executed/failed with reason in note. Deliberately NO sent state: published-but-unacked stays approved, deduped in memory by command id, never republished. MQTT reality: yantrabridge --commands publishes each approved row once as VDA 5050 instantActions on uagv/v2/<manufacturer>/<serial>/instantActions with actions [{actionType: yantra.<cmd>, actionId: <command uuid>, blockingType: HARD}]; robot reports actionStates FINISHED/FAILED in next state messages, which PATCH the row. QoS 0, published once: command to offline robot is lost, stays approved, needs fresh human re-approval. Teaching: approval = accountability; check robot status/intent before approving; reject with note is legitimate; audit answers who asked / who authorized / what happened."
+      },
+      {
+        "id": "lesson-06-vda5050-and-interop",
+        "title": "VDA 5050 and Interoperability",
+        "minutes": 15,
+        "track": "fleet-admin",
+        "body_html": "<h3>Why standards kill lock-in</h3><p>Without a standard, every robot vendor ships its own fleet manager, and a warehouse running three vendors runs three control rooms. VDA 5050 — a standard from the German automotive industry association, spoken over MQTT — defines a common interface between AGVs/AMRs and a master controller. Any robot that speaks it can join any compliant fleet system. This platform is built on VDA 5050 v2.1: the simulator emits it, the connector consumes it, and a real robot that speaks it needs no custom code to appear on your console.</p><h3>The topic scheme</h3><p>VDA 5050 messages travel on MQTT topics of the form <code>interfaceName/majorVersion/manufacturer/serialNumber/topic</code> — concretely, <code>uagv/v2/&lt;manufacturer&gt;/&lt;serialNumber&gt;/state</code> for telemetry and <code>.../instantActions</code> for immediate commands. Serial numbers are sanitized to the allowed character set, so robot AMR-07 appears on the wire as AMR_07 while the database keeps AMR-07. The <code>connection</code> topic carries ONLINE/OFFLINE presence.</p><h3>The state message</h3><p>The <code>state</code> message is the robot's periodic self-report, and the connector's translation of it is worth knowing precisely:</p><ul><li><code>batteryState.batteryCharge</code> becomes <code>battery</code>; <code>agvPosition</code> becomes <code>pos</code>; speed is computed from the velocity vector.</li><li>Status is derived by priority: a FATAL error means <code>fault</code>; an e-stop or field violation means <code>estop</code>; charging, paused, driving, idle follow.</li><li><code>errors[]</code> entries become alerts (WARNING maps to warn, FATAL to crit), deduplicated on activation edges.</li><li>Fields outside core VDA 5050 — motor temperature, tasks done — are passed through only when a vendor extends the payload; otherwise the columns are omitted so an upsert never clobbers another writer's values.</li></ul><h3>instantActions: commands going the other way</h3><p>Approved commands flow back as <code>instantActions</code>: the bridge publishes <code>actionType yantra.&lt;cmd&gt;</code> with the command's uuid as <code>actionId</code> and <code>blockingType HARD</code>. The robot reports an <code>actionStates</code> entry (FINISHED or FAILED with a result description) in its next state messages, which closes the loop and marks the command row executed or failed. One standard, both directions.</p><h3>What interop buys you</h3><p>As a fleet admin, VDA 5050 means: one console and one alarm pipeline across vendors; the freedom to buy your next robots from a different vendor without replatforming; and replayable, vendor-neutral recordings. The platform's three simulated vendors (nexomotion, agilus, boturo) exist precisely to prove the multi-vendor path — the connector cannot tell them apart, and neither should your operations.</p><p>When you evaluate a new robot vendor, make VDA 5050 v2.1 compliance a line item in the RFP, and prove it cheaply: capture a few of their state messages and replay them through the connector's dry-run before any hardware ships. Ten minutes of replay tells you more than a hundred pages of datasheet.</p>",
+        "key_points": [
+          "VDA 5050 (v2.1 here) is a vendor-neutral AGV/AMR interface over MQTT — one console for a multi-vendor fleet.",
+          "Topic scheme: uagv/v2/<manufacturer>/<serialNumber>/state for telemetry, .../instantActions for commands.",
+          "Serials are sanitized for topics (AMR-07 on the wire is AMR_07; the DB keeps AMR-07).",
+          "State translation priority: FATAL error -> fault; eStop/fieldViolation -> estop; then charging/paused/active/idle.",
+          "Vendor-extension fields (motor temp, tasks done) are passed through only when present — omitted columns never clobber other writers.",
+          "instantActions close the command loop: yantra.<cmd> out, actionStates FINISHED/FAILED back."
+        ],
+        "quiz": [
+          {
+            "q": "What is the primary business value of VDA 5050 for a fleet admin?",
+            "options": [
+              "It makes robots drive faster",
+              "It removes vendor lock-in: any compliant robot joins the same console, alarms, and command gate",
+              "It encrypts all robot traffic",
+              "It replaces the need for MQTT"
+            ],
+            "answer_idx": 1,
+            "explain": "VDA 5050 defines a common robot-to-controller interface, so one operations stack serves robots from any compliant vendor — no per-vendor control rooms, no replatforming to switch vendors."
+          },
+          {
+            "q": "On which MQTT topic does a robot publish its periodic self-report?",
+            "options": [
+              "uagv/v2/<manufacturer>/<serialNumber>/state",
+              "fleet/<robot_id>/telemetry",
+              "uagv/v2/<serialNumber>/status",
+              "vda5050/state/<manufacturer>"
+            ],
+            "answer_idx": 0,
+            "explain": "The VDA topic scheme is interfaceName/majorVersion/manufacturer/serialNumber/topic; state messages travel on uagv/v2/<manufacturer>/<serialNumber>/state."
+          },
+          {
+            "q": "A state message carries no motorTemp field. What does the connector write to the robots row's motor_temp column?",
+            "options": [
+              "Zero",
+              "The previous value, copied forward explicitly",
+              "Nothing — the column is omitted from the upsert so another writer's value is never clobbered",
+              "Null, overwriting any existing value"
+            ],
+            "answer_idx": 2,
+            "explain": "motor_temp and tasks_done are not core VDA 5050. They are passed through only when a vendor extends the payload; otherwise the connector omits the columns entirely from its upsert."
+          },
+          {
+            "q": "How does the platform learn that a robot finished an instantAction command?",
+            "options": [
+              "It polls the robot over HTTP",
+              "The robot's next state messages carry an actionStates entry (FINISHED/FAILED) for that actionId",
+              "The MQTT broker sends a delivery receipt",
+              "An operator confirms manually"
+            ],
+            "answer_idx": 1,
+            "explain": "The command loop is closed by the standard itself: the robot reports actionStates with the actionId the bridge published, and the bridge PATCHes the command row to executed or failed."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Read raw VDA 5050 with your own eyes — no network needed.</p><ul><li>From the repo root, dry-run the connector on the bundled recording: <code>python -m yantrabridge --file connector/sample.jsonl --dry-run</code>. It prints the translated robots rows without writing anywhere.</li><li>Open <code>connector/sample.jsonl</code> in an editor. In one state message, find: <code>serialNumber</code>, <code>batteryState.batteryCharge</code>, <code>agvPosition</code>, and the <code>errors</code> array.</li><li>Match each field to the translated row the dry-run printed: which status did the message produce, and why (check the priority order)?</li></ul>",
+          "verify": {
+            "kind": "self_check",
+            "prompt": "Did you run the dry-run translation of connector/sample.jsonl and trace at least one state message's serialNumber, batteryCharge, position, and errors through to the printed robots row — including why its status came out as it did?"
+          }
+        },
+        "tutor_context": "Lesson: VDA 5050 and interop. VDA 5050: vendor-neutral AGV/AMR <-> master-control interface over MQTT (German automotive standard); platform speaks v2.1. Topics: uagv/v2/<manufacturer>/<serial>/state (telemetry), .../instantActions (commands); connection topic carries ONLINE/OFFLINE. Serial sanitization: dash not allowed in topic charset, AMR-07 -> AMR_07 on wire, DB keeps AMR-07. State translation (yantrabridge): identity serialNumber, vendor = manufacturer; status priority: FATAL error -> fault; eStop != NONE or fieldViolation -> estop; batteryState.charging -> charging; then paused/active(driving)/idle. battery = batteryState.batteryCharge; pos from agvPosition; speed = hypot(vx,vy); task_kind = first RUNNING/INITIALIZING action's actionType, else transit while driving; health heuristic 0-100; fault_msg = first fatal error description. motor_temp/tasks_done only from vendor extensions (motorTemp, tasksDone), otherwise columns omitted so upserts never clobber other writers. errors[] -> alerts: WARNING->warn, FATAL->crit (v3.0 CRITICAL/URGENT->crit), dedup on inactive->active edge. Commands out: instantActions {actionType yantra.<cmd>, actionId = command uuid, blockingType HARD}; robot returns actionStates FINISHED/FAILED -> row executed/failed. Sim vendors nexomotion/agilus/boturo prove multi-vendor. Dry-run: python -m yantrabridge --file connector/sample.jsonl --dry-run (5 sample messages, 3 robots)."
+      },
+      {
+        "id": "lesson-07-telemetry-and-predictive-maintenance",
+        "title": "Telemetry and Predictive Maintenance",
+        "minutes": 15,
+        "track": "fleet-admin",
+        "body_html": "<h3>History is a table</h3><p>Live status tells you what is; history tells you what is coming. Every writer downsamples robot state into <code>robot_telemetry</code> — roughly one sample per robot every six seconds of sim time — each row carrying <code>robot_id</code>, <code>ts</code>, <code>battery</code>, <code>speed</code>, <code>motor_temp</code>, <code>status</code>, and <code>pos</code>. A purge function keeps 72 hours of raw history, a deliberate free-tier discipline: enough for incident replay and trend detection, small enough to stay cheap. This same table powers the incident replay you met in the Operator track.</p><h3>From history to findings</h3><p>Run the detector in maintenance mode — <code>python -m yantradetect --maintenance</code> (optionally <code>--window-hours 6</code>) — and it reads recent telemetry windows and maintains the <code>maintenance_findings</code> table. Three specific, documented trend rules produce findings:</p><ul><li><em>Drive motor:</em> motor-temperature trend of at least 1.5 degrees C per hour, with a regression fit of r-squared at least 0.5 — a real trend, not noise.</li><li><em>Battery:</em> drain at least 1.5 times the fleet median per active-minute — the robot is an outlier against its own peers, which self-adjusts as the fleet ages.</li><li><em>Drivetrain:</em> active-speed decline of at least 15 percent across the window.</li></ul><h3>Reading a finding</h3><p>Each finding row carries a human-readable <code>finding</code> description, a heuristic <code>rul_days</code> (remaining useful life), a <code>confidence</code> between 0 and 1, and a recommended <code>action</code>. Two invariants keep the table trustworthy: at most one Open finding exists per robot-plus-component, and findings are Cleared — never deleted — when the trend abates, so the history of near-misses survives. IDs are deterministic, so retried writes cannot duplicate.</p><h3>Acting on findings</h3><p>Treat <code>rul_days</code> and <code>confidence</code> as scheduling inputs, not verdicts. A drive-motor finding with high confidence and short RUL should move a robot into the next maintenance window; a low-confidence battery finding earns a watch, not a work order. The right habit is triage by (confidence, rul_days), then verify against raw telemetry — open the robot's history and look at the actual motor-temp curve before spending a technician's afternoon. A finding that clears on its own is still information: it goes to Cleared, and a robot that repeatedly generates-then-clears the same finding deserves a closer look.</p><h3>Honest limits</h3><p>These are heuristics over a 72-hour window, not survival models trained on your fleet. They will miss failure modes that do not show up in temperature, drain, or speed, and rul_days is an order-of-magnitude aid. Their value is earlier, cheaper attention — the difference between a scheduled swap and a mission-hour lost to a seized drivetrain.</p>",
+        "key_points": [
+          "robot_telemetry holds ~1 sample per robot per ~6s of sim time; a purge function keeps 72 hours of raw history.",
+          "Maintenance mode (yantradetect --maintenance) turns telemetry windows into maintenance_findings.",
+          "Three trend rules: motor-temp rise >=1.5 C/hr (r-squared >=0.5) -> drive motor; drain >=1.5x fleet median per active-minute -> battery; active-speed decline >=15% -> drivetrain.",
+          "Findings carry finding text, rul_days, confidence (0-1), and a recommended action.",
+          "At most one Open finding per robot+component; findings are Cleared, never deleted, when the trend abates.",
+          "Triage by confidence and rul_days, then verify against raw telemetry before dispatching a technician."
+        ],
+        "quiz": [
+          {
+            "q": "Why does the battery drain rule compare against the fleet median rather than a fixed threshold?",
+            "options": [
+              "Fixed thresholds are illegal in maintenance software",
+              "It flags outliers relative to peers, so the rule self-adjusts as the whole fleet ages",
+              "The fleet median is cheaper to compute",
+              "Battery vendors require relative measures"
+            ],
+            "answer_idx": 1,
+            "explain": "A robot draining at 1.5x the fleet median per active-minute is abnormal among its peers today — a comparison that stays meaningful as batteries age fleet-wide, where a fixed threshold would drift into noise."
+          },
+          {
+            "q": "A drivetrain finding's trend abates. What happens to the row?",
+            "options": [
+              "It is deleted to keep the table small",
+              "It is marked Cleared with a timestamp — findings are never deleted",
+              "It stays Open until a technician closes it",
+              "It converts into an incident"
+            ],
+            "answer_idx": 1,
+            "explain": "Findings are Cleared, never deleted, when the trend abates. The record of near-misses is itself operational data — a robot that repeatedly generates-then-clears findings deserves attention."
+          },
+          {
+            "q": "What does the r-squared >= 0.5 requirement on the motor-temp rule accomplish?",
+            "options": [
+              "It halves the number of telemetry samples needed",
+              "It requires the temperature rise to be a genuine linear trend, not noise that happens to end higher",
+              "It ensures the motor is above 50 degrees",
+              "It weights newer samples double"
+            ],
+            "answer_idx": 1,
+            "explain": "The rule needs both a slope (>=1.5 C/hr) and a decent regression fit (r-squared >=0.5): a real, consistent warming trend rather than scatter."
+          },
+          {
+            "q": "How should a fleet admin treat rul_days?",
+            "options": [
+              "As a guaranteed failure date for warranty claims",
+              "As a heuristic scheduling input — verify against raw telemetry before committing technician time",
+              "As irrelevant unless confidence equals 1.0",
+              "As the number of days since the finding opened"
+            ],
+            "answer_idx": 1,
+            "explain": "rul_days is an order-of-magnitude heuristic from a 72-hour window. It earns earlier, cheaper attention; the raw motor-temp/battery/speed curves are the ground truth to check before dispatching."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Trace one robot's history — the raw material of every prediction.</p><ul><li>With the loopback platform running for a few minutes, open robot AMR-07's detail view in the console and study its recent battery and speed history.</li><li>Find the scripted localization fault in the history: battery and speed around the fault window, and the status samples flipping to <code>fault</code>.</li><li>Optional deeper dive: ask the Sarathi copilot about AMR-07's recent telemetry — its telemetry tool returns windowed samples plus battery/speed/motor-temp stats and status-transition counts.</li></ul><p>Verification passes once AMR-07 has recorded telemetry history in the backend.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "robot_telemetry",
+            "filter": "robot_id=eq.AMR-07&select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: Telemetry and predictive maintenance. robot_telemetry (0003_telemetry.sql): id bigint identity, robot_id, ts, battery, speed, motor_temp, status, pos, site_id; index (robot_id, ts desc); writers downsample ~1 sample/robot per ~6s sim time; purge_old_telemetry(keep interval default 72 hours) enforces retention — free-tier discipline. Powers incident replay + trend detection + copilot query_telemetry (windowed samples, battery/speed/motor-temp stats, status-transition counts). Maintenance mode: python -m yantradetect --maintenance [--window-hours 6] reads recent telemetry windows, maintains maintenance_findings (0004_maintenance.sql): id deterministic MF-XXXX (idempotent retries), robot_id, component CHECK in (drive motor, battery, drivetrain), finding text, rul_days numeric heuristic, confidence 0-1, action, state CHECK Open/Cleared, created_at, cleared_at, site_id. Rules: motor-temp trend >=1.5 C/hr with r-squared >=0.5 -> drive motor; battery drain >=1.5x fleet median per active-minute -> battery (peer-relative, self-adjusts as fleet ages); active-speed decline >=15% across window -> drivetrain. Invariants: at most one Open finding per robot+component; Cleared never deleted. Note: loopback demo does not run --maintenance by default; findings appear when maintenance mode runs. Guidance: triage by (confidence, rul_days), verify against raw curves before dispatch; heuristics over 72h, not survival models — honest limits."
+      },
+      {
+        "id": "lesson-08-missions-and-throughput",
+        "title": "Missions, Throughput, and Fleet KPIs",
+        "minutes": 15,
+        "track": "fleet-admin",
+        "body_html": "<h3>Missions: work in fleet-sized units</h3><p>Individual robot tasks (pick, drop, move, inventory) are too granular to manage a business on. Missions group them: a mission is a named batch of work assigned to a group of robots — think Outbound wave #1 or Cycle count — Storage A. On this platform the simulator keeps up to three missions in flight at once, each with two to four robots and ten to twenty planned tasks. A mission's row in the <code>missions</code> table carries its <code>name</code>, its <code>robots</code> list, a <code>state</code> that runs Queued to Running to Done, an integer <code>prog</code> percent, and a clock ETA. Robots' completed tasks credit their mission; every tick the snapshot is upserted idempotently, and the console's Missions view polls the table live and can insert new missions.</p><h3>The KPIs that matter</h3><p>As fleet admin, three families of numbers turn robot activity into business language:</p><ul><li><em>Throughput</em> — tasks completed per unit time (the <code>fleet_meta</code> heartbeat row tracks a throughput figure, and per-robot <code>tasks_done</code> accumulates). Missions give throughput a shape: waves per shift, progress percent against ETA.</li><li><em>Availability</em> — the fraction of time robots are able to work. In canonical-status terms: not <code>fault</code>, not <code>estop</code> (the two not-operating statuses). Charging is a nuance — it is unavailable for tasks but healthy; separate scheduled charging from unplanned downtime in your reporting.</li><li><em>MTTR</em> — mean time to repair/recover. Every incident records its duration in minutes (<code>dur</code>), so MTTR is computable directly from resolved incidents. The re-open flap counter keeps this honest: an incident that resolves and re-opens is not two fast recoveries, it is one bad fix.</li></ul><h3>SLAs: promises with instrumentation</h3><p>An SLA is only meaningful when the platform can measure it. Useful fleet SLAs here: mission on-time completion (ETA vs actual), incident response (time from incident open to ack/first action), MTTR ceilings by severity (crit incidents resolved within N minutes), and availability floors per site. Every one of these is computable from tables you already know: <code>missions</code>, <code>incidents</code>, <code>alerts</code>, <code>robots</code>.</p><h3>Reading throughput problems</h3><p>When throughput drops, work the chain in order: are robots unavailable (check status distribution — faults? a charging pileup?), are they slow (speed trends in telemetry — drivetrain findings?), or is work starved (missions Queued but robots idle — an assignment problem, not a robot problem)? The platform separates these signals precisely so you do not guess: status tells availability, telemetry tells speed, missions tell work supply. Most throughput mysteries dissolve into one of the three.</p>",
+        "key_points": [
+          "Missions batch robot tasks into business units: state Queued -> Running -> Done, integer prog percent, clock ETA.",
+          "The simulator keeps up to 3 concurrent missions (2-4 robots, 10-20 tasks each); snapshots upsert idempotently every tick.",
+          "Availability = time not in fault/estop; report scheduled charging separately from unplanned downtime.",
+          "MTTR comes straight from incident durations; flapping incidents mean one bad fix, not two fast recoveries.",
+          "Throughput lives in tasks_done, fleet_meta, and mission progress against ETA.",
+          "Diagnose throughput drops in order: availability (status), speed (telemetry), work supply (missions queue)."
+        ],
+        "quiz": [
+          {
+            "q": "Which statuses count against availability in the canonical vocabulary?",
+            "options": [
+              "fault and estop",
+              "idle and charging",
+              "paused and degraded",
+              "Any status except active"
+            ],
+            "answer_idx": 0,
+            "explain": "fault and estop are the two not-operating statuses. Idle robots are available but unassigned; charging is healthy but should be reported separately; degraded robots are still operating."
+          },
+          {
+            "q": "Where does the data for computing MTTR come from?",
+            "options": [
+              "Operator time sheets",
+              "Resolved incidents' recorded durations (dur, in minutes)",
+              "The robots table's updated_at column",
+              "Mission ETAs"
+            ],
+            "answer_idx": 1,
+            "explain": "Every incident records its duration; MTTR is the mean over resolved incidents. The flap counter prevents a resolve/re-open cycle from masquerading as fast recovery."
+          },
+          {
+            "q": "Missions are Queued but many robots sit idle. What kind of problem is this most likely to be?",
+            "options": [
+              "A robot hardware problem",
+              "A battery problem",
+              "A work-assignment/supply problem — robots are available but work is not flowing to them",
+              "An MQTT connectivity problem"
+            ],
+            "answer_idx": 2,
+            "explain": "Idle robots plus queued missions means availability is fine and the bottleneck is assignment or work release — the third leg of the throughput diagnosis chain (availability, speed, work supply)."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Read the fleet like a business.</p><ul><li>With the loopback platform running, open the console's Missions view. Identify one Running mission: its robots, progress percent, and ETA.</li><li>Watch a robot from that mission complete a task on the map and see the mission's progress credit it.</li><li>Now compute one KPI by hand: from the incidents view, take the durations of any resolved incidents and estimate the fleet's MTTR so far this session.</li></ul><p>Verification passes once the simulator's rolling mission pool has written at least one mission.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "missions",
+            "filter": "select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: Missions and throughput. missions table: id, name, robots jsonb list, state (Queued -> Running -> Done), prog int percent, eta text (clock ETA), created_at, site_id. Simulator keeps up to 3 concurrent missions in flight, 2-4 robots each, 10-20 planned tasks; deterministic rolling names (Outbound wave #1, Cycle count — Storage A, Inbound putaway — Dock 1); robots' completed tasks credit their mission; snapshot upserted every tick with on_conflict=id (idempotent). Console Missions view polls ~6s and can insert new missions. KPIs: throughput = tasks/time (per-robot tasks_done accumulates; fleet_meta id=1 heartbeat row carries writer_id, sim_min, throughput, updated_at); availability = fraction of time not in fault/estop (NOT_OPERATING set); charging is healthy-but-unavailable, report separately from unplanned downtime; MTTR = mean of resolved incidents' dur minutes (flap counter keeps it honest: resolve+reopen = one bad fix). SLA candidates, all computable from live tables: mission on-time vs ETA; incident time-to-ack; MTTR ceiling by severity; availability floor per site. Throughput triage order: 1 availability (status distribution: faults? charging pileup?), 2 speed (telemetry trends, drivetrain findings), 3 work supply (missions Queued while robots idle = assignment problem)."
+      },
+      {
+        "id": "lesson-09-multisite-and-security",
+        "title": "Multi-Site and Security Posture",
+        "minutes": 15,
+        "track": "fleet-admin",
+        "body_html": "<h3>One backend, many buildings</h3><p>Every operational table carries a <code>site_id</code> column so one backend can host several facilities. The default is BLR-DC1 — the original deployment — and writers stamp their rows via a shared helper that reads the <code>YANTRA_SITE_ID</code> environment variable, falling back to the default. Two consequences worth internalizing: legacy writers that never heard of sites keep working (the column default fills in), and readers must treat <code>site_id</code> as optional on rows they consume. Hot read paths are indexed site-first, then by time — filtering by site is the intended access pattern.</p><h3>Demo mode: open on purpose</h3><p>Out of the box the platform is demo-open: a policy called <code>demo_all</code> lets anyone holding the anon (publishable) key read and write every table. That is a feature for evaluation — zero setup, throwaway data — and a liability for anything real. Know your key classes:</p><ul><li><em>Publishable/anon key</em> — designed to ship in browsers and client code. It is exactly as dangerous as your row-level security policies allow: fully open in demo mode, nothing at all in hardened mode.</li><li><em>service_role key</em> — bypasses row-level security entirely. It is a server-side admin credential. Never ship it to a browser, embed it in the console, commit it to git, or put it in client-side code. Servers and cron jobs only.</li></ul><h3>Hardening: the 0006 migration</h3><p>The hardening migration (<code>supabase/0006_harden.sql</code>, opt-in, idempotent) drops <code>demo_all</code> on every table and creates read-only access for the authenticated role. No write policy is created because none is needed — writers switch to the service_role key, which bypasses RLS. The anon key is left with no access at all. Immediately after running it: switch every writer's <code>SUPABASE_KEY</code> to the service_role key; set <code>SARATHI_TOKEN</code> (the copilot then requires a bearer token on its ask endpoint) and <code>YANTRA_WEBHOOK_SECRET</code> (the notifier then signs every webhook POST with an HMAC-SHA256 signature header receivers can verify); and decide the console story.</p><h3>The console decision</h3><p>The browser console has no login flow yet, so in hardened mode it goes dark. Two documented options: add Supabase Auth (preferred, planned), or grant anon read-only access — keeping the console loginless but harmless, since writes still require service_role. Read-only anon is fine for dashboards on trusted networks and wrong for sensitive data. Command approvals always need a server-side path in hardened mode: anon and authenticated deliberately have no write policy.</p><h3>Where multi-site meets security</h3><p>Today all sites share one open (or one hardened) policy set. The documented future path is per-site JWTs carrying a site claim, with per-table policies matching rows to the caller's site — plus a fleet-wide operator role for cross-site reads. Design your site_id hygiene now; tenancy enforcement builds on it later.</p>",
+        "key_points": [
+          "Every operational table carries site_id (default BLR-DC1); writers stamp it from YANTRA_SITE_ID; readers must treat it as optional.",
+          "Demo mode: the demo_all policy lets the anon key read and write everything — great for evaluation, wrong for real data.",
+          "Anon/publishable keys are safe to ship in clients; the service_role key bypasses RLS and must never reach a browser or git.",
+          "0006_harden.sql drops demo_all, makes authenticated read-only, and leaves anon with no access; writers switch to service_role.",
+          "Hardened extras: SARATHI_TOKEN gates the copilot's ask endpoint; YANTRA_WEBHOOK_SECRET adds HMAC-SHA256 webhook signatures.",
+          "Hardened console options: Supabase Auth (preferred), or read-only anon for trusted-network dashboards; command writes always need a server-side path."
+        ],
+        "quiz": [
+          {
+            "q": "What makes the service_role key categorically different from the anon key?",
+            "options": [
+              "It is longer",
+              "It bypasses row-level security entirely — a server-side admin credential that must never reach a browser or git",
+              "It only works from the console",
+              "It expires daily"
+            ],
+            "answer_idx": 1,
+            "explain": "The anon key's power is bounded by RLS policies; the service_role key ignores RLS completely. That is why it belongs only on servers and in cron jobs — never in client code."
+          },
+          {
+            "q": "After running the hardening migration, what can the anon (publishable) key do?",
+            "options": [
+              "Read everything, write nothing",
+              "Read and write, but only its own site's rows",
+              "Nothing — no read and no write, unless you separately add a read-only anon option",
+              "Write commands only"
+            ],
+            "answer_idx": 2,
+            "explain": "0006_harden.sql deliberately creates no anon policies: the publishable key loses both read and write. The documented Option B can restore read-only anon access for a loginless console on trusted networks."
+          },
+          {
+            "q": "Why do writers not need any write policy after hardening?",
+            "options": [
+              "Writes are disabled platform-wide",
+              "Writers use the service_role key, which bypasses RLS — so no policy is required",
+              "The authenticated role has an implicit write grant",
+              "PostgREST caches writes locally"
+            ],
+            "answer_idx": 1,
+            "explain": "Hardened-mode writers (sim, detector, connector, ops) switch SUPABASE_KEY to service_role, which has RLS bypass. Creating write policies would only widen the attack surface."
+          },
+          {
+            "q": "What does setting YANTRA_WEBHOOK_SECRET change about notifier behavior?",
+            "options": [
+              "Webhooks are encrypted end to end",
+              "Every webhook POST carries an HMAC-SHA256 signature of the request body, so receivers can verify the sender",
+              "The notifier switches to WhatsApp delivery",
+              "Webhooks are queued instead of sent"
+            ],
+            "answer_idx": 1,
+            "explain": "With the secret set, each webhook POST includes an X-Yantra-Signature header — an HMAC-SHA256 of the exact body — letting receivers authenticate that the payload really came from your notifier."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Audit your running platform's posture.</p><ul><li>Read <code>docs/SECURITY.md</code> — specifically the two-modes table and the key-classes section.</li><li>Answer for your own (loopback) session: which mode is it equivalent to, and why is that acceptable here?</li><li>In the console or via the API, confirm robots are stamped with the default site: every simulated robot should carry <code>site_id</code> BLR-DC1 (the value <code>YANTRA_SITE_ID</code> would override).</li><li>Write down the three things you would do first when moving this to real data (hint: the migration, the writer keys, the two service secrets).</li></ul><p>Verification passes once robots stamped with site BLR-DC1 exist in the backend.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "robots",
+            "filter": "site_id=eq.BLR-DC1&select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: Multi-site and security (docs/SECURITY.md, supabase/0005+0006). Multi-site: 0005_sites.sql adds site_id (default BLR-DC1) to robots/alerts/incidents/missions/robot_telemetry/maintenance_findings/commands, with site-first+time indexes; writers stamp via yantracore site_id() reading env YANTRA_SITE_ID (fallback BLR-DC1); readers treat site_id as optional; fleet_meta stays single-site (id=1). Future sketch: per-site JWTs with site_id claim, per-table policies, fleet-wide operator role. Modes: DEMO (default): demo_all policy = anon+authenticated full read/write everywhere; embedded client-safe anon key; for demos/throwaway data. HARDENED (0006_harden.sql, opt-in, idempotent): drops demo_all on all 8 tables, creates hardened_read_authenticated (select-only for authenticated), NO anon policies (anon loses read+write), NO write policies (writers use service_role, which BYPASSES RLS). Key classes: publishable/anon = safe in browsers, power bounded by RLS; service_role = bypasses RLS, server-side only, never in browser/console/git. Post-harden: switch writer SUPABASE_KEY to service_role; set SARATHI_TOKEN (POST /ask requires Bearer, else 401; /health open); set YANTRA_WEBHOOK_SECRET (X-Yantra-Signature: sha256 HMAC of exact body). Console: Option A Supabase Auth (preferred/planned); Option B read-only anon for trusted networks; command writes always need a server-side path. 0006 includes a rollback block."
+      },
+      {
+        "id": "lesson-10-architecture-tour",
+        "title": "Architecture Tour",
+        "minutes": 15,
+        "track": "integrator",
+        "body_html": "<h3>The shape of the system</h3><p>YantraFleet is a small constellation of independent processes that share exactly one thing: the backend schema. No component calls another directly — everything coordinates through tables over PostgREST. That single design decision is why you can kill, restart, replace, or add components without renegotiating interfaces. The modules:</p><ul><li><code>sim/</code> (yantrasim) — deterministic 10-AMR warehouse simulator: 3 vendors, an 8x5 waypoint grid, chargers, random and scripted faults. Emits VDA 5050 v2.1 state; publishes to the backend directly, to MQTT, or to stdout.</li><li><code>connector/</code> (yantrabridge) — pure VDA 5050-to-rows translation, alert dedup, and a batched sink. Sources: JSONL replay or live MQTT. Also home to the MCAP importer and the command publisher.</li><li><code>detector/</code> (yantradetect) — polls robots and maintains incidents (pending window, deterministic ids, re-open/flap logic); in maintenance mode it reads telemetry windows and maintains findings instead.</li><li><code>notifier/</code> (yantranotify) — polls unacked crit/serious alerts and Open incidents, dedups, fans out to console/webhook/WhatsApp; credential-less channels print instead of sending.</li><li><code>copilot/</code> (sarathi) — a FastAPI service answering fleet questions with cited evidence, degrading through tiers; also exposes the same toolbox over MCP for external agents.</li><li><code>console/</code> — a single-file web console with no build step: live map, robot detail, alerts, incidents with replay, missions, the approval gate, and a copilot panel.</li><li><code>core/</code> (yantracore) — the canonical status contract and the site-id helper every component shares.</li><li><code>ops/</code> (yantraops) — the orchestrator: one command brings the stack up in loopback, cloud, or MQTT mode; plus migrate, doctor, and status.</li></ul><h3>The loopback trick</h3><p>In loopback mode the orchestrator starts an in-process fake PostgREST on localhost first, then points every child at it via environment variables. The children cannot tell the difference — same HTTP, same filters, same rows. This is also how the offline end-to-end suite works: real localhost HTTP, zero network egress.</p><h3>Coordination without a coordinator</h3><p>Two patterns do the coordinating. First, writer election: the <code>fleet_meta</code> heartbeat row (id 1) carries a <code>writer_id</code>; a live simulator feed outranks console tabs, and consoles automatically become viewers while a simulator (or a future robot adapter) is publishing. Second, idempotent writes everywhere: deterministic incident and finding ids, upserts with conflict targets, duplicate-ignoring alert inserts — so any component can crash and retry without corrupting shared state.</p><h3>Why this matters to integrators</h3><p>Your integration surface is the schema, not any process's internals. Anything that can write well-formed rows is a first-class citizen — which is exactly how real robots join in the next lesson.</p>",
+        "key_points": [
+          "Components never call each other — all coordination flows through shared tables over PostgREST.",
+          "Module map: sim (simulator), connector (VDA translation + import + commands), detector (incidents/findings), notifier (fan-out), copilot (sarathi), console (single file), core (status contract), ops (orchestrator).",
+          "Loopback mode boots an in-process fake PostgREST and points children at it via env — children cannot tell the difference.",
+          "Writer election via the fleet_meta heartbeat (writer_id): a live simulator feed outranks console tabs.",
+          "Idempotency everywhere (deterministic ids, upserts, ignore-duplicate inserts) makes crash-and-retry safe.",
+          "The integration surface is the schema: anything writing well-formed rows is a first-class citizen."
+        ],
+        "quiz": [
+          {
+            "q": "How do YantraFleet components communicate with each other?",
+            "options": [
+              "gRPC calls between services",
+              "A shared message bus with a broker in every mode",
+              "They do not call each other — all coordination flows through backend tables over PostgREST",
+              "Unix pipes managed by the orchestrator"
+            ],
+            "answer_idx": 2,
+            "explain": "The schema is the only shared interface. That is why components can be killed, replaced, or added independently — and why the integration surface for real robots is simply well-formed rows."
+          },
+          {
+            "q": "What makes loopback mode work without any cloud backend?",
+            "options": [
+              "Components detect loopback and switch to SQLite",
+              "The orchestrator starts an in-process fake PostgREST first and points every child at it via environment variables",
+              "The console caches all data in the browser",
+              "A bundled Postgres container"
+            ],
+            "answer_idx": 1,
+            "explain": "The fake serves the same HTTP/filter surface as PostgREST on localhost; children are configured via env and cannot tell the difference. The offline e2e suite uses the same trick."
+          },
+          {
+            "q": "Two consoles and a simulator are all running. Who writes fleet state, and how is that decided?",
+            "options": [
+              "Whoever started first, permanently",
+              "The simulator — a live sim feed outranks console tabs via the fleet_meta writer_id heartbeat, and consoles become viewers",
+              "All three write and last-write-wins",
+              "The detector arbitrates"
+            ],
+            "answer_idx": 1,
+            "explain": "Writer election runs through the fleet_meta heartbeat row: consoles auto-elect leader/follower against writer_id, and a publishing simulator (or robot adapter) outranks them, demoting consoles to viewers."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Trace the data flow through a live stack.</p><ul><li>With the loopback platform running, list the processes the orchestrator started (the startup output names them: the backend, simulator, detector, notifier, copilot, console server).</li><li>Follow one fault end to end: simulator writes a fault status to <code>robots</code>; the detector's next polls open an incident; the notifier prints a dry-run notification; the console shows both.</li><li>Check the heartbeat: the <code>fleet_meta</code> row (id 1) identifies the current writer — confirm it is the simulator's feed, not a console tab.</li></ul><p>Verification passes once the fleet_meta heartbeat row exists.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "fleet_meta",
+            "filter": "id=eq.1&select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Lesson: Architecture tour. Design: independent processes sharing ONE interface — the backend schema over PostgREST; no direct inter-component calls. Modules: sim/yantrasim (deterministic 10-AMR simulator, 3 vendors, 8x5 grid, chargers, scripted AMR-07 fault; emits VDA 5050 v2.1 state to Supabase/MQTT/stdout); connector/yantrabridge (VDA->rows translation, AlertDeduper, batched sink; JSONL/MQTT sources; MCAP importer; command publisher); detector/yantradetect (robots poll -> incidents: pending window, deterministic INC ids, re-open/flap, stale auto-resolve; --maintenance -> maintenance_findings); notifier/yantranotify (unacked crit/serious alerts + Open incidents -> console/webhook/WhatsApp; credential-less channels print); copilot/sarathi (FastAPI POST /ask :8001, tiers grounded/llm_only/offline, citations; MCP server); console (single-file index.html, no build step: map, robot detail, alerts, incidents+replay, missions, approval gate, copilot panel with 4s timeout + rule-engine fallback); core/yantracore (canonical statuses + site_id helper); ops/yantraops (up --loopback/--supabase/--mqtt, migrate, doctor, status). Loopback: orchestrator loads e2e/fakerest.py in-process (fake PostgREST on 127.0.0.1, ephemeral ports), spawns sim, detector, notifier --dry-run, sarathi, http.server console; READY banner prints URL. Coordination: fleet_meta id=1 writer_id heartbeat (sim feed outranks consoles); idempotent writes everywhere (deterministic ids, upserts, ignore-duplicates)."
+      },
+      {
+        "id": "lesson-11-connecting-real-robots",
+        "title": "Connecting Real Robots",
+        "minutes": 18,
+        "track": "integrator",
+        "body_html": "<h3>Three on-ramps</h3><p>A real robot joins the platform three ways, in increasing order of liveness: replay a recording file, import a robot bag, or bridge a live MQTT broker. All three go through the same connector and the same translation code, so what you validate offline holds online.</p><h3>Live MQTT: the production path</h3><p>Point the bridge at your broker: <code>python -m yantrabridge --mqtt-host broker.local --mqtt-port 1883</code>. It subscribes to the VDA state topics (by default <code>uagv/v2/+/+/state</code>) and translates every state message into robots rows, alerts, and a connector heartbeat. Any robot publishing compliant VDA 5050 v2.1 state — or any vendor adapter that emits it — appears on the console with no further code. Authentication flags cover username/password brokers; environment variables point at your backend.</p><h3>Closing the loop: the commands flag</h3><p>Add <code>--commands</code> (live MQTT mode only) and the bridge also runs the operator-command loop: it polls approved rows from the <code>commands</code> table, publishes each exactly once as an instantActions message on the robot's own topic, then watches the state messages it is already consuming for matching actionStates entries and PATCHes each command to executed or failed with the robot's result description. This is the same approval gate operators learned, now driving real hardware. Remember the documented caveat: publish-once semantics mean a command sent to an offline robot is lost until a human re-approves a fresh one — nothing silently retries into a machine that just came back.</p><h3>Bring your own recording: MCAP import</h3><p>Most robots can already give you an MCAP file — a ROS 2 rosbag with JSON-encoded topics, a Foxglove recording, anything writing raw JSON channels. The importer needs no ROS installation:</p><ul><li><code>python -m yantrabridge import --mcap run.mcap --dry-run</code> — inspect first: topics found, message counts, time range, rows that would be written. No network.</li><li>Bulk import writes one telemetry row per message with the <em>original recording timestamps preserved</em>, plus a final robots state and alerts from errors — instant historical fleet data.</li><li><code>--rate 4</code> replays at 4x real time, updating the robots table live so the console animates the recording.</li></ul><h3>Non-VDA robots: the topic map</h3><p>Topics that look like VDA 5050 state are auto-detected and go through the standard translation. Everything else is skipped — unless you map it. A topic-map JSON file maps arbitrary topic patterns and payload fields to fleet columns: robot id from a topic segment, battery from a nested payload field, a status map translating vendor mode strings into the canonical vocabulary. With a dozen lines of JSON, a proprietary robot's recording becomes standard fleet history — no code.</p><h3>Integration discipline</h3><p>Always dry-run first — both the file replay and the importer support it. Validate the translated rows against what you know about the robot. Then go live, and watch the console with your own eyes before trusting the pipeline unattended.</p>",
+        "key_points": [
+          "Three on-ramps, one translation path: JSONL replay, MCAP import, live MQTT bridge.",
+          "Live bridge: yantrabridge --mqtt-host subscribes to uagv/v2/+/+/state; compliant VDA 5050 robots need zero custom code.",
+          "--commands adds the approved-command loop: publish instantActions once, close via actionStates, PATCH executed/failed.",
+          "Publish-once caveat: a command sent to an offline robot is lost and needs fresh human approval — no silent retries.",
+          "MCAP import preserves original recording timestamps; --dry-run inspects before writing; --rate replays live for the console.",
+          "The topic map turns non-VDA recordings into fleet history with JSON config, including a status map into the canonical vocabulary."
+        ],
+        "quiz": [
+          {
+            "q": "What does the bridge subscribe to in live MQTT mode by default?",
+            "options": [
+              "All topics on the broker",
+              "uagv/v2/+/+/state — the VDA 5050 state topics for every manufacturer and serial",
+              "A single per-robot topic you must configure",
+              "The instantActions topics"
+            ],
+            "answer_idx": 1,
+            "explain": "The wildcard subscription covers every robot's state topic under the VDA scheme; each message is translated by the same code the offline paths use."
+          },
+          {
+            "q": "Why must --commands be combined with live MQTT mode?",
+            "options": [
+              "It is a licensing restriction",
+              "The command loop publishes instantActions to robots and closes them from state messages — both require a live broker connection",
+              "File replay is too slow for commands",
+              "MQTT is the only transport with authentication"
+            ],
+            "answer_idx": 1,
+            "explain": "The command publisher needs to publish to robot topics and observe returning actionStates in live state traffic; neither exists when replaying a file."
+          },
+          {
+            "q": "What is the recommended first step before importing an MCAP recording?",
+            "options": [
+              "Convert it to CSV",
+              "Run the import with --dry-run to inspect topics, counts, time range, and the rows that would be written",
+              "Truncate the telemetry table",
+              "Install ROS 2"
+            ],
+            "answer_idx": 1,
+            "explain": "Dry-run inspection costs nothing (no network) and shows exactly what the importer detected and would write. No ROS installation is needed at any point — the importer reads MCAP directly."
+          },
+          {
+            "q": "Your robot publishes JSON on /acme/robot7/telemetry with a mode field of MOVING or DOCKED. How do you import its recordings?",
+            "options": [
+              "You must write a custom Python translator",
+              "Rename the topics to VDA form in the robot firmware",
+              "Provide a topic-map JSON mapping topic patterns and payload fields to fleet columns, with a status map to the canonical vocabulary",
+              "It cannot be imported — only VDA 5050 sources are supported"
+            ],
+            "answer_idx": 2,
+            "explain": "The --topic-map option maps arbitrary topics/fields to robot_id, battery, position, speed, status and more, including a status_map (e.g. MOVING to active, DOCKED to charging). No code required."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Rehearse a real-robot integration offline.</p><ul><li>Replay the bundled recording through the full translation: <code>python -m yantrabridge --file connector/sample.jsonl --dry-run</code>, and confirm the three robots and their derived statuses.</li><li>Read the topic-map example in <code>connector/README.md</code> and sketch (on paper or in a scratch file) the map you would write for one of your own robots: which topic pattern, which payload field per column, and the status_map into the canonical vocabulary.</li><li>Identify the caveat you would brief operators on before enabling --commands on a live broker.</li></ul>",
+          "verify": {
+            "kind": "self_check",
+            "prompt": "Did you dry-run the sample replay, draft a topic map for a hypothetical non-VDA robot (topic pattern, field mappings, status_map), and can you state the publish-once command caveat from memory?"
+          }
+        },
+        "tutor_context": "Lesson: Connecting real robots. On-ramps: 1) JSONL replay: python -m yantrabridge --file connector/sample.jsonl [--dry-run] (5 VDA 5050 v2.1 state messages, 3 robots). 2) Live MQTT: python -m yantrabridge --mqtt-host broker.local --mqtt-port 1883; subscribes uagv/v2/+/+/state; flags --mqtt-topic/--mqtt-username/--mqtt-password/--battery-threshold (default 20); needs paho-mqtt>=2.0; any compliant VDA robot appears with zero custom code. 3) MCAP import: pip install yantrabridge[import]; python -m yantrabridge import --mcap run.mcap [--dry-run|--rate 4|--jsonl file]; no ROS needed; writes one robot_telemetry row per message with ORIGINAL recording timestamps, final robots state, alerts from errors[]; --rate 4 = 4x realtime replay animating the console; VDA-looking topics auto-detected, others skipped unless mapped. Topic map (--topic-map map.json): {topic-pattern (exact or fnmatch *): {robot_id required (e.g. topic[1]), battery, pos.x, pos.y, speed, status, motor_temp, ts, status_map {vendor-string: canonical}}}. Command loop: --commands (live MQTT only): polls status=approved rows, publishes each ONCE as instantActions {actionType yantra.<cmd>, actionId=uuid, blockingType HARD}; closes from actionStates FINISHED/FAILED in state messages -> PATCH executed/failed, resultDescription in note. Caveat: QoS 0 publish-once; offline robot loses the command; row stays approved; human re-approves a fresh row. Discipline: dry-run first, validate rows, then live with eyes on the console."
+      },
+      {
+        "id": "lesson-12-copilots-and-grounding",
+        "title": "Copilots and Grounding",
+        "minutes": 15,
+        "track": "integrator",
+        "body_html": "<h3>A copilot you can audit</h3><p>Sarathi, the fleet copilot, answers questions about your fleet — but the interesting part is how it earns trust. Every answer is built from a toolbox of live-data queries (fleet summary, robots, alerts, incidents, commands, robot history, telemetry), and each tool result carries a citation key. Answers cite their evidence; a claim without a source is a defect, not a style choice.</p><h3>Three tiers, honest degradation</h3><p>The service always answers, but it always tells you how much to trust the answer, via a tier label:</p><ul><li><code>grounded</code> — an LLM runs an agent loop over the live tools. Requires both an API key and a reachable data backend. This is the full experience: natural-language answers backed by fresh rows.</li><li><code>llm_only</code> — the data backend is down but an LLM is available. The model answers from general knowledge, clearly labeled as not backed by live data.</li><li><code>offline</code> — no LLM at all (no key, or the LLM failed). The service computes template answers directly from tool data. Less fluent, but grounded by construction.</li></ul><p>The endpoint returns success with a tier field in every case — clients render the tier, and operators learn to read it. Degradation is a feature: a copilot that fails closed into silence is useless during an outage, and one that fails open into confident guessing is dangerous.</p><h3>The grounding guard</h3><p>LLMs sometimes emit numbers their evidence does not support. Sarathi runs a post-hoc guard on LLM-tier answers: it extracts the numeric tokens from the final text — deliberately skipping timestamps, clock times, entity-style ids like AMR-07 or INC-2, and evidence references, none of which are figures a model could meaningfully hallucinate — and requires each remaining number to appear in the tool-result payloads backing the answer. Formatting differences are tolerated (8 and 8.0 match; a payload value of 54.16 supports a quoted 54.2, since models legitimately round). The answer is then labeled verified or unverified, with offending tokens listed; offline-tier answers are labeled computed, being grounded by construction. An unverified label does not delete the answer — it tells the human exactly which claims to double-check.</p><h3>Beyond the chat panel</h3><p>The console's copilot panel calls the service with a short timeout and quietly falls back to a built-in rule engine when the service is not running — the UI never hangs on an LLM. And the same evidence-grounded toolbox is exposed over the Model Context Protocol, so external agents (a desktop assistant, another automation) can query your fleet through the identical tools, with the identical citations. One toolbox, many surfaces.</p><h3>The integrator's takeaway</h3><p>When you extend the copilot, preserve the contract: every capability is a tool that returns citable data, every answer declares its tier, and every number must trace to evidence. Fluency is optional; auditability is not.</p>",
+        "key_points": [
+          "Sarathi answers from a live-data toolbox (fleet summary, robots, alerts, incidents, commands, history, telemetry), with citation keys on every tool result.",
+          "Three tiers, always labeled: grounded (LLM + live tools) -> llm_only (LLM, backend down) -> offline (computed template answers, no LLM).",
+          "The service always responds with a tier field; honest degradation beats both silence and confident guessing.",
+          "The grounding guard extracts numbers from LLM answers (skipping timestamps, ids, clock times) and verifies each against tool payloads.",
+          "Labels: verified / unverified (with offending tokens listed) for LLM tiers; computed for offline answers.",
+          "The console panel falls back to a local rule engine on timeout; the same toolbox is exposed over MCP for external agents."
+        ],
+        "quiz": [
+          {
+            "q": "The data backend is unreachable but an LLM key is configured. Which tier does Sarathi answer at?",
+            "options": [
+              "grounded",
+              "llm_only — clearly labeled as answered without live data",
+              "offline",
+              "It returns an error instead of answering"
+            ],
+            "answer_idx": 1,
+            "explain": "Tier degradation is grounded -> llm_only -> offline. With tools unavailable but an LLM working, the answer comes from the model alone and is labeled llm_only so the reader can calibrate trust."
+          },
+          {
+            "q": "Why does the grounding guard skip tokens like AMR-07 and timestamps when verifying numbers?",
+            "options": [
+              "They are too long to parse",
+              "They are identifiers and times, not figures — not the kind of number a model could meaningfully hallucinate as a quantitative claim",
+              "The guard only checks integers",
+              "They are always wrong anyway"
+            ],
+            "answer_idx": 1,
+            "explain": "The guard targets quantitative claims (counts, percentages, temperatures). Entity ids, clock times, timestamps, and evidence references are excluded on both sides so they neither trigger nor satisfy verification."
+          },
+          {
+            "q": "Why are offline-tier answers labeled computed rather than run through the grounding check?",
+            "options": [
+              "The check would be too slow without an LLM",
+              "They are rendered directly from tool data by construction, so there is no model output to verify",
+              "Offline answers contain no numbers",
+              "The label is a legacy artifact"
+            ],
+            "answer_idx": 1,
+            "explain": "Offline answers are templates filled from tool results — every figure comes straight from the data. There is no free-form generation step that could introduce unsupported numbers."
+          },
+          {
+            "q": "What happens in the console when the copilot service is not running?",
+            "options": [
+              "The copilot panel shows an error and blocks",
+              "The console crashes",
+              "The panel times out quickly and silently falls back to a built-in local rule engine",
+              "The console restarts the service"
+            ],
+            "answer_idx": 2,
+            "explain": "The panel calls the service with a short timeout and falls back to its local rule engine — the UI never hangs on an LLM, and basic answers keep flowing."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Interrogate your fleet and audit the answers.</p><ul><li>With the loopback platform running, open the console's Copilot panel and ask: which robots are not operating right now?</li><li>Check the tier of the answer. In a default loopback run with no LLM key, expect <code>offline</code> — computed template answers.</li><li>Ask about AMR-07's recent history and compare the answer's numbers against the robot detail view. Do they trace?</li><li>If you have an LLM API key, export it and restart: repeat a question at the <code>grounded</code> tier and find the evidence citations and grounding label on the response.</li></ul>",
+          "verify": {
+            "kind": "self_check",
+            "prompt": "Did you ask the copilot at least two fleet questions, identify the tier of each answer, and verify at least one numeric claim against the console's own data?"
+          }
+        },
+        "tutor_context": "Lesson: Copilots and grounding. Sarathi: FastAPI service, POST /ask on :8001. Toolbox (each result carries a source_id citation key): fleet_summary, query_robots, query_alerts, query_incidents, query_commands, robot_history, query_telemetry (windowed samples + battery/speed/motor-temp stats + status-transition counts). Tiers: grounded (LLM agent loop over live tools; needs API key AND data backend), llm_only (LLM without live data — backend down), offline (computed template answers from tool data, no LLM). Always HTTP 200 with tier field; degrades t1->t2 on backend failure, t1/t2->t3 on LLM failure. Keys: GEMINI_API_KEY or OPENAI_API_KEY (or SARATHI_MODEL); no key = offline. Grounding guard (post-hoc, LLM tiers only): extracts numeric tokens from the answer, skipping ISO timestamps, clock times, entity ids (AMR-07, INC-2 style), evidence refs; each remaining number must appear in the tool-result payloads; tolerances: int/float equivalence, 1-decimal rounding (54.16 supports 54.2). Labels: verified / unverified (offending tokens listed) / computed (offline tier, grounded by construction). Console panel: calls localhost:8001/ask with 4s timeout, silent fallback to a built-in local rule engine. MCP: python -m sarathi.mcp_server exposes the same toolbox over Model Context Protocol (stdio) for external agents. SARATHI_TOKEN gates /ask with Bearer auth when set. Integrator contract: every capability is a citable tool; every answer declares its tier; every number traces to evidence."
+      }
+    ],
+    "checkride": {
+      "id": "checkride-operator-cert",
+      "title": "Operator Certification — Checkride",
+      "steps": [
+        {
+          "instruction_html": "<p><strong>Scenario:</strong> You are on shift when robot AMR-07 loses localization — the simulator scripts this fault early in every run, so start a fresh <code>python -m yantraops up --loopback</code> session and watch for it.</p><p><strong>Step 1 — Find the faulted robot.</strong> Using the console's live map and status vocabulary, identify the robot in <code>fault</code>. Open its detail view and read the fault message (it names a localization/LiDAR mismatch). Let the platform record the event.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "robot_telemetry",
+            "filter": "robot_id=eq.AMR-07&status=eq.fault&select=id&limit=1",
+            "expect": "rows>0"
+          },
+          "rubric_points": [
+            "Located the faulted robot from the map/status distribution without being told its id",
+            "Read fault_msg and correctly identified the failure class (localization lost, LiDAR scan does not match map)",
+            "Used canonical vocabulary: distinguished fault from estop/degraded when describing the state"
+          ]
+        },
+        {
+          "instruction_html": "<p><strong>Step 2 — Read the incident.</strong> The detector opens an incident after seeing AMR-07 in fault for two consecutive polls. Open the incidents view, find the incident whose source is AMR-07, and read its severity, state, and duration. Explain why it took roughly two poll intervals to appear.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "incidents",
+            "filter": "src=eq.AMR-07&select=id&limit=1",
+            "expect": "rows>0"
+          },
+          "rubric_points": [
+            "Found the AMR-07 incident and read sev (crit — fault condition), state, and dur correctly",
+            "Explained the two-consecutive-polls pending window as a flap guard against transients",
+            "Opened the replay (or explained what it would show) using the telemetry window around the incident"
+          ]
+        },
+        {
+          "instruction_html": "<p><strong>Step 3 — Acknowledge the critical alert.</strong> The fault raised a <code>crit</code> alert. Triage the alerts view — highest severity, unacked, most recent — and acknowledge it. State out loud what your ack means and what it does to external notification.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "alerts",
+            "filter": "sev=eq.crit&ack=eq.true&select=id&limit=1",
+            "expect": "rows>0"
+          },
+          "rubric_points": [
+            "Triaged by severity before recency and picked the crit alert",
+            "Articulated ack semantics: a human owns the response; it is not resolution",
+            "Knew that acking stops the notifier's repeat external pushes (it only notifies unacked crit/serious)"
+          ]
+        },
+        {
+          "instruction_html": "<p><strong>Step 4 — Queue a pause through the gate.</strong> Policy says a robot recovering from a localization fault should be held for inspection. From AMR-07's detail view in the console, request a <code>pause</code>. Confirm that nothing changed on the robot yet — the request must appear as a <code>pending</code> row awaiting approval.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "commands",
+            "filter": "robot_id=eq.AMR-07&cmd=eq.pause&select=id&limit=1",
+            "expect": "rows>0"
+          },
+          "rubric_points": [
+            "Queued the pause via the console rather than expecting direct robot control",
+            "Verified the command sat in pending status with requested_by recorded",
+            "Explained why the gate exists: no unaccountable, single-click actions on physical machines"
+          ]
+        },
+        {
+          "instruction_html": "<p><strong>Step 5 — Approve it, accountably.</strong> On the Overview's Pending approvals card, review the pause request: right robot, right verb, sensible reason. Approve it. You are now the accountable human — the row records you as <code>decided_by</code> with a timestamp.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "commands",
+            "filter": "robot_id=eq.AMR-07&cmd=eq.pause&status=in.(approved,executed)&select=id&limit=1",
+            "expect": "rows>0"
+          },
+          "rubric_points": [
+            "Reviewed robot id, verb, and context before approving — did not rubber-stamp",
+            "Stated the accountability transfer: approver owns the action; decided_by/decided_at record it",
+            "Knew rejection with a note is the correct move when a request cannot be justified"
+          ]
+        },
+        {
+          "instruction_html": "<p><strong>Step 6 — Verify execution and closure.</strong> The running simulator polls approved commands and executes them. Watch AMR-07 go <code>paused</code> on the map, confirm the command row reached <code>executed</code>, and check the incident: once AMR-07 recovered from the fault, the detector resolved it with a final duration. Walk the full audit trail — who requested, who decided, when it executed, how long the incident lasted.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "commands",
+            "filter": "robot_id=eq.AMR-07&cmd=eq.pause&status=eq.executed&select=id&limit=1",
+            "expect": "rows>0"
+          },
+          "rubric_points": [
+            "Confirmed executed status on the command and paused status on the robot",
+            "Checked the incident's resolution state and duration after recovery",
+            "Narrated the complete audit chain: request -> decision -> execution -> incident resolution, with timestamps"
+          ]
+        }
+      ],
+      "pass_threshold": 0.8
+    }
+  }
+}

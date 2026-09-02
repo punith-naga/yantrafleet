@@ -68,4 +68,6 @@ def run_status(state_file: Path) -> int:
     for name, pid, url, detail in rows:
         print(f"{name:<{w_name}}{pid:<{w_pid}}{url:<{w_url}}{detail}")
     print(f"\nconsole: {state['console_url']}")
+    if state.get("academy_url"):
+        print(f"academy: {state['academy_url']}")
     return 0 if all_ok else 1

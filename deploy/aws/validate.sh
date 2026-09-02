@@ -62,6 +62,21 @@ echo "$RENDERED" | grep -q 'proxy_pass http://127.0.0.1:8001;' \
     && pass "/ask + /health proxy to 127.0.0.1:8001" \
     || fail "copilot proxy_pass missing"
 
+# academy + docs static locations (v0.9.x)
+echo "$RENDERED" | grep -q 'location /academy/' \
+    && pass "nginx location /academy/ present" \
+    || fail "nginx location /academy/ missing"
+echo "$RENDERED" | grep -q 'location /docs/' \
+    && pass "nginx location /docs/ present" \
+    || fail "nginx location /docs/ missing"
+echo "$RENDERED" | grep -q '302 /academy/index.html?supa=https://dummy.supabase.co&key=dummy-anon-key&site=TEST-SITE' \
+    && pass "academy 302 redirect carries supa/key/site" \
+    || fail "academy 302 redirect missing substituted supa/key/site"
+echo "$RENDERED" | grep -qE 'location /(academy|docs)/ \{' \
+    && echo "$RENDERED" | grep -q 'root /opt/yantrafleet;' \
+    && pass "academy/docs served from /opt/yantrafleet" \
+    || fail "academy/docs root directive missing"
+
 # ---------------------------------------------------------------------------
 # 3) python sanity (the instance needs a venv-capable python3)
 # ---------------------------------------------------------------------------

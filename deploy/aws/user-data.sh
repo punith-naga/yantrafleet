@@ -129,7 +129,7 @@ systemctl enable --now yantra-detect yantra-notify yantra-sarathi
 #   sudo systemctl enable --now yantra-sim
 
 # ---------------------------------------------------------------------------
-# 7) nginx: console + copilot proxy
+# 7) nginx: console + academy + docs + copilot proxy
 # ---------------------------------------------------------------------------
 echo "== templating nginx site"
 export SUPABASE_URL SUPABASE_KEY YANTRA_SITE_ID

@@ -36,6 +36,25 @@ server {
         try_files $uri $uri/ =404;
     }
 
+    # -- academy (static training app) ------------------------------------
+    # Bare /academy or /academy/ gets the same backend params as the console.
+    location = /academy {
+        return 302 /academy/index.html?supa=${SUPABASE_URL}&key=${SUPABASE_KEY}&site=${YANTRA_SITE_ID};
+    }
+    location = /academy/ {
+        return 302 /academy/index.html?supa=${SUPABASE_URL}&key=${SUPABASE_KEY}&site=${YANTRA_SITE_ID};
+    }
+    location /academy/ {
+        root /opt/yantrafleet;
+        try_files $uri $uri/ =404;
+    }
+
+    # -- docs (static docs site) ------------------------------------------
+    location /docs/ {
+        root /opt/yantrafleet;
+        try_files $uri $uri/ =404;
+    }
+
     # -- sarathi copilot API (uvicorn on loopback) ------------------------
     location /ask {
         proxy_pass http://127.0.0.1:8001;

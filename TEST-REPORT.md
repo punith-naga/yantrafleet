@@ -1,4 +1,4 @@
-# YantraFleet — Test Report (v0.9.0)
+# YantraFleet — Test Report (v0.10.0)
 
 All suites executed offline, 2026-09-02.
 
@@ -10,10 +10,11 @@ All suites executed offline, 2026-09-02.
 | detector | 60 |
 | notifier | 64 |
 | copilot | 65 |
-| ops | 45 |
-| e2e | 17 |
+| ops | 48 |
+| e2e | 18 |
+| academy | 20 (browser, incl. fake-WebLLM tier tests) |
 | console | 33 (24 browser via Playwright/Chromium + 9 static) |
-| **Total** | **426** — 0 failed |
+| **Total** | **450** — 0 failed |
 
 Also green: node scripts/check_console.mjs · bash deploy/aws/validate.sh (18 checks).
 

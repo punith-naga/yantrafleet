@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.10.0 — 2026-09-02
+- **YantraFleet Academy** (`academy/`) — learn Physical AI by operating the
+  live platform. Research-driven design (NVIDIA DLI, MiR/OTTO operator
+  training, The Construct; checkride-style practical certification):
+  - 3 role tracks × 12 lessons (Operator / Fleet Admin / Integrator),
+    every fact grounded in this codebase; quizzes with explanations
+  - practicals verified against the LIVE backend ("ack an alert" is
+    checked in the alerts table, not self-reported)
+  - Operator Certification Checkride: 6 verified steps on the AMR-07
+    scenario → printable certificate + Open Badges 3.0-shaped JSON
+  - **Guru, the on-device AI tutor**: WebLLM (opt-in ~1.7GB one-time
+    download, then fully offline & free; Qwen2.5-1.5B default with
+    1B/3B ladder), streamed lesson-grounded answers, JSON-schema rubric
+    grading — degrading to Sarathi server tier, then offline rules
+- `yantraops up` now serves console + /academy/ + /docs/ from one server
+  (URLs in banner/status); EC2 nginx template + validate.sh extended
+- 450 tests green across 10 suites (incl. 20 academy browser tests with
+  an injected fake WebLLM engine).
+
 ## v0.9.0 — 2026-09-02
 - **AWS deployment kit** (`deploy/aws/`): console-UI-only EC2 deployment —
   cloud-init user-data (EDIT-ME block), systemd units, nginx template that

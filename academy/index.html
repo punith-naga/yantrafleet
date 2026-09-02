@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<!-- ================================================================
+  YantraFleet ACADEMY — learn Physical AI by operating a live fleet
+  =================================================================
+  CONFIG (all optional — the academy degrades gracefully):
+
+  1. Content packs
+     - Loaded from ./content/pack-physical-ai.json (relative fetch).
+     - On ANY failure (404, file://, bad JSON, schema mismatch) the app
+       falls back to a small EMBEDDED starter pack (3 lessons + a
+       checkride) so the page always works.
+     - The full pack schema is documented in academy/README.md.
+
+  2. Live backend (PostgREST / Supabase — same params as the console)
+     - ?supa=<PostgREST base url>   overrides SUPA_URL
+     - ?key=<anon key>              overrides SUPA_KEY
+     - ?site=<site id>              exposed as window.SITE
+     Practical "Verify" buttons and the checkride query the backend
+     read-only (GET /rest/v1/<table>?<filter>). If the backend is
+     unreachable, verification fails with a clear message — lessons
+     and quizzes still work fully offline.
+
+  3. Tutor tiers (window.YFTutor — stable interface, swappable guts)
+     - 'canned'  : built-in keyword engine over the lesson's
+                   tutor_context + key_points. Always available.
+     - 'sarathi' : if http://localhost:8001/health is reachable,
+                   questions POST to /ask with a lesson-context prefix.
+                   ?token=<bearer> adds an Authorization header
+                   (same convention as the console copilot).
+     - 'webllm'  : OPT-IN in-browser model via WebLLM (mlc-ai). Nothing
+                   loads at page-open: the runtime is dynamic-import()ed
+                   from a CDN only after the user clicks "Enable
+                   on-device tutor" in the tutor panel (WebGPU browsers
+                   only; model weights are cached by the browser, then
+                   questions never leave the machine). Test/self-host
+                   seam: window.__YF_WEBLLM_FACTORY (see the WEBLLM
+                   TIER section at the bottom of the script).
+
+  4. 'Open console' links to ../console/index.html preserving the
+     supa/key/site/token query params.
+
+  No build step. Open index.html directly or serve statically:
+      cd academy && python3 -m http.server 8090
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YantraFleet Academy — Learn Physical AI</title>
+<style>
+/* ============ Design tokens (shared with the console — dark, ISA-101) ============ */
+:root{
+  --page:#0d0d0d; --surface:#1a1a19; --surface2:#222221; --surface3:#2a2a28;
+  --border:rgba(255,255,255,.08); --border2:rgba(255,255,255,.14);
+  --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --accent:#3987e5;
+  --r:8px; --r-sm:6px;
+  --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--page);color:var(--ink);font-family:var(--font);font-size:13.5px;line-height:1.5;overflow:hidden}
+button{font-family:inherit;cursor:pointer}
+a{color:#9ec5f4}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#333;border-radius:6px;border:2px solid var(--page)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ============ App shell: header / rail / main / tutor ============ */
+#app{display:grid;grid-template-columns:246px 1fr 336px;grid-template-rows:52px 1fr;height:100vh}
+#app.no-tutor{grid-template-columns:246px 1fr 0}
+#app.no-tutor #tutor{display:none}
+header{grid-column:1/4;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--border)}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:.01em}
+.logo .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#3987e5,#199e70);display:grid;place-items:center;font-size:13px}
+.spacer{flex:1}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;color:var(--ink2);white-space:nowrap}
+.chip .dot{width:7px;height:7px;border-radius:50%}
+.pill{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 7px}
+.btn{background:var(--surface2);border:1px solid var(--border2);color:var(--ink);border-radius:var(--r-sm);padding:6px 13px;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.btn:hover{background:var(--surface3)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{filter:brightness(1.1)}
+.btn.ghost{background:none;border-color:transparent;color:var(--ink2)}
+.btn.ghost:hover{background:var(--surface2)}
+.btn.sm{padding:3px 9px;font-size:11.5px}
+.btn.danger{border-color:#5c2a2a;color:#e66767}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+
+/* ============ Left rail (tracks / lessons) ============ */
+#rail{background:var(--surface);border-right:1px solid var(--border);padding:12px 8px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+#rail .sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:12px 12px 5px;display:flex;gap:8px;align-items:baseline}
+#rail .sec .role{margin-left:auto;text-transform:none;letter-spacing:0}
+#rail button.lsn{display:flex;align-items:center;gap:9px;width:100%;background:none;border:none;color:var(--ink2);padding:8px 12px;border-radius:var(--r-sm);font-size:13px;text-align:left}
+#rail button.lsn:hover{background:var(--surface2);color:var(--ink)}
+#rail button.lsn.on{background:var(--surface3);color:var(--ink);font-weight:600}
+#rail .tick{width:17px;text-align:center;font-style:normal;flex:none}
+#rail .tick.done{color:var(--good)}
+#rail .tick.todo{color:var(--muted)}
+#rail .min{margin-left:auto;font-size:10.5px;color:var(--muted);white-space:nowrap}
+.rail-foot{margin-top:auto;padding:10px 8px 4px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
+.rail-foot .row{display:flex;gap:6px}
+.rail-foot .note{font-size:10.5px;color:var(--muted);padding:0 4px}
+.prog-track{background:var(--surface3);border-radius:4px;height:6px;overflow:hidden;margin:4px 4px 2px}
+.prog-fill{height:100%;border-radius:4px;background:var(--s3);transition:width .3s ease}
+
+/* ============ Main ============ */
+main{overflow:hidden;position:relative;display:flex}
+.view{display:none;flex:1;overflow-y:auto;padding:20px 22px}
+.view.on{display:block}
+.vhead{display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.vhead h1{font-size:17px;font-weight:700}
+.vhead .sub{color:var(--muted);font-size:12.5px}
+.vhead .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card h3{font-size:12px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.card h3 .right{margin-left:auto;font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11.5px}
+.empty{color:var(--muted);font-size:12.5px;padding:14px;text-align:center}
+.body-html p{margin:0 0 10px;color:var(--ink2)}
+.body-html p:last-child{margin-bottom:0}
+.body-html b,.body-html strong{color:var(--ink)}
+.body-html ul,.body-html ol{margin:6px 0 10px 18px;color:var(--ink2)}
+.body-html li{margin:3px 0}
+.body-html code{background:var(--surface3);border:1px solid var(--border);border-radius:4px;padding:0 5px;font-size:12px}
+.body-html pre{background:var(--surface3);border:1px solid var(--border);border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;margin:8px 0}
+.body-html h3,.body-html h4{margin:12px 0 6px;font-size:13px}
+.kp{display:flex;gap:9px;padding:6px 0;font-size:12.8px;color:var(--ink2);border-bottom:1px solid var(--border);align-items:flex-start}
+.kp:last-child{border-bottom:none}
+.kp .ic{color:var(--s3);flex:none;font-style:normal}
+
+/* ============ Quiz ============ */
+.qq{padding:12px 0;border-bottom:1px solid var(--border)}
+.qq:last-child{border-bottom:none}
+.qq .qt{font-weight:600;margin-bottom:8px;font-size:13px}
+.q-opt{display:block;width:100%;text-align:left;background:var(--surface2);border:1px solid var(--border);color:var(--ink2);border-radius:var(--r-sm);padding:8px 12px;font-size:12.5px;margin:5px 0}
+.q-opt:hover{border-color:var(--border2);color:var(--ink)}
+.q-opt.ok{border-color:var(--s3);color:#7fd6b3;background:#12241c}
+.q-opt.bad{border-color:var(--crit);color:#e88;background:#2a1414}
+.q-opt[disabled]{cursor:default}
+.q-explain{margin-top:8px;font-size:12.3px;border-radius:var(--r-sm);padding:9px 12px;border:1px solid var(--border);background:var(--surface2);color:var(--ink2)}
+.q-explain b{color:var(--ink)}
+.q-explain.right b{color:#7fd6b3}
+.q-explain.wrong b{color:#e88}
+#quiz-score{font-size:12.5px;margin-top:10px;color:var(--ink2)}
+#quiz-score b{color:var(--ink)}
+
+/* ============ Practical / verify ============ */
+.practical{border-left:3px solid var(--accent)}
+.vres{margin-top:10px;border-radius:var(--r-sm);padding:9px 12px;font-size:12.5px;border:1px solid var(--border);display:none}
+.vres.show{display:block}
+.vres.ok{background:#12241c;border-color:#1e4a38;color:#7fd6b3}
+.vres.bad{background:#2a1414;border-color:#5c2a2a;color:#e88}
+textarea.free{width:100%;min-height:84px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:9px 12px;font-size:12.8px;font-family:inherit;outline:none;resize:vertical;margin:8px 0}
+textarea.free:focus{border-color:#2a4a75}
+
+/* ============ Checkride ============ */
+.cr-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.cr-timer{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);padding:4px 12px}
+.cr-steps{display:flex;gap:6px;margin:2px 0 0}
+.cr-dot{width:22px;height:6px;border-radius:3px;background:var(--surface3)}
+.cr-dot.pass{background:var(--s3)}
+.cr-dot.fail{background:var(--crit)}
+.cr-dot.cur{background:var(--accent)}
+.rubric li{margin:3px 0;color:var(--ink2);font-size:12.3px}
+input.name{background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:9px 12px;font-size:13px;font-family:inherit;outline:none;width:260px}
+input.name:focus{border-color:#2a4a75}
+
+/* ============ Certificate (light "paper" card, print-first) ============ */
+.cert{background:#fbfaf6;color:#1c1c1a;border-radius:10px;max-width:760px;margin:0 auto;padding:44px 52px;border:1px solid #d9d6cb;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.cert .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;color:#333}
+.cert .brand .mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,#3987e5,#199e70);display:grid;place-items:center;color:#fff;font-size:13px}
+.cert h2{font-size:24px;margin:26px 0 4px;letter-spacing:.01em}
+.cert .sub2{color:#6b6a63;font-size:13px}
+.cert .name{font-size:30px;font-weight:700;margin:22px 0 4px;border-bottom:2px solid #d9d6cb;display:inline-block;padding:0 24px 6px}
+.cert .meta{display:flex;gap:34px;margin-top:26px;flex-wrap:wrap}
+.cert .meta .kv{font-size:12.5px;color:#6b6a63}
+.cert .meta .kv b{display:block;color:#1c1c1a;font-size:14px;font-variant-numeric:tabular-nums}
+.cert .code{margin-top:26px;font-size:11.5px;color:#6b6a63}
+.cert .code b{font-family:ui-monospace,Menlo,monospace;color:#333;letter-spacing:.08em}
+.cert .foot{margin-top:24px;padding-top:14px;border-top:1px solid #e4e1d6;font-size:10.5px;color:#8a887f}
+.cert-actions{max-width:760px;margin:14px auto 0;display:flex;gap:8px;justify-content:center}
+
+/* ============ Tutor panel ============ */
+#tutor{background:var(--surface);border-left:1px solid var(--border2);display:flex;flex-direction:column;overflow:hidden}
+.tp-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--border)}
+.tp-head .t{font-weight:700;font-size:14px}
+.tp-head .s{font-size:11px;color:var(--muted)}
+.tp-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:94%;border-radius:10px;padding:10px 13px;font-size:12.8px;line-height:1.55}
+.msg.user{align-self:flex-end;background:#1c3a63;border:1px solid #2a4a75}
+.msg.ai{align-self:flex-start;background:var(--surface2);border:1px solid var(--border)}
+.msg.ai ul{margin:6px 0 2px 16px}
+.msg .src{display:inline-block;margin-top:7px}
+.tp-input{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border)}
+.tp-input input{flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:9px 12px;font-size:13px;font-family:inherit;outline:none}
+.tp-input input:focus{border-color:#2a4a75}
+.tier-pill{font-size:11px;border-radius:4px;padding:1px 8px;border:1px solid;font-weight:600}
+.tier-pill.canned{color:var(--s4);border-color:#4a3d18}
+.tier-pill.sarathi{color:#7fd6b3;border-color:#1e4a38}
+.tier-pill.webllm{color:#9ec5f4;border-color:#2a4a75}
+
+/* ============ WebLLM opt-in card (tutor panel) ============ */
+#webllm-card{border-bottom:1px solid var(--border);padding:11px 14px;background:var(--surface2);font-size:12px}
+#webllm-card .wl-head{color:var(--ink2);line-height:1.5}
+#webllm-card .wl-head b{color:var(--ink)}
+#webllm-card .wl-row{display:flex;gap:6px;margin-top:8px;align-items:center}
+#webllm-card select{flex:1;min-width:0;background:var(--surface3);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:5px 8px;font-size:11.5px;font-family:inherit}
+.wl-prog{background:var(--surface3);border-radius:4px;height:6px;overflow:hidden;margin-top:8px}
+.wl-prog-fill{height:100%;background:var(--s1);border-radius:4px;transition:width .2s ease;width:0}
+.wl-status{margin-top:5px;font-size:10.5px;color:var(--muted)}
+
+/* ============ Toast ============ */
+#toasts{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:100}
+.toast{background:var(--surface2);border:1px solid var(--border2);border-left:3px solid var(--accent);border-radius:var(--r-sm);padding:10px 14px;font-size:12.5px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:tin .2s ease}
+@keyframes tin{from{transform:translateY(8px);opacity:0}}
+
+@media(max-width:1180px){#app{grid-template-columns:220px 1fr 0}#tutor{display:none}}
+
+/* ============ Print: certificate only ============ */
+@media print{
+  body{background:#fff;overflow:visible}
+  header,#rail,#tutor,#toasts,.cert-actions,.no-print{display:none!important}
+  #app{display:block;height:auto}
+  main{overflow:visible;display:block}
+  .view{display:none;padding:0}
+  #v-cert{display:block!important;overflow:visible}
+  .cert{box-shadow:none;border:2px solid #444;max-width:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <div class="logo"><div class="mark">⬡</div>YantraFleet <span style="color:#9ec5f4">Academy</span></div>
+  <span class="pill" id="pack-src">loading pack…</span>
+  <div class="spacer"></div>
+  <div class="chip" id="chip-backend" title="Live backend used by the practical Verify checks"><span class="dot" id="be-dot" style="background:var(--muted)"></span><span id="be-lbl">backend: probing…</span></div>
+  <div class="chip" title="Active tutor tier (see YFTutor in the page script)">✦ tutor: <b id="tutor-tier" style="color:var(--ink)">canned</b></div>
+  <a class="btn" id="btn-open-console" href="../console/index.html" target="_blank" rel="noopener">⬡ Open console</a>
+  <button class="btn ghost sm" id="btn-tutor-toggle" title="Show / hide the tutor panel">✦ Tutor</button>
+</header>
+
+<nav id="rail" aria-label="Tracks and lessons"><!-- rendered by Rail.render() --></nav>
+
+<main id="main">
+  <div class="view on" id="v-lesson"></div>
+  <div class="view" id="v-checkride"></div>
+  <div class="view" id="v-cert"></div>
+</main>
+
+<aside id="tutor" aria-label="Tutor panel">
+  <div class="tp-head"><span style="font-size:16px">✦</span>
+    <div><div class="t">Tutor</div><div class="s" id="tutor-sub">answers ground on the open lesson</div></div>
+    <span class="tier-pill canned" id="tutor-tier-pill" style="margin-left:auto">offline rules</span>
+  </div>
+  <div id="webllm-card" hidden>
+    <div class="wl-head">🧠 <b>Enable on-device tutor</b> — downloads ~1.7 GB once, cached in your browser, then runs fully offline &amp; free</div>
+    <div class="wl-row" id="webllm-optin">
+      <select id="webllm-model" aria-label="On-device model"></select>
+      <button class="btn primary sm" id="webllm-enable">Enable</button>
+    </div>
+    <div class="wl-row" id="webllm-active" hidden>
+      <span class="pill" style="color:#9ec5f4;border-color:#2a4a75">✓ on-device model active</span>
+      <button class="btn danger sm" id="webllm-disable">Disable on-device tutor</button>
+    </div>
+    <div class="wl-prog" id="webllm-prog" hidden><div class="wl-prog-fill" id="webllm-prog-fill"></div></div>
+    <div class="wl-status" id="webllm-status" hidden></div>
+  </div>
+  <div class="tp-body" id="tutor-log"></div>
+  <div class="tp-input">
+    <input id="tutor-in" placeholder="Ask about this lesson…">
+    <button class="btn primary" id="tutor-send">Send</button>
+  </div>
+</aside>
+</div>
+<div id="toasts"></div>
+<input type="file" id="imp-file" accept="application/json" style="display:none">
+
+<script>
+"use strict";
+/* ================================================================
+   YantraFleet Academy — lesson engine + live-backend practicals +
+   checkride/certificate + pluggable tutor (window.YFTutor).
+   Single file, no build step. Content schema: see academy/README.md.
+   ================================================================ */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const pad=n=>String(n).padStart(2,'0');
+function toast(m){const d=document.createElement('div');d.className='toast';d.textContent=m;$('#toasts').appendChild(d);setTimeout(()=>d.remove(),4200);}
+
+/* ---------------- Backend config (same query params as the console) -------- */
+const _cfg=new URLSearchParams(location.search);
+const SUPA_URL=_cfg.get('supa')||'https://flwyvhsmgrrqpmhcqlzd.supabase.co';
+const SUPA_KEY=_cfg.get('key')||'sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf'; // publishable anon key — safe client-side
+window.SITE=_cfg.get('site')||null;
+
+const API={
+  hdr(extra){return Object.assign({'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},extra||{});},
+  /* fetch wrapper, 4 s timeout — mirrors the console's Sync.q */
+  async q(path,opt){
+    const c=new AbortController();const t=setTimeout(()=>c.abort(),4000);
+    try{const r=await fetch(SUPA_URL+'/rest/v1/'+path,Object.assign({signal:c.signal},opt,{headers:this.hdr(opt&&opt.headers)}));
+      clearTimeout(t);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const txt=await r.text();return txt?JSON.parse(txt):null;
+    }catch(e){clearTimeout(t);throw e;}
+  },
+  reachable:null,
+  async probe(){
+    try{await this.q('alerts?select=id&limit=1');this.reachable=true;}
+    catch(e){this.reachable=false;}
+    const d=$('#be-dot'),l=$('#be-lbl');
+    if(d)d.style.background=this.reachable?'var(--good)':'var(--warn)';
+    if(l)l.textContent=this.reachable?'backend: connected':'backend: offline';
+    return this.reachable;
+  }
+};
+
+/* ---------------- HTML sanitizer (body_html / instructions_html) -----------
+   Allowed subset: p br b strong i em code pre ul ol li h3 h4 span a[href].
+   Everything else is unwrapped (text kept); script-ish elements are removed
+   outright; all attributes are stripped except a safe href on <a>. */
+const SAFE_TAGS={P:1,BR:1,B:1,STRONG:1,I:1,EM:1,CODE:1,PRE:1,UL:1,OL:1,LI:1,H3:1,H4:1,SPAN:1,A:1};
+const DROP_TAGS={SCRIPT:1,STYLE:1,IFRAME:1,OBJECT:1,EMBED:1,LINK:1,META:1,FORM:1,INPUT:1,BUTTON:1,TEXTAREA:1,SELECT:1,SVG:1,MATH:1,TEMPLATE:1};
+function sanitize(html){
+  const t=document.createElement('template');t.innerHTML=String(html||'');
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(const el of t.content.querySelectorAll('*')){
+      if(DROP_TAGS[el.tagName]){el.remove();changed=true;break;}
+      if(!SAFE_TAGS[el.tagName]){el.replaceWith(...el.childNodes);changed=true;break;}
+    }
+  }
+  for(const el of t.content.querySelectorAll('*')){
+    for(const a of [...el.attributes]){
+      const keep=el.tagName==='A'&&a.name==='href'&&/^(https?:|\.\/|\.\.\/|\/|#)/i.test(a.value.trim());
+      if(!keep)el.removeAttribute(a.name);
+    }
+    if(el.tagName==='A'){el.setAttribute('target','_blank');el.setAttribute('rel','noopener');}
+  }
+  return t.innerHTML;
+}
+
+/* ================================================================
+   EMBEDDED starter pack — used whenever ./content/pack-physical-ai.json
+   cannot be fetched/parsed, so the app always works (file://, offline,
+   content agent not finished yet). Same schema as external packs.
+   ================================================================ */
+const EMBEDDED_PACK={
+ id:'physical-ai-starter', title:'Physical AI Starter', version:'0.1.0-embedded',
+ tracks:[
+  {id:'trk-operator',title:'Fleet Operator Foundations',role:'Operator',
+   lesson_ids:['pai-101','pai-102','pai-103']}
+ ],
+ lessons:[
+  {id:'pai-101',title:'What is Physical AI?',minutes:8,track:'trk-operator',
+   body_html:'<p><b>Physical AI</b> is software that senses, decides and acts in the real world — warehouse robots, delivery drones, inspection rovers. Unlike a chatbot, a physical agent pays for every mistake in bumped racks, blocked aisles and lost throughput.</p><p>A fleet like YantraFleet’s stitches three loops together: <b>perception</b> (LiDAR, cameras, wheel odometry fused into a position estimate), <b>planning</b> (task allocation and path routing across the fleet) and <b>actuation</b> (motor control with safety interlocks). The operator console you’ll use sits above all three, turning raw telemetry into decisions a human can supervise.</p><ul><li>Robots publish status, battery and position every few seconds.</li><li>Alerts fire when a robot’s confidence or health degrades.</li><li>Operators acknowledge alerts and approve risky commands.</li></ul>',
+   key_points:[
+    'Physical AI systems close a sense → decide → act loop in the real world, where errors have physical cost.',
+    'Localization fuses LiDAR, cameras and odometry into a position estimate with a confidence score.',
+    'The operator console renders fleet telemetry: status, battery, position and alerts for every robot.',
+    'Acknowledging an alert tells the fleet a human has seen it — unacked critical alerts page the on-call operator.'
+   ],
+   quiz:[
+    {q:'What makes Physical AI different from a purely digital agent?',
+     options:['It always uses bigger neural networks','Its mistakes have physical cost in the real world','It never needs a human in the loop','It runs only on robots with wheels'],
+     answer_idx:1,explain:'Physical agents act in the real world, so errors cost real throughput, damage or safety margin — that is why fleets keep humans supervising.'},
+    {q:'Which sensors typically feed a robot’s localization estimate?',
+     options:['Only GPS','LiDAR, cameras and wheel odometry','The operator’s mouse position','The WMS order queue'],
+     answer_idx:1,explain:'Indoor robots fuse LiDAR scans, camera features and wheel odometry — GPS is useless inside a warehouse.'}
+   ],
+   practical:{
+    instructions_html:'<p>Open the live console (button in the header — it keeps your backend settings), find an <b>unacknowledged alert</b> in the Overview alert feed and press <b>Ack</b>. Then come back here and press Verify: the academy queries the same backend for acknowledged alert rows.</p>',
+    verify:{kind:'backend_check',table:'alerts',filter:'ack=eq.true&select=id&limit=10',expect:'rows>0'}
+   },
+   tutor_context:'Physical AI means software agents that sense, decide and act in the physical world, such as warehouse robots. Localization is the robot’s estimate of where it is, fused from LiDAR, cameras and wheel odometry, and it carries a confidence score. When localization confidence drops below threshold the robot performs a protective stop. The operator console shows each robot’s status, battery, position and alerts. Acknowledging an alert marks that a human operator has seen it; unacknowledged critical alerts can page the on-call operator. Throughput is measured in tasks per hour and drops when robots fault or reroute.'},
+
+  {id:'pai-102',title:'Reading Fleet Telemetry',minutes:10,track:'trk-operator',
+   body_html:'<p>Telemetry is the fleet’s heartbeat. Each robot streams <b>status</b> (active, charging, fault, e-stop), <b>battery</b> percentage, <b>position</b>, speed and health scores. The skill of a good operator is triage: which of ten robots deserves your next minute?</p><p>Rules of thumb:</p><ul><li>A <b>fault</b> status beats everything — a stopped robot can block an aisle and drag fleet throughput down.</li><li>Battery below ~30% should already be heading to a charger; if not, ask why.</li><li>Rising motor temperature plus vibration anomalies predict mechanical failure days ahead — that is <b>predictive maintenance</b>.</li></ul><p>Every number is evidence. The console’s charts and the copilot both exist to turn that evidence into a decision.</p>',
+   key_points:[
+    'Triage order: faults and e-stops first, then low battery, then degradations and maintenance findings.',
+    'A faulted robot mid-aisle causes reroutes that tax the whole fleet, not just one robot.',
+    'Battery under about 30% should trigger a charge trip; watch robots that ignore the threshold.',
+    'Motor temperature and vibration trends predict failures days early — predictive maintenance buys planned downtime instead of mid-shift stops.'
+   ],
+   quiz:[
+    {q:'Two robots need attention: one shows a fault mid-aisle, one is at 28% battery heading to a charger. Which first?',
+     options:['The low-battery robot','The faulted robot','Neither, wait for more alerts','Restart the console'],
+     answer_idx:1,explain:'The faulted robot is blocking an aisle and degrading everyone’s routes; the other robot is already doing the right thing.'},
+    {q:'What does a rising vibration trend with elevated motor temperature usually indicate?',
+     options:['A software bug in the console','Imminent mechanical wear — schedule maintenance','The robot is moving too slowly','Nothing, both are cosmetic'],
+     answer_idx:1,explain:'Vibration + heat is the classic mechanical wear signature; catching it early converts a mid-shift failure into a planned 40-minute swap.'}
+   ],
+   practical:{
+    instructions_html:'<p>In your own words: a robot has just dropped to a <b>localization fault</b> in a busy aisle. Describe what you would check first and what you would do in the first five minutes. Write 2–4 sentences below and let the tutor grade it against the rubric.</p>',
+    verify:{kind:'self_check',prompt:'A robot shows a localization fault in a busy aisle. What do you check first, and what do you do in the first five minutes?'}
+   },
+   tutor_context:'Telemetry triage: handle faults and e-stops first because a stopped robot blocks aisles and forces reroutes, then low battery robots, then degradations. Battery below thirty percent should send a robot to a charger. Motor temperature and vibration trends are predictive maintenance signals: rising vibration sigma with elevated temperature means bearing or drivetrain wear with days of remaining useful life. A localization fault means the robot lost position confidence; check the map for where it stopped, check whether reflectors or racks moved nearby, re-localize from a known anchor, and clear the aisle. Escalate to an incident when throughput drops or multiple robots reroute.'},
+
+  {id:'pai-103',title:'Humans in the Loop: Commands & Approvals',minutes:7,track:'trk-operator',
+   body_html:'<p>Autonomy is a dial, not a switch. YantraFleet routes risky robot commands — <code>pause</code>, <code>resume</code>, <code>charge</code>, <code>estop</code> — through a <b>command queue with human approval</b>. The console writes a <i>pending</i> command row; a supervisor approves or rejects it; only then does the robot adapter execute it and stamp the result.</p><p>This gives you an audit trail for free: every command records who requested it, who decided, and what happened. When something goes wrong at 2 a.m., the audit view answers "who told the robot to do that?" in one query.</p>',
+   key_points:[
+    'Risky commands go through a pending → approved/rejected → executed pipeline, never straight to the robot.',
+    'Every command row records requester, decider and outcome — an audit trail by construction.',
+    'E-stop is the highest-severity command and always deserves a second pair of eyes.',
+    'The same queue pattern lets the console, copilot and future automations share one safety gate.'
+   ],
+   quiz:[
+    {q:'Why do commands pass through a pending/approved queue instead of going straight to the robot?',
+     options:['It makes the UI look busier','Human approval plus an audit trail for risky actions','Robots cannot parse direct commands','To slow down operators on purpose'],
+     answer_idx:1,explain:'The queue is a human-in-the-loop safety gate and doubles as the audit log of who requested and approved every action.'}
+   ],
+   practical:{
+    instructions_html:'<p>From the console, queue a <b>pause</b> command for any robot (open a robot’s drawer, or run <code>cmdRobot(\'AMR-02\',\'pause\')</code> from the palette’s robot actions). Then press Verify — the academy checks the backend command queue for your pause command.</p>',
+    verify:{kind:'backend_check',table:'commands',filter:'cmd=eq.pause&select=id,status&limit=10',expect:'rows>0'}
+   },
+   tutor_context:'Human in the loop command flow: the console inserts a command row with status pending, containing robot id, command such as pause resume charge or estop, and requested_by. A supervisor approves or rejects it, setting decided_by. The simulator or robot adapter executes approved commands and marks them executed or failed with a reason. This pipeline is both a safety gate and an audit trail. E-stop is the most severe command. The audit view lists the full command history with every status.'}
+ ],
+ checkride:{
+  id:'cr-operator-1', title:'Operator Checkride I', pass_threshold:0.66,
+  steps:[
+   {instruction_html:'<p><b>Acknowledge an alert.</b> Open the console, find any unacknowledged alert and press Ack. Verify checks that the backend now holds at least one acknowledged alert.</p>',
+    verify:{kind:'backend_check',table:'alerts',filter:'ack=eq.true&select=id&limit=10',expect:'rows>0'},
+    rubric_points:['Found the alert feed on the Overview','Acknowledged an alert on the live backend']},
+   {instruction_html:'<p><b>Queue a pause command.</b> From the console, request a <code>pause</code> for any robot so it lands in the human-approval queue. Verify checks the commands table for it.</p>',
+    verify:{kind:'backend_check',table:'commands',filter:'cmd=eq.pause&select=id&limit=10',expect:'rows>0'},
+    rubric_points:['Used the command queue instead of a direct action','Command row visible with requester recorded']},
+   {instruction_html:'<p><b>Leave the board clean.</b> Acknowledge every remaining <b>critical</b> alert. Verify passes when no unacknowledged critical alerts remain on the backend.</p>',
+    verify:{kind:'backend_check',table:'alerts',filter:'sev=eq.crit&ack=eq.false&select=id',expect:'rows==0'},
+    rubric_points:['Cleared all critical alerts','Understands the alert acknowledgement discipline']}
+  ]
+ }
+};
+
+/* ---------------- Content loader ---------------- */
+const Content={
+  pack:null, source:'embedded',
+  valid(p){return p&&typeof p==='object'&&p.pack&&Array.isArray(p.pack.lessons)&&p.pack.lessons.length>0&&Array.isArray(p.pack.tracks);},
+  async load(){
+    try{
+      const r=await fetch('./content/pack-physical-ai.json',{cache:'no-store'});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();
+      if(!this.valid(j))throw new Error('schema mismatch');
+      this.pack=j.pack; this.source='file';
+    }catch(e){
+      this.pack=EMBEDDED_PACK; this.source='embedded';
+    }
+    const el=$('#pack-src');
+    if(el)el.textContent=this.source==='file'
+      ?`${this.pack.title} v${this.pack.version||'?'}`
+      :'embedded starter pack';
+    return this.pack;
+  },
+  lesson(id){return this.pack.lessons.find(l=>l.id===id)||null;}
+};
+
+/* ---------------- Progress (localStorage, always try/catch) ---------------- */
+const Progress={
+  KEY:'yfa_progress_v1',
+  data:{quiz:{},practicals:{},checkride:null,cert:null,lastLesson:null},
+  load(){try{const s=localStorage.getItem(this.KEY);if(s){const j=JSON.parse(s);if(j&&typeof j==='object')this.data=Object.assign(this.data,j);}}catch(e){}},
+  save(){try{localStorage.setItem(this.KEY,JSON.stringify(this.data));}catch(e){}},
+  quizDone(l){if(!l.quiz||!l.quiz.length)return true;
+    const q=this.data.quiz[l.id];return !!q&&Object.keys(q.answers||{}).length>=l.quiz.length;},
+  practicalDone(l){if(!l.practical)return true;return !!this.data.practicals[l.id];},
+  lessonDone(l){return this.quizDone(l)&&this.practicalDone(l);},
+  doneCount(){return Content.pack.lessons.filter(l=>this.lessonDone(l)).length;},
+  export(){
+    const payload={app:'yantrafleet-academy',version:1,exported_at:new Date().toISOString(),
+      pack_id:Content.pack.id,progress:this.data};
+    download('yantrafleet-academy-progress.json',JSON.stringify(payload,null,2));
+    toast('Progress exported');
+  },
+  import(text){
+    try{
+      const j=JSON.parse(text);
+      const p=j&&j.progress?j.progress:j;   // accept raw progress too
+      if(!p||typeof p!=='object'||(!p.quiz&&!p.practicals&&!p.checkride))throw new Error('not a progress file');
+      this.data=Object.assign({quiz:{},practicals:{},checkride:null,cert:null,lastLesson:null},p);
+      this.save(); Rail.render();
+      const cur=Content.lesson(state.lessonId); if(cur)Lesson.render(cur);
+      toast('Progress imported');
+    }catch(e){toast('⚠ Import failed: '+e.message);}
+  }
+};
+function download(name,text){
+  const b=new Blob([text],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},400);
+}
+
+/* ================================================================
+   window.YFTutor — the tutor interface. STABLE CONTRACT for the
+   future tutor-upgrade agent; UI code calls only these four methods:
+
+     YFTutor.status()               -> 'canned' | 'sarathi' | 'webllm'
+     YFTutor.init(opts?)            -> Promise<void>   (probes tiers)
+     YFTutor.ask(question, lessonCtx) -> Promise<{answer, source}>
+     YFTutor.grade(answer, rubric[])  -> Promise<{score, feedback}>
+
+   lessonCtx is the full lesson object (tutor_context, key_points,
+   title, …). score is 0..1. source is 'canned'|'webllm'|'sarathi'.
+   ================================================================ */
+window.YFTutor={
+  _tier:'canned',
+  _backend:null,                             // registered webllm-style backend
+  _sarathiOk:false,                          // last /health probe result
+  SARATHI_URL:'http://localhost:8001',
+  TOKEN:_cfg.get('token')||null,
+  status(){return this._tier;},
+  _hdr(extra){const h=Object.assign({},extra||{});if(this.TOKEN)h['Authorization']='Bearer '+this.TOKEN;return h;},
+  async init(opts){
+    opts=opts||{};
+    if(opts.sarathiUrl)this.SARATHI_URL=opts.sarathiUrl;
+    /* sarathi tier: reachable /health promotes the tier */
+    try{
+      const c=new AbortController();const t=setTimeout(()=>c.abort(),2000);
+      try{const r=await fetch(this.SARATHI_URL+'/health',{signal:c.signal,headers:this._hdr()});
+        if(r.ok){this._sarathiOk=true;this._tier='sarathi';}}
+      finally{clearTimeout(t);}
+    }catch(e){/* stay canned */}
+    if(this._backend&&this._backend.ready&&this._backend.ready())this._tier=this._backend.name||'webllm';
+    tierChanged();
+  },
+  /** Extra tiers plug in here (see the WEBLLM TIER section below). */
+  registerBackend(b){
+    if(!b||typeof b.ask!=='function')throw new Error('backend needs ask()');
+    this._backend=b;
+    if(!b.ready||b.ready()){this._tier=b.name||'webllm';tierChanged();}
+  },
+  /** Removes the registered backend and demotes to the best remaining tier. */
+  unregisterBackend(){
+    this._backend=null;
+    this._tier=this._sarathiOk?'sarathi':'canned';
+    tierChanged();
+  },
+  /* onToken (optional) receives the accumulated answer text as a streaming
+     backend produces it — non-streaming tiers simply never call it. */
+  async ask(question,lessonCtx,onToken){
+    question=String(question||'').trim();
+    if(!question)return {answer:'Ask me anything about the open lesson.',source:'canned'};
+    if(this._backend&&(!this._backend.ready||this._backend.ready())){
+      try{const r=await this._backend.ask(question,lessonCtx,onToken);
+        return {answer:r.answer,source:this._backend.name||'webllm'};}catch(e){}
+    }
+    if(this._tier==='sarathi'){
+      try{
+        const ctx=lessonCtx?`Context — YantraFleet Academy lesson "${lessonCtx.title}": ${lessonCtx.tutor_context||''}\n\nLearner question: `:'';
+        const c=new AbortController();const t=setTimeout(()=>c.abort(),4000);
+        try{
+          const r=await fetch(this.SARATHI_URL+'/ask',{method:'POST',signal:c.signal,
+            headers:this._hdr({'Content-Type':'application/json'}),
+            body:JSON.stringify({question:ctx+question})});
+          if(!r.ok)throw new Error('HTTP '+r.status);
+          const d=await r.json();
+          if(!d||typeof d.answer!=='string')throw new Error('bad payload');
+          return {answer:d.answer,source:'sarathi'};
+        }finally{clearTimeout(t);}
+      }catch(e){/* fall through to canned */}
+    }
+    return {answer:this._canned(question,lessonCtx),source:'canned'};
+  },
+  /* Canned tier: keyword match over tutor_context sentences + key_points. */
+  _canned(q,ctx){
+    ctx=ctx||{};
+    const STOP=new Set(['what','when','where','which','with','this','that','does','have','from','about','should','would','could','their','there','then','they','them','your','will','into','only','more','than','been','because','how','why','are','the','and','for','can','you','who']);
+    const words=(String(q).toLowerCase().match(/[a-z0-9-]{3,}/g)||[]).filter(w=>!STOP.has(w));
+    const pool=String(ctx.tutor_context||'').split(/(?:[.!?])\s+/).map(s=>s.trim()).filter(s=>s.length>8)
+      .concat((ctx.key_points||[]).map(String));
+    const scored=pool.map(s=>{
+      const low=s.toLowerCase();
+      return {s,score:words.reduce((n,w)=>n+(low.includes(w)?1:0),0)};
+    }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+    if(scored.length){
+      const best=scored.slice(0,2).map(x=>x.s.replace(/[.]?$/,'.'));
+      return 'From this lesson’s notes: '+best.join(' ');
+    }
+    const kps=(ctx.key_points||[]).slice(0,3);
+    return 'I could not match that to this lesson (canned tier — keyword lookup only). Key points of the open lesson:\n'+
+      (kps.length?kps.map(k=>'• '+k).join('\n'):'• open a lesson first, then ask again.');
+  },
+  /* Grading: a registered backend (webllm) gets first shot; the canned
+     keyword-rubric grader is the always-available fallback and is
+     always flagged "needs review". */
+  async grade(answer,rubric,lessonCtx){
+    if(this._backend&&typeof this._backend.grade==='function'&&(!this._backend.ready||this._backend.ready())){
+      try{return await this._backend.grade(answer,rubric,lessonCtx);}catch(e){}
+    }
+    const a=String(answer||'').toLowerCase();
+    rubric=Array.isArray(rubric)?rubric:[];
+    const hits=[],misses=[];
+    for(const p of rubric){
+      const kws=(String(p).toLowerCase().match(/[a-z0-9-]{4,}/g)||[]);
+      (kws.some(w=>a.includes(w))?hits:misses).push(String(p));
+    }
+    const score=rubric.length?hits.length/rubric.length:0;
+    const fb='Keyword rubric check (canned tier — needs review by a human or a smarter tutor tier): '+
+      `covered ${hits.length}/${rubric.length} rubric points.`+
+      (misses.length?' Consider also: '+misses.map(m=>'“'+m+'”').join(' · '):' All rubric points touched.');
+    return {score,feedback:fb};
+  }
+};
+function tierChanged(){
+  const t=window.YFTutor.status();
+  const b=$('#tutor-tier');if(b)b.textContent=t;
+  const p=$('#tutor-tier-pill');
+  if(p){p.textContent=t==='webllm'?'on-device':t==='sarathi'?'server':'offline rules';
+    p.className='tier-pill '+t;}
+  const s=$('#tutor-sub');if(s)s.textContent=t==='canned'
+    ?'canned keyword engine · answers ground on the open lesson'
+    :t==='sarathi'?'sarathi live agent · lesson context attached'
+    :'on-device model · questions never leave this machine';
+}
+
+/* ---------------- Verify runner (shared by practicals + checkride) ---------
+   verify shapes (see README):
+     {kind:'backend_check', table, filter, expect:'rows>0'|'rows==0'|'field_equals', field?, value?}
+     {kind:'self_check', prompt}                                            */
+async function runVerify(v){
+  if(!v)return {ok:true,detail:'nothing to verify'};
+  if(v.kind==='self_check')return {ok:null,self:true};
+  if(v.kind!=='backend_check')return {ok:false,detail:'unknown verify kind: '+v.kind};
+  let rows;
+  try{rows=await API.q(v.table+'?'+v.filter);}
+  catch(e){return {ok:false,detail:'backend unreachable ('+e.message+') — check ?supa/?key or open the console to confirm the backend is up'};}
+  const n=Array.isArray(rows)?rows.length:0;
+  if(v.expect==='rows>0')return {ok:n>0,detail:n+' matching row(s) on '+v.table};
+  if(v.expect==='rows==0')return {ok:n===0,detail:n+' matching row(s) on '+v.table+' (expected none)'};
+  if(v.expect==='field_equals'){
+    const cell=rows&&rows[0]?rows[0][v.field]:undefined;
+    return {ok:String(cell)===String(v.value),detail:v.table+'[0].'+v.field+' = '+JSON.stringify(cell)+' (expected '+JSON.stringify(v.value)+')'};
+  }
+  return {ok:false,detail:'unknown expect: '+v.expect};
+}
+
+/* ================= State + views ================= */
+const state={view:'lesson',lessonId:null,cr:null,crTimer:null};
+
+function show(view){
+  state.view=view;
+  $$('.view').forEach(x=>x.classList.remove('on'));
+  $('#v-'+view).classList.add('on');
+  Rail.render();
+}
+
+/* ---------------- Left rail ---------------- */
+const Rail={
+  render(){
+    const p=Content.pack;if(!p)return;
+    const done=Progress.doneCount(), total=p.lessons.length;
+    let h='';
+    for(const t of p.tracks){
+      h+=`<div class="sec">${esc(t.title)}<span class="role pill">${esc(t.role||'')}</span></div>`;
+      for(const id of (t.lesson_ids||[])){
+        const l=Content.lesson(id);if(!l)continue;
+        const dn=Progress.lessonDone(l);
+        h+=`<button class="lsn ${state.view==='lesson'&&state.lessonId===l.id?'on':''}" data-lesson="${esc(l.id)}">
+          <i class="tick ${dn?'done':'todo'}">${dn?'✓':'○'}</i>${esc(l.title)}<span class="min">${l.minutes||'–'} min</span></button>`;
+      }
+    }
+    /* lessons not referenced by any track still get listed */
+    const inTracks=new Set(p.tracks.flatMap(t=>t.lesson_ids||[]));
+    const orphans=p.lessons.filter(l=>!inTracks.has(l.id));
+    if(orphans.length){
+      h+=`<div class="sec">More lessons</div>`;
+      for(const l of orphans){
+        const dn=Progress.lessonDone(l);
+        h+=`<button class="lsn ${state.view==='lesson'&&state.lessonId===l.id?'on':''}" data-lesson="${esc(l.id)}">
+          <i class="tick ${dn?'done':'todo'}">${dn?'✓':'○'}</i>${esc(l.title)}<span class="min">${l.minutes||'–'} min</span></button>`;
+      }
+    }
+    if(p.checkride){
+      h+=`<div class="sec">Certification</div>
+      <button class="lsn ${state.view==='checkride'?'on':''}" id="btn-checkride">
+        <i class="tick ${Progress.data.checkride&&Progress.data.checkride.passed?'done':'todo'}">${Progress.data.checkride&&Progress.data.checkride.passed?'✓':'🎓'}</i>${esc(p.checkride.title)}</button>`;
+      if(Progress.data.cert)
+        h+=`<button class="lsn ${state.view==='cert'?'on':''}" id="btn-view-cert"><i class="tick done">🏅</i>View certificate</button>`;
+    }
+    h+=`<div class="rail-foot">
+      <div class="note">${done}/${total} lessons complete</div>
+      <div class="prog-track"><div class="prog-fill" style="width:${total?Math.round(done/total*100):0}%"></div></div>
+      <div class="row">
+        <button class="btn sm" id="btn-export" title="Download progress as JSON">⤓ Export</button>
+        <button class="btn sm" id="btn-import" title="Restore progress from a JSON export">⤒ Import</button>
+        <button class="btn sm ghost" id="btn-reset" title="Clear all local progress">Reset</button>
+      </div>
+      <div class="note">progress lives in this browser (localStorage)</div>
+    </div>`;
+    $('#rail').innerHTML=h;
+    $$('#rail button.lsn[data-lesson]').forEach(b=>b.addEventListener('click',()=>Lesson.open(b.dataset.lesson)));
+    const cr=$('#btn-checkride');if(cr)cr.addEventListener('click',()=>Checkride.open());
+    const vc=$('#btn-view-cert');if(vc)vc.addEventListener('click',()=>Cert.render());
+    $('#btn-export').addEventListener('click',()=>Progress.export());
+    $('#btn-import').addEventListener('click',()=>$('#imp-file').click());
+    $('#btn-reset').addEventListener('click',()=>{
+      Progress.data={quiz:{},practicals:{},checkride:null,cert:null,lastLesson:null};
+      Progress.save();Rail.render();const l=Content.lesson(state.lessonId);if(l)Lesson.render(l);
+      toast('Progress cleared');});
+  }
+};
+
+/* ---------------- Lesson view ---------------- */
+const Lesson={
+  open(id){
+    const l=Content.lesson(id);if(!l)return;
+    state.lessonId=id;Progress.data.lastLesson=id;Progress.save();
+    show('lesson');this.render(l);
+    Tutor.lessonChanged(l);
+  },
+  render(l){
+    const track=Content.pack.tracks.find(t=>(t.lesson_ids||[]).includes(l.id));
+    const qz=Progress.data.quiz[l.id]||{answers:{}};
+    const done=Progress.lessonDone(l);
+    let h=`<div class="vhead"><h1 id="lesson-title">${esc(l.title)}</h1>
+      <span class="sub">${track?esc(track.title)+' · ':''}${l.minutes||'–'} min read</span>
+      <div class="right">${done?'<span class="pill" style="color:#7fd6b3;border-color:#1e4a38">✓ lesson complete</span>':''}</div></div>`;
+    h+=`<div class="card"><div class="body-html" id="lesson-body">${sanitize(l.body_html)}</div></div>`;
+    if(l.key_points&&l.key_points.length){
+      h+=`<div class="card"><h3>Key points</h3><div id="key-points">${
+        l.key_points.map(k=>`<div class="kp"><i class="ic">▸</i><span>${esc(k)}</span></div>`).join('')}</div></div>`;
+    }
+    if(l.quiz&&l.quiz.length){
+      h+=`<div class="card"><h3>Quiz <span class="right">instant feedback · first answer counts</span></h3><div id="quiz">`;
+      l.quiz.forEach((q,qi)=>{
+        const ans=qz.answers[qi];
+        h+=`<div class="qq" data-q="${qi}"><div class="qt">${qi+1}. ${esc(q.q)}</div>`;
+        q.options.forEach((o,oi)=>{
+          let cls='';
+          if(ans){if(oi===q.answer_idx)cls='ok';else if(oi===ans.picked)cls='bad';}
+          h+=`<button class="q-opt ${cls}" data-q="${qi}" data-i="${oi}" ${ans?'disabled':''}>${esc(o)}</button>`;
+        });
+        if(ans)h+=`<div class="q-explain ${ans.correct?'right':'wrong'}"><b>${ans.correct?'✓ Correct.':'✗ Not quite.'}</b> ${esc(q.explain||'')}</div>`;
+        h+=`</div>`;
+      });
+      h+=`</div><div id="quiz-score">${this.scoreLine(l)}</div></div>`;
+    }
+    if(l.practical){
+      const v=l.practical.verify||{};
+      const pdone=!!Progress.data.practicals[l.id];
+      h+=`<div class="card practical" id="practical"><h3>Practical — on the live fleet
+        <span class="right">${v.kind==='backend_check'?'verified against the backend':'free-text · tutor graded'}</span></h3>
+        <div class="body-html">${sanitize(l.practical.instructions_html)}</div>`;
+      if(v.kind==='backend_check'){
+        h+=`<div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+          <button class="btn primary" id="btn-verify">✓ Verify</button>
+          ${pdone?'<span class="pill" style="color:#7fd6b3;border-color:#1e4a38">passed</span>':''}
+        </div><div class="vres" id="verify-result"></div>`;
+      }else{ // self_check
+        h+=`<div style="margin-top:10px;font-size:12.8px;color:var(--ink)"><b>${esc(v.prompt||'')}</b></div>
+        <textarea class="free" id="sc-answer" placeholder="Write your answer…"></textarea>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn primary" id="btn-grade">✦ Grade my answer</button>
+          <button class="btn" id="btn-selfdone" ${pdone?'disabled':''}>${pdone?'Completed':'Mark complete'}</button>
+        </div><div class="vres" id="grade-result"></div>`;
+      }
+      h+=`</div>`;
+    }
+    $('#v-lesson').innerHTML=h;
+    // wire quiz
+    $$('#quiz .q-opt:not([disabled])').forEach(b=>b.addEventListener('click',()=>this.answer(l,+b.dataset.q,+b.dataset.i)));
+    // wire practical
+    const bv=$('#btn-verify');
+    if(bv)bv.addEventListener('click',async()=>{
+      bv.disabled=true;bv.textContent='Verifying…';
+      const res=await runVerify(l.practical.verify);
+      bv.disabled=false;bv.textContent='✓ Verify';
+      const out=$('#verify-result');
+      out.className='vres show '+(res.ok?'ok':'bad');
+      out.textContent=res.ok?'✓ Verified against the live backend — '+res.detail
+                            :'✗ Not verified yet — '+res.detail;
+      if(res.ok&&!Progress.data.practicals[l.id]){
+        Progress.data.practicals[l.id]=true;Progress.save();Rail.render();
+        toast('Practical verified — nice work');
+        if(Progress.lessonDone(l))this.render(l);
+      }
+    });
+    const bg=$('#btn-grade');
+    if(bg)bg.addEventListener('click',async()=>{
+      const ans=$('#sc-answer').value;
+      bg.disabled=true;bg.textContent='Grading…';
+      const g=await window.YFTutor.grade(ans,l.key_points||[],l);
+      bg.disabled=false;bg.textContent='✦ Grade my answer';
+      const out=$('#grade-result');
+      out.className='vres show '+(g.score>=0.5?'ok':'bad');
+      out.textContent=`Score ${(g.score*100).toFixed(0)}% — ${g.feedback}`;
+    });
+    const bs=$('#btn-selfdone');
+    if(bs)bs.addEventListener('click',()=>{
+      Progress.data.practicals[l.id]=true;Progress.save();Rail.render();this.render(l);
+      toast('Practical marked complete');
+    });
+  },
+  answer(l,qi,oi){
+    const q=l.quiz[qi];
+    const st=Progress.data.quiz[l.id]||(Progress.data.quiz[l.id]={answers:{}});
+    if(st.answers[qi])return;                        // first answer counts
+    st.answers[qi]={picked:oi,correct:oi===q.answer_idx};
+    const answered=Object.keys(st.answers).length;
+    st.total=l.quiz.length;
+    st.score=Object.values(st.answers).filter(a=>a.correct).length;
+    st.completed=answered>=l.quiz.length;
+    Progress.save();
+    this.render(l);Rail.render();
+  },
+  scoreLine(l){
+    const st=Progress.data.quiz[l.id];
+    if(!st||!Object.keys(st.answers||{}).length)return 'Answer the questions — explanations appear instantly.';
+    const answered=Object.keys(st.answers).length;
+    if(answered<l.quiz.length)return `Progress: ${answered}/${l.quiz.length} answered · <b>${st.score}</b> correct so far.`;
+    return `Quiz complete — score <b>${st.score}/${st.total}</b>.`;
+  }
+};
+
+/* ---------------- Checkride ---------------- */
+const Checkride={
+  open(){
+    show('checkride');
+    if(state.cr&&!state.cr.finished){this.renderStep();return;}
+    this.renderIntro();
+  },
+  cr(){return Content.pack.checkride;},
+  renderIntro(){
+    const c=this.cr();
+    const prev=Progress.data.checkride;
+    $('#v-checkride').innerHTML=`
+      <div class="vhead"><h1>🎓 ${esc(c.title)}</h1><span class="sub">practical exam · verified against the live backend</span></div>
+      <div class="card"><h3>Before you start</h3>
+        <div class="body-html"><p>${c.steps.length} timed steps, each verified against the live fleet backend.
+        Pass threshold: <b>${Math.round((c.pass_threshold||0.8)*100)}%</b> of steps verified.
+        Keep the console open in another tab — the steps ask you to operate the real fleet.</p></div>
+        ${prev?`<div class="pill" style="margin-bottom:10px">last attempt: ${Math.round(prev.score*100)}% · ${prev.passed?'passed':'not passed'}</div>`:''}
+        <button class="btn primary" id="cr-start">Start checkride</button></div>`;
+    $('#cr-start').addEventListener('click',()=>{
+      state.cr={t0:Date.now(),idx:0,results:[],finished:false};
+      this.startTimer();this.renderStep();
+    });
+  },
+  startTimer(){
+    clearInterval(state.crTimer);
+    state.crTimer=setInterval(()=>{
+      const el=$('#cr-timer');
+      if(el&&state.cr&&!state.cr.finished)el.textContent=this.elapsed();
+    },1000);
+  },
+  elapsed(){
+    const s=Math.floor((Date.now()-state.cr.t0)/1000);
+    return pad(Math.floor(s/60))+':'+pad(s%60);
+  },
+  renderStep(){
+    const c=this.cr(),cr=state.cr,step=c.steps[cr.idx];
+    const dots=c.steps.map((_,i)=>{
+      let cls='';if(i<cr.results.length)cls=cr.results[i]?'pass':'fail';else if(i===cr.idx)cls='cur';
+      return `<span class="cr-dot ${cls}"></span>`;}).join('');
+    $('#v-checkride').innerHTML=`
+      <div class="vhead"><h1>🎓 ${esc(c.title)}</h1>
+        <span class="sub">step ${cr.idx+1} of ${c.steps.length}</span>
+        <div class="right"><span class="cr-timer" id="cr-timer">${this.elapsed()}</span></div></div>
+      <div class="cr-meta"><div class="cr-steps">${dots}</div></div>
+      <div class="card practical" id="cr-step">
+        <h3>Step ${cr.idx+1}</h3>
+        <div class="body-html">${sanitize(step.instruction_html)}</div>
+        ${step.rubric_points&&step.rubric_points.length?`<h3 style="margin-top:12px">Rubric</h3><ul class="rubric">${step.rubric_points.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:''}
+        <div style="display:flex;gap:8px;margin-top:12px">
+          ${step.verify&&step.verify.kind==='self_check'
+            ?`<button class="btn primary" id="cr-verify">Mark step done</button>`
+            :`<button class="btn primary" id="cr-verify">✓ Verify step</button>`}
+          <button class="btn ghost" id="cr-skip">Skip (counts as failed)</button>
+        </div>
+        <div class="vres" id="cr-result"></div>
+      </div>`;
+    $('#cr-verify').addEventListener('click',async()=>{
+      const b=$('#cr-verify');b.disabled=true;
+      const v=step.verify||{};
+      const res=v.kind==='self_check'?{ok:true,detail:'self-checked'}:await runVerify(v);
+      b.disabled=false;
+      const out=$('#cr-result');
+      if(res.ok){this.advance(true);}
+      else{out.className='vres show bad';out.textContent='✗ Not verified — '+res.detail+'. Fix it and Verify again, or skip.';}
+    });
+    $('#cr-skip').addEventListener('click',()=>this.advance(false));
+  },
+  advance(passed){
+    const c=this.cr(),cr=state.cr;
+    cr.results.push(!!passed);
+    if(cr.results.length>=c.steps.length){this.finish();return;}
+    cr.idx++;this.renderStep();
+  },
+  finish(){
+    const c=this.cr(),cr=state.cr;
+    cr.finished=true;clearInterval(state.crTimer);
+    const passedSteps=cr.results.filter(Boolean).length;
+    const score=passedSteps/c.steps.length;
+    const passed=score>=(c.pass_threshold||0.8);
+    const elapsed=this.elapsed();
+    // rubric points earned = points of passed steps
+    const earned=c.steps.flatMap((s,i)=>cr.results[i]?(s.rubric_points||[]):[]);
+    Progress.data.checkride={score,passed,elapsed,steps:cr.results,date:new Date().toISOString().slice(0,10)};
+    Progress.save();Rail.render();
+    $('#v-checkride').innerHTML=`
+      <div class="vhead"><h1>🎓 ${esc(c.title)} — ${passed?'PASSED':'not passed'}</h1>
+        <div class="right"><span class="cr-timer">${elapsed}</span></div></div>
+      <div class="card"><h3>Result</h3>
+        <div class="body-html"><p>Steps verified: <b>${passedSteps}/${c.steps.length}</b> ·
+        score <b id="cr-score">${Math.round(score*100)}%</b> ·
+        threshold ${Math.round((c.pass_threshold||0.8)*100)}% · time ${elapsed}</p></div>
+        ${earned.length?`<h3>Rubric points earned</h3><ul class="rubric">${earned.map(r=>`<li>✓ ${esc(r)}</li>`).join('')}</ul>`:''}
+      </div>
+      ${passed?`
+      <div class="card" id="cr-passform"><h3>Claim your certificate</h3>
+        <div class="body-html"><p>Enter your name exactly as it should appear on the certificate.</p></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="name" id="cert-name" placeholder="Your name" maxlength="80">
+          <button class="btn primary" id="btn-make-cert">Issue certificate</button>
+        </div></div>`
+      :`<div class="card" id="cr-fail"><h3>Keep flying</h3>
+        <div class="body-html"><p>Below the pass threshold this time. Review the lessons, then retry — the fleet will still be there.</p></div>
+        <button class="btn primary" id="cr-retry">Retry checkride</button></div>`}`;
+    if(passed){
+      $('#btn-make-cert').addEventListener('click',()=>{
+        const name=$('#cert-name').value.trim();
+        if(!name){toast('Enter a name first');return;}
+        Cert.issue(name,score,elapsed);
+      });
+    }else{
+      $('#cr-retry').addEventListener('click',()=>{state.cr=null;this.open();});
+    }
+  }
+};
+
+/* ---------------- Certificate + Open Badge ----------------
+   Verification code = deterministic hash (djb2 + FNV-1a) of
+   "<name>|<date>|<score%>" — anyone can recompute it from the
+   printed fields to spot tampering. Demo-grade, not cryptographic. */
+function vcode(s){
+  let h1=5381;for(let i=0;i<s.length;i++)h1=(((h1<<5)+h1)+s.charCodeAt(i))>>>0;
+  let h2=2166136261;for(let i=0;i<s.length;i++){h2=(h2^s.charCodeAt(i))>>>0;h2=Math.imul(h2,16777619)>>>0;}
+  const hex=(h1.toString(16).padStart(8,'0')+h2.toString(16).padStart(8,'0')).toUpperCase();
+  return hex.match(/.{4}/g).join('-');
+}
+const Cert={
+  issue(name,score,elapsed){
+    const c=Content.pack.checkride;
+    const track=Content.pack.tracks[0]||{};
+    const date=new Date().toISOString().slice(0,10);
+    const scorePct=Math.round(score*100);
+    const code=vcode(name+'|'+date+'|'+scorePct);
+    Progress.data.cert={name,date,scorePct,elapsed,code,
+      track:track.title||Content.pack.title,checkride:c.title,pack:Content.pack.id};
+    Progress.save();Rail.render();
+    this.render();
+    toast('Certificate issued 🏅');
+  },
+  render(){
+    const d=Progress.data.cert;
+    if(!d){show('checkride');return;}
+    show('cert');
+    $('#v-cert').innerHTML=`
+      <div class="cert" id="cert">
+        <div class="brand"><span class="mark">⬡</span>YantraFleet Academy</div>
+        <h2>Certificate of Completion</h2>
+        <div class="sub2">${esc(d.checkride)} — practical checkride, verified against a live fleet backend</div>
+        <div class="name" id="cert-holder">${esc(d.name)}</div>
+        <div class="sub2">has demonstrated operational proficiency in the track</div>
+        <div style="font-weight:700;font-size:16px;margin-top:6px">${esc(d.track)}</div>
+        <div class="meta">
+          <div class="kv">Date<b id="cert-date">${esc(d.date)}</b></div>
+          <div class="kv">Score<b id="cert-score">${d.scorePct}%</b></div>
+          <div class="kv">Time<b>${esc(d.elapsed||'—')}</b></div>
+          <div class="kv">Pack<b>${esc(d.pack)}</b></div>
+        </div>
+        <div class="code">Verification code <b id="cert-code">${esc(d.code)}</b> — deterministic hash of name + date + score; recompute to verify.</div>
+        <div class="foot">Demo credential issued client-side by the YantraFleet Academy sample app. Unsigned — not a claim of accreditation.</div>
+      </div>
+      <div class="cert-actions no-print">
+        <button class="btn primary" id="btn-print">⎙ Print certificate</button>
+        <button class="btn" id="btn-badge">⤓ Download Open Badge JSON</button>
+        <button class="btn ghost" id="btn-back-lessons">← Back to lessons</button>
+      </div>`;
+    $('#btn-print').addEventListener('click',()=>window.print());
+    $('#btn-badge').addEventListener('click',()=>this.badge());
+    $('#btn-back-lessons').addEventListener('click',()=>{
+      const id=Progress.data.lastLesson||Content.pack.lessons[0].id;Lesson.open(id);});
+  },
+  /* Open Badges 3.0-shaped assertion. UNSIGNED demo: it follows the
+     OpenBadgeCredential structure but carries no `proof`, so it is not
+     verifiable — a real deployment would sign it server-side. */
+  badge(){
+    const d=Progress.data.cert;if(!d)return;
+    const badge={
+      '@context':['https://www.w3.org/ns/credentials/v2','https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json'],
+      id:'urn:yantrafleet:academy:cert:'+d.code,
+      type:['VerifiableCredential','OpenBadgeCredential'],
+      name:d.checkride,
+      issuer:{id:'https://yantrafleet.example/academy',type:['Profile'],
+        name:'YantraFleet Academy (demo)',description:'Sample learning app — demo issuer, not accredited'},
+      validFrom:d.date+'T00:00:00Z',
+      credentialSubject:{
+        type:['AchievementSubject'],
+        identifier:[{type:'IdentityObject',identityType:'name',identityHash:d.name,hashed:false,salt:''}],
+        achievement:{
+          id:'urn:yantrafleet:academy:achievement:'+(d.pack||'pack'),
+          type:['Achievement'],name:d.track,
+          description:'Completed the '+d.checkride+' with a score of '+d.scorePct+'% on a live fleet backend.',
+          criteria:{narrative:'Timed practical checkride; each step verified against live PostgREST fleet data.'}
+        },
+        result:[{type:['Result'],value:String(d.scorePct),status:'Completed'}]
+      },
+      'yantrafleet:verificationCode':d.code,
+      'yantrafleet:note':'UNSIGNED DEMO credential — no proof property; do not treat as a verifiable credential.'
+    };
+    download('yantrafleet-open-badge-'+d.code+'.json',JSON.stringify(badge,null,2));
+  }
+};
+
+/* ---------------- Tutor panel UI ---------------- */
+const Tutor={
+  push(cls,html){
+    const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;
+    const log=$('#tutor-log');log.appendChild(d);log.scrollTop=log.scrollHeight;
+  },
+  srcPill(src){
+    const cls=src==='sarathi'?'sarathi':src==='canned'?'canned':'webllm';
+    return `<span class="tier-pill ${cls} src">${esc(src)}</span>`;
+  },
+  lessonChanged(l){
+    // keep the chat, note the context switch
+    const log=$('#tutor-log');
+    if(log&&log.lastElementChild&&log.lastElementChild.dataset.ctx===l.id)return;
+    const d=document.createElement('div');
+    d.className='msg ai';d.dataset.ctx=l.id;
+    d.innerHTML=`Now tutoring on <b>${esc(l.title)}</b>. Ask me anything from this lesson.`;
+    log.appendChild(d);log.scrollTop=log.scrollHeight;
+  },
+  async ask(q){
+    q=String(q||'').trim();if(!q)return;
+    $('#tutor-in').value='';
+    this.push('user',esc(q));
+    const l=Content.lesson(state.lessonId);
+    /* streaming tiers (webllm) grow a live bubble token by token; the final
+       {answer, source} then replaces/finishes it. Non-streaming tiers never
+       call onToken and get a plain bubble as before. */
+    let live=null;
+    const log=$('#tutor-log');
+    const onToken=text=>{
+      if(!live){live=document.createElement('div');live.className='msg ai';log.appendChild(live);}
+      live.textContent=text;log.scrollTop=log.scrollHeight;
+    };
+    const r=await window.YFTutor.ask(q,l,onToken);
+    const html=esc(r.answer).replace(/\n/g,'<br>')+'<br>'+this.srcPill(r.source);
+    if(live){live.innerHTML=html;log.scrollTop=log.scrollHeight;}
+    else this.push('ai',html);
+  },
+  init(){
+    $('#tutor-send').addEventListener('click',()=>this.ask($('#tutor-in').value));
+    $('#tutor-in').addEventListener('keydown',e=>{if(e.key==='Enter')this.ask($('#tutor-in').value);});
+    $('#btn-tutor-toggle').addEventListener('click',()=>$('#app').classList.toggle('no-tutor'));
+    this.push('ai','Hi! I’m the Academy tutor. I answer from the open lesson’s notes and can grade your free-text practicals. Current tier: <b>'+esc(window.YFTutor.status())+'</b>.');
+  }
+};
+
+/* ---------------- Open-console link (preserves backend params) ------------- */
+function wireConsoleLink(){
+  const qs=new URLSearchParams();
+  for(const k of ['supa','key','site','token']){const v=_cfg.get(k);if(v)qs.set(k,v);}
+  const a=$('#btn-open-console');
+  a.href='../console/index.html'+(qs.toString()?('?'+qs.toString()):'');
+}
+
+/* ---------------- Import wiring ---------------- */
+$('#imp-file').addEventListener('change',e=>{
+  const f=e.target.files&&e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>Progress.import(String(rd.result));
+  rd.readAsText(f);
+  e.target.value='';
+});
+
+/* ================================================================
+   WEBLLM TIER — top of the tutor ladder (webllm > sarathi > canned)
+   ----------------------------------------------------------------
+   In-browser LLM tutoring via WebLLM (mlc-ai). Strictly OPT-IN:
+   nothing is fetched at page load. When the user clicks "Enable
+   on-device tutor" the runtime is dynamic-import()ed from a CDN,
+   CreateMLCEngine downloads + caches the model weights (browser
+   Cache/OPFS storage — a one-time download, then fully offline),
+   and the engine registers as a YFTutor backend. Any init or
+   runtime failure (OOM, no adapter, CDN down) toasts once and
+   demotes back to sarathi/canned without breaking the chat.
+
+   TEST / SELF-HOST SEAM: if window.__YF_WEBLLM_FACTORY is a
+   function it is used INSTEAD of the CDN import. It must return
+   (or resolve to) an object shaped like the @mlc-ai/web-llm module
+   — i.e. { CreateMLCEngine(model, {initProgressCallback}) }. Tests
+   inject a fake engine through it (network-free); deployments that
+   self-host the runtime can point it at their own bundle.
+   ================================================================ */
+const WebLLM={
+  KEY:'yfa_webllm_v1',                       // localStorage opt-in flag
+  CDN_URLS:['https://esm.run/@mlc-ai/web-llm',
+            'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm'],
+  /* Model ladder by device: floor 1B, default 1.5B, 3B offered on
+     beefy machines (navigator.deviceMemory>=16). gb = approx download. */
+  MODELS:[
+    {id:'Llama-3.2-1B-Instruct-q4f16_1-MLC', label:'Llama 3.2 1B · ~0.9 GB', gb:0.9},
+    {id:'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', label:'Qwen 2.5 1.5B · ~1.7 GB (recommended)', gb:1.7, default:true},
+    {id:'Llama-3.2-3B-Instruct-q4f16_1-MLC', label:'Llama 3.2 3B · ~2.3 GB', gb:2.3, minMem:16},
+  ],
+  engine:null, model:null, loading:false, progress:0, _toasted:false,
+  supported(){return typeof navigator!=='undefined'&&!!navigator.gpu;},   // WebGPU preflight
+  models(){
+    const mem=Number(navigator.deviceMemory)||0;
+    return this.MODELS.filter(m=>!m.minMem||mem>=m.minMem);
+  },
+  defaultModel(){return (this.MODELS.find(m=>m.default)||this.MODELS[0]).id;},
+  pref(){try{const s=localStorage.getItem(this.KEY);return s?JSON.parse(s):null;}catch(e){return null;}},
+  setPref(v){try{if(v)localStorage.setItem(this.KEY,JSON.stringify(v));else localStorage.removeItem(this.KEY);}catch(e){}},
+
+  /* Runtime loader: factory seam first, then CDN with fallback mirror. */
+  async _lib(){
+    if(typeof window.__YF_WEBLLM_FACTORY==='function')return await window.__YF_WEBLLM_FACTORY();
+    let lastErr=null;
+    for(const url of this.CDN_URLS){
+      try{return await import(url);}catch(e){lastErr=e;}
+    }
+    throw lastErr||new Error('WebLLM runtime unavailable');
+  },
+
+  async enable(modelId){
+    if(this.loading||this.engine)return;
+    if(!this.supported()){toast('⚠ WebGPU is not available in this browser — on-device tutor needs Chrome/Edge 113+ or Safari 26+');return;}
+    const m=this.MODELS.find(x=>x.id===modelId)||this.MODELS.find(x=>x.id===this.defaultModel());
+    this._toasted=false;this.loading=true;this.progress=0;this._ui();
+    this._status('Preparing '+m.id+'…');
+    try{
+      /* storage preflight — refuse a download that cannot fit */
+      if(navigator.storage&&typeof navigator.storage.estimate==='function'){
+        let est=null;try{est=await navigator.storage.estimate();}catch(e){}
+        if(est&&est.quota){
+          const free=est.quota-(est.usage||0);
+          if(free<m.gb*1e9)
+            throw new Error('not enough browser storage — need ~'+m.gb+' GB free, have ~'+(free/1e9).toFixed(1)+' GB');
+        }
+      }
+      const lib=await this._lib();
+      if(!lib||typeof lib.CreateMLCEngine!=='function')throw new Error('runtime lacks CreateMLCEngine');
+      this.engine=await lib.CreateMLCEngine(m.id,{
+        initProgressCallback:p=>{
+          if(p&&typeof p.progress==='number')this.progress=p.progress;
+          this._prog(this.progress,p&&p.text?String(p.text):'');
+        }
+      });
+      this.model=m.id;
+      this.setPref({enabled:true,model:m.id});
+      window.YFTutor.registerBackend(this.backend());
+      this._status('✓ on-device model ready — questions stay on this machine');
+      toast('🧠 On-device tutor ready ('+m.id+')');
+    }catch(e){
+      this.engine=null;this.model=null;this.setPref(null);
+      this._status('');
+      this._toastOnce('⚠ On-device tutor failed to start ('+(e&&e.message?e.message:e)+') — staying on the '+window.YFTutor.status()+' tier');
+    }finally{
+      this.loading=false;this._ui();
+    }
+  },
+
+  async disable(){
+    const eng=this.engine;
+    this.engine=null;this.model=null;this.setPref(null);
+    window.YFTutor.unregisterBackend();
+    if(eng&&typeof eng.unload==='function'){try{await eng.unload();}catch(e){}}
+    this._status('');this._ui();
+    toast('On-device tutor disabled — model unloaded');
+  },
+
+  /* Any runtime failure: toast once, demote, let YFTutor fall through. */
+  _fail(err){
+    this.engine=null;this.model=null;
+    window.YFTutor.unregisterBackend();
+    this._toastOnce('⚠ On-device tutor error ('+(err&&err.message?err.message:err)+') — falling back to the '+window.YFTutor.status()+' tier');
+    this._ui();
+  },
+  _toastOnce(msg){if(this._toasted)return;this._toasted=true;toast(msg);},
+
+  /* LESSON grounding text: tutor_context + key_points, capped at 2000 chars. */
+  _lessonText(ctx){
+    ctx=ctx||{};
+    const kp=(ctx.key_points||[]).map(k=>'- '+String(k)).join('\n');
+    return ((ctx.title?'Lesson: '+ctx.title+'\n':'')+String(ctx.tutor_context||'')+
+      (kp?'\nKey points:\n'+kp:'')).slice(0,2000);
+  },
+
+  backend(){
+    const self=this;
+    return {
+      name:'webllm',
+      ready:()=>!!self.engine,
+      async ask(question,lessonCtx,onToken){
+        try{
+          const sys='You are Guru, the YantraFleet Academy tutor. Answer ONLY from the LESSON section; if not covered, say you do not know and suggest asking Sarathi.\n\nLESSON:\n'+self._lessonText(lessonCtx);
+          const out=await self.engine.chat.completions.create({
+            messages:[{role:'system',content:sys},{role:'user',content:String(question)}],
+            temperature:0.2,stream:true});
+          let text='';
+          if(out&&typeof out[Symbol.asyncIterator]==='function'){
+            for await(const ch of out){
+              const d=ch&&ch.choices&&ch.choices[0]&&ch.choices[0].delta;
+              if(d&&typeof d.content==='string'){text+=d.content;if(onToken)onToken(text);}
+            }
+          }else if(out&&out.choices&&out.choices[0]&&out.choices[0].message){
+            text=String(out.choices[0].message.content||'');
+          }
+          text=text.trim();
+          if(!text)throw new Error('empty completion');
+          return {answer:text};
+        }catch(e){self._fail(e);throw e;}
+      },
+      /* JSON-mode grading; parse failures throw so YFTutor.grade falls
+         back to the canned keyword grader (already labelled "needs review"). */
+      async grade(answer,rubric,lessonCtx){
+        try{
+          const rub=(Array.isArray(rubric)?rubric:[]).map(String);
+          const q=lessonCtx&&lessonCtx.practical&&lessonCtx.practical.verify?String(lessonCtx.practical.verify.prompt||''):'';
+          const sys='You are Guru, grading a learner\'s free-text answer for the YantraFleet Academy. '+
+            'Respond with ONLY a JSON object: {"score": <number 0..1>, "hits": [<rubric strings the answer covers>], "feedback": "<2-3 sentences of coaching>"}. '+
+            'Example — rubric: ["Faults first","Check battery"], answer: "I would triage the fault before anything, battery can wait." -> '+
+            '{"score":0.5,"hits":["Faults first"],"feedback":"Good triage order. You skipped the battery check: low cells still need a charger plan."}';
+          const user='QUESTION: '+q+'\nRUBRIC:\n'+rub.map(r=>'- '+r).join('\n')+'\nANSWER:\n'+String(answer||'');
+          const res=await self.engine.chat.completions.create({
+            messages:[{role:'system',content:sys},{role:'user',content:user}],
+            temperature:0.2,response_format:{type:'json_object'}});
+          const raw=res&&res.choices&&res.choices[0]&&res.choices[0].message?String(res.choices[0].message.content||''):'';
+          let j=null;
+          try{j=JSON.parse(raw);}catch(e){
+            const mch=raw.match(/\{[\s\S]*\}/);
+            if(mch){try{j=JSON.parse(mch[0]);}catch(e2){}}
+          }
+          if(!j||typeof j.score!=='number'||!isFinite(j.score))throw new Error('ungradable model reply');
+          const score=Math.max(0,Math.min(1,j.score));
+          const hits=Array.isArray(j.hits)?j.hits.filter(x=>typeof x==='string'):[];
+          const fb=(typeof j.feedback==='string'&&j.feedback.trim())?j.feedback.trim():'Graded on-device.';
+          return {score,hits,
+            feedback:fb+(rub.length?' (on-device grade · '+hits.length+'/'+rub.length+' rubric points)':' (on-device grade)')};
+        }catch(e){self._fail(e);throw e;}
+      }
+    };
+  },
+
+  /* ---- panel card UI ---- */
+  _status(t){const el=$('#webllm-status');if(el){el.textContent=t;el.hidden=!t;}},
+  _prog(frac,text){
+    const p=$('#webllm-prog'),f=$('#webllm-prog-fill');
+    if(p)p.hidden=false;
+    if(f)f.style.width=Math.round(Math.max(0,Math.min(1,frac))*100)+'%';
+    if(text)this._status(text);
+  },
+  _ui(){
+    const card=$('#webllm-card');if(!card)return;
+    card.hidden=!this.supported();
+    const optin=$('#webllm-optin'),active=$('#webllm-active'),prog=$('#webllm-prog');
+    if(optin)optin.hidden=!!this.engine;
+    if(active)active.hidden=!this.engine;
+    if(prog)prog.hidden=!this.loading&&!this.engine;
+    const be=$('#webllm-enable');if(be){be.disabled=this.loading;be.textContent=this.loading?'Loading…':'Enable';}
+  },
+  mount(){
+    const sel=$('#webllm-model');
+    if(sel){
+      sel.innerHTML=this.models().map(m=>
+        `<option value="${esc(m.id)}" ${m.id===this.defaultModel()?'selected':''}>${esc(m.label)}</option>`).join('');
+    }
+    const be=$('#webllm-enable');if(be)be.addEventListener('click',()=>this.enable(sel?sel.value:this.defaultModel()));
+    const bd=$('#webllm-disable');if(bd)bd.addEventListener('click',()=>this.disable());
+    this._ui();
+    /* persisted opt-in: re-init from the browser cache (no re-download) */
+    const p=this.pref();
+    if(p&&p.enabled&&this.supported())this.enable(p.model||this.defaultModel());
+  }
+};
+window.YFWebLLM=WebLLM;                      // hook surface for tests
+
+/* ---------------- Boot ---------------- */
+window.YFA={ // small hook surface for tests / integrations
+  get pack(){return Content.pack;},
+  get source(){return Content.source;},
+  Progress, runVerify, sanitize, vcode
+};
+(async function boot(){
+  Progress.load();
+  await Content.load();
+  wireConsoleLink();
+  Tutor.init();
+  Rail.render();
+  const first=Progress.data.lastLesson&&Content.lesson(Progress.data.lastLesson)
+    ?Progress.data.lastLesson:Content.pack.lessons[0].id;
+  Lesson.open(first);
+  API.probe();                 // async — updates the header chip
+  window.YFTutor.init();       // async — probes the sarathi tier
+  WebLLM.mount();              // wires the opt-in card; loads NOTHING unless opted in
+})();
+
+/* ================================================================
+   BACKEND MOUNT POINT  (the WebLLM tier above is the reference
+   implementation — further tiers plug in the same way)
+   ----------------------------------------------------------------
+   To add another model tier WITHOUT touching the UI code:
+
+        window.YFTutor.registerBackend({
+          name:  'mytier',
+          ready: () => engineLoaded,                       // sync bool
+          ask:   async (question, lessonCtx, onToken?) =>  // lessonCtx =
+                   ({answer: '...'}),                      //  full lesson obj
+          grade: async (answer, rubricPoints, lessonCtx?) =>
+                   ({score: 0.0..1.0, feedback: '...'}),
+        });
+
+   registerBackend() flips YFTutor.status() to your backend's name and
+   the tier pill updates automatically; unregisterBackend() demotes to
+   sarathi/canned. Call onToken(accumulatedText) while streaming and
+   the chat bubble grows live. ask()/grade() failures fall back to the
+   canned tier, so a half-loaded model never breaks the panel. Keep
+   answers grounded on lessonCtx.tutor_context — that field is capped
+   at 1500 chars precisely so it fits small contexts.
+
+   For tests / self-hosted runtimes, window.__YF_WEBLLM_FACTORY
+   (documented at the WEBLLM TIER section) replaces the CDN import.
+   ================================================================ */
+</script>
+</body>
+</html>

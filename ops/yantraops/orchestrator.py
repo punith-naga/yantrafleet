@@ -11,7 +11,9 @@ Children (start order; shutdown is the reverse):
 2. ``yantradetect --interval N`` — incident detector
 3. ``yantranotify --dry-run``    — notifier (prints instead of sending)
 4. ``uvicorn sarathi.app:app``   — the copilot API (skipped by --no-copilot)
-5. ``http.server``               — static console on an ephemeral port
+5. ``http.server``               — one static server on an ephemeral port,
+   serving a tiny generated docroot that exposes the console at ``/``,
+   the training app at ``/academy/`` and the docs site at ``/docs/``
 
 MQTT mode (``--mqtt``) swaps the robot-data path for the real VDA 5050
 wire: an MQTT broker (embedded amqtt on an ephemeral port, or an external
@@ -29,10 +31,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -74,6 +78,45 @@ def load_fakerest(root: Path) -> Any:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _place(src: Path, dst: Path) -> None:
+    """Symlink ``src`` at ``dst``; copy when symlinks are unavailable.
+
+    Linux/macOS always allow symlinks; Windows needs a privilege, so the
+    fallback copies (dirs recursively) to keep the docroot working there.
+    """
+    try:
+        dst.symlink_to(src.resolve(), target_is_directory=src.is_dir())
+    except OSError:
+        if src.is_dir():
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
+
+
+def build_docroot(root: Path) -> Path:
+    """Assemble the static server's docroot in a fresh temp directory.
+
+    ONE ``http.server`` child exposes the three static apps side by side:
+
+    * ``/``          — every top-level entry of ``console/`` (so the
+      console's ``/index.html`` URL keeps working exactly as before)
+    * ``/academy/``  — the training app, when ``academy/`` exists
+    * ``/docs/``     — the docs site, when ``docs/`` exists
+
+    The caller owns the returned directory and removes it on stop().
+    """
+    docroot = Path(tempfile.mkdtemp(prefix="yantraops-www-"))
+    for entry in sorted((root / "console").iterdir()):
+        if entry.name.startswith("."):
+            continue                       # .pytest_cache and friends
+        _place(entry, docroot / entry.name)
+    for name in ("academy", "docs"):
+        src = root / name
+        if src.is_dir():
+            _place(src, docroot / name)
+    return docroot
 
 
 def free_port() -> int:
@@ -165,6 +208,7 @@ class StackInfo:
     key: str
     console_url: str
     copilot_url: str | None
+    academy_url: str | None = None    # /academy/ on the static server, if present
     services: list[dict[str, Any]] = field(default_factory=list)
     mqtt_url: str | None = None       # mqtt://host:port when --mqtt is active
     mqtt_embedded: bool = False       # True when yantraops owns the broker
@@ -210,6 +254,7 @@ class FleetStack:
         self.open_browser = open_browser
 
         self.root = repo_root()
+        self.docroot: Path | None = None  # generated static docroot (temp dir)
         self.fake: Any = None            # FakePostgREST instance in loopback mode
         self.broker: Any = None          # EmbeddedBroker when --mqtt w/o --broker
         self.services: list[Service] = []
@@ -304,14 +349,23 @@ class FleetStack:
                    port=port, url=copilot_url)
 
             console_port = free_port()
-            console_url = (
-                f"http://127.0.0.1:{console_port}/index.html"
+            self.docroot = build_docroot(self.root)
+            # Same backend params for every static app (the pages read
+            # ?supa/?key/?site via URLSearchParams).
+            params = (
                 f"?supa={quote(base_url, safe='')}&key={quote(key, safe='')}"
+                f"&site={quote(self.site, safe='')}"
+            )
+            console_url = f"http://127.0.0.1:{console_port}/index.html{params}"
+            academy_url = (
+                f"http://127.0.0.1:{console_port}/academy/index.html{params}"
+                if (self.docroot / "academy" / "index.html").is_file()
+                else None
             )
             spawn("console", [
                 py, "-m", "http.server", str(console_port),
                 "--bind", "127.0.0.1",
-                "--directory", str(self.root / "console"),
+                "--directory", str(self.docroot),
             ], port=console_port, url=f"http://127.0.0.1:{console_port}/")
         except Exception:
             self.stop()
@@ -323,6 +377,7 @@ class FleetStack:
             mode="loopback" if self.loopback else "supabase",
             base_url=base_url, key=key,
             console_url=console_url, copilot_url=copilot_url,
+            academy_url=academy_url,
             services=[s.as_dict() for s in self.services],
             mqtt_url=(f"mqtt://{mqtt_host}:{mqtt_port}" if self.mqtt else None),
             mqtt_embedded=self.broker is not None,
@@ -353,6 +408,9 @@ class FleetStack:
         if self.fake is not None:
             self.fake.stop()
             self.fake = None
+        if self.docroot is not None:
+            shutil.rmtree(self.docroot, ignore_errors=True)
+            self.docroot = None
         try:
             self.state_file.unlink()
         except OSError:
@@ -408,6 +466,7 @@ class FleetStack:
             "base_url": self.info.base_url,
             "key": self.info.key,
             "console_url": self.info.console_url,
+            "academy_url": self.info.academy_url,
             "copilot_url": self.info.copilot_url,
             "mqtt_url": self.info.mqtt_url,
             "services": self.info.services,
@@ -486,6 +545,10 @@ class FleetStack:
         lines += [
             "-" * 72,
             f"  {'console':<{width}}{i.console_url}",
+        ]
+        if i.academy_url:
+            lines.append(f"  {'academy':<{width}}{i.academy_url}")
+        lines += [
             "-" * 72,
             "  Ctrl-C to stop.",
         ]
