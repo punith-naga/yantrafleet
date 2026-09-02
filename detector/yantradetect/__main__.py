@@ -93,7 +93,10 @@ def run(argv: list[str] | None = None,
         max_polls: int | None = None) -> int:
     """Entry point; ``client``/``max_polls`` are injectable for tests."""
     args = build_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO,
+    import os as _os
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.basicConfig(level=getattr(logging,
+        _os.environ.get("YANTRA_LOG_LEVEL", "INFO").upper(), logging.INFO),
                         format="%(asctime)s %(levelname)s %(message)s")
 
     if args.maintenance:

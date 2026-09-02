@@ -134,6 +134,7 @@ class FleetStack:
         notify_interval: float = 10.0,
         state_file: Path | str | None = None,
         quiet: bool = False,
+        verbose: bool = False,
     ) -> None:
         self.loopback = loopback
         self.copilot = copilot
@@ -144,6 +145,7 @@ class FleetStack:
         self.notify_interval = notify_interval
         self.state_file = Path(state_file) if state_file else DEFAULT_STATE_FILE
         self.quiet = quiet
+        self.verbose = verbose
 
         self.root = repo_root()
         self.fake: Any = None            # FakePostgREST instance in loopback mode
@@ -166,6 +168,9 @@ class FleetStack:
         env = dict(os.environ)
         env["SUPABASE_URL"] = base_url
         env["SUPABASE_KEY"] = key
+        # v0.6.1: keep child logs calm so the banner/READY line stays visible;
+        # `up --verbose` restores full INFO streams.
+        env.setdefault("YANTRA_LOG_LEVEL", "DEBUG" if self.verbose else "WARNING")
 
         out = subprocess.DEVNULL if self.quiet else None
         py = sys.executable
@@ -228,6 +233,7 @@ class FleetStack:
             services=[s.as_dict() for s in self.services],
         )
         self._write_state()
+        self._t0 = time.time()
         return self.info
 
     def stop(self) -> None:
@@ -307,6 +313,45 @@ class FleetStack:
             "copilot_url": self.info.copilot_url,
             "services": self.info.services,
         }, indent=2))
+
+    def wait_ready(self, timeout_s: float = 45.0) -> float:
+        """Block until the fleet is actually flowing; return seconds taken.
+
+        Ready means: robots rows exist in the backend AND (when enabled)
+        sarathi /health answers. Prints a final READY line with the console
+        URL so it is the last thing on screen even above child logs.
+        """
+        import httpx as _hx
+        assert self.info is not None
+        started = getattr(self, "_t0", time.time())
+        deadline = started + timeout_s
+        headers = {"apikey": self.info.key,
+                   "Authorization": f"Bearer {self.info.key}"}
+        robots_ok = False
+        sarathi_ok = self.info.copilot_url is None
+        with _hx.Client(timeout=2.0) as c:
+            while time.time() < deadline and not (robots_ok and sarathi_ok):
+                if not robots_ok:
+                    try:
+                        r = c.get(f"{self.info.base_url}/rest/v1/robots",
+                                  params={"select": "id", "limit": "1"},
+                                  headers=headers)
+                        robots_ok = r.status_code == 200 and bool(r.json())
+                    except Exception:
+                        pass
+                if not sarathi_ok:
+                    try:
+                        sarathi_ok = c.get(
+                            f"{self.info.copilot_url}/health").status_code == 200
+                    except Exception:
+                        pass
+                if not (robots_ok and sarathi_ok):
+                    time.sleep(0.4)
+        took = time.time() - started
+        state = "READY" if (robots_ok and sarathi_ok) else "PARTIAL (still warming up)"
+        print(f"\n  \u2714 {state} in {took:.1f}s \u2014 open:  "
+              f"{self.info.console_url}\n", flush=True)
+        return took
 
     def _say(self, msg: str) -> None:
         if not self.quiet:

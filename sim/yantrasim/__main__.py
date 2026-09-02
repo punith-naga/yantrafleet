@@ -50,10 +50,16 @@ def make_transport(args: argparse.Namespace, sim: FleetSim) -> Transport:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    import os as _os
+    _lvl = (logging.DEBUG if args.verbose else
+            getattr(logging, _os.environ.get("YANTRA_LOG_LEVEL", "INFO").upper(),
+                    logging.INFO))
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=_lvl,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if not args.verbose:  # httpx request spam is DEBUG-grade for a demo
+        logging.getLogger("httpx").setLevel(logging.WARNING)
     sim = FleetSim(seed=args.seed)
     transport = make_transport(args, sim)
     # Simulated seconds per tick; a zero --interval (fast-forward runs)

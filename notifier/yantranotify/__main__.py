@@ -92,7 +92,10 @@ def run(args: argparse.Namespace,
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO,
+    import os as _os
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.basicConfig(level=getattr(logging,
+        _os.environ.get("YANTRA_LOG_LEVEL", "INFO").upper(), logging.INFO),
                         format="%(asctime)s %(levelname)s %(message)s")
     args = build_parser().parse_args(argv)
     return run(args)

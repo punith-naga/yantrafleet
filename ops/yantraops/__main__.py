@@ -42,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="yantranotify poll interval seconds (default 10)")
     up.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE,
                     help=f"where to record ports/pids (default {DEFAULT_STATE_FILE})")
+    up.add_argument("--verbose", action="store_true",
+                    help="full INFO logs from every child (default: WARNING)")
     up.add_argument("--quiet", action="store_true",
                     help="suppress child output and banner")
 
@@ -62,10 +64,12 @@ def cmd_up(args: argparse.Namespace) -> int:
         notify_interval=args.notify_interval,
         state_file=args.state_file,
         quiet=args.quiet,
+        verbose=args.verbose,
     )
     stack.start()
     if not args.quiet:
         print(stack.banner(), flush=True)
+    stack.wait_ready()
     return stack.run(duration=args.duration)
 
 
