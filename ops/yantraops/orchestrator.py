@@ -189,12 +189,16 @@ class FleetStack:
         mqtt: bool = False,
         mqtt_broker: str | None = None,
         sim: bool = True,
+        site: str | None = None,
     ) -> None:
         self.loopback = loopback
         self.copilot = copilot
         self.mqtt = mqtt
         self.mqtt_broker = mqtt_broker  # external "host[:port]", None=embedded
         self.sim = sim
+        # Site stamped on bridge-written rows and used to scope the command
+        # gate; flag > env > default demo site.
+        self.site = site or os.environ.get("YANTRA_SITE_ID") or "BLR-DC1"
         self.url = url
         self.key = key
         self.sim_interval = sim_interval
@@ -275,6 +279,8 @@ class FleetStack:
                     "--mqtt-host", str(mqtt_host),
                     "--mqtt-port", str(mqtt_port),
                     "--supabase-url", base_url, "--supabase-key", key,
+                    "--commands",
+                    "--site", self.site,
                 ], url=f"mqtt://{mqtt_host}:{mqtt_port}")
             spawn("yantradetect", [
                 py, "-m", "yantradetect", "--interval", str(self.detect_interval),

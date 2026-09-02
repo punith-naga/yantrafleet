@@ -1,0 +1,21 @@
+[Unit]
+Description=YantraFleet notifier (yantranotify)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yantra
+Group=yantra
+EnvironmentFile=/etc/yantrafleet.env
+WorkingDirectory=/opt/yantrafleet
+StateDirectory=yantrafleet
+ExecStart=/opt/yantrafleet/.venv/bin/python -m yantranotify --interval 10 --state-file /var/lib/yantrafleet/notify-state.json
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

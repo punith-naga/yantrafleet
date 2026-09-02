@@ -1,0 +1,53 @@
+# YantraFleet nginx site — TEMPLATE.
+#
+# ${SUPABASE_URL} / ${SUPABASE_KEY} / ${YANTRA_SITE_ID} are substituted by
+# envsubst during install (see user-data.sh step 7); every other $variable
+# is native nginx and must survive substitution untouched — that is why
+# user-data passes envsubst an explicit variable list.
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    # -- compression -------------------------------------------------------
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript
+               text/javascript image/svg+xml;
+
+    # -- basic security headers -------------------------------------------
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy no-referrer-when-downgrade always;
+
+    # -- console (static single-file app) ---------------------------------
+    root /opt/yantrafleet/console;
+    index index.html;
+
+    # Landing on the bare host: hand the console its backend config in the
+    # URL (the app reads ?supa/?key/?site via URLSearchParams).
+    location = / {
+        return 302 /index.html?supa=${SUPABASE_URL}&key=${SUPABASE_KEY}&site=${YANTRA_SITE_ID};
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # -- sarathi copilot API (uvicorn on loopback) ------------------------
+    location /ask {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_set_header Host $host;
+    }
+}

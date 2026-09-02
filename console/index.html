@@ -20,6 +20,9 @@
        module below. If the console is served from https, a plain-http
        localhost endpoint may be blocked as mixed content — serve the
        console over http (e.g. `python3 -m http.server`) for local dev.
+     - Auth: pass ?token=<bearer token> in the console URL to send an
+       `Authorization: Bearer <token>` header on the copilot /ask and
+       /health requests (omitted entirely when no token is given).
 
   2. Supabase sync (optional multi-tab live sync)
      - SUPA_URL / SUPA_KEY constants near the bottom of the script.
@@ -257,6 +260,7 @@ svg text{font-family:var(--font)}
   <button data-v="analytics"><i class="ic">∿</i>Analytics</button>
   <div class="sec">Configure</div>
   <button data-v="fleet"><i class="ic">⬡</i>Fleet &amp; Connectors</button>
+  <button data-v="audit"><i class="ic">☰</i>Audit</button>
   <div class="nav-foot">v0.1 demo · VDA 5050 · 3 vendors<br><span style="color:#0ca30c">●</span> Sim feed connected</div>
 </nav>
 <main id="main">
@@ -267,6 +271,7 @@ svg text{font-family:var(--font)}
   <div class="view" id="v-maint"></div>
   <div class="view" id="v-analytics"></div>
   <div class="view" id="v-fleet"></div>
+  <div class="view" id="v-audit"></div>
   <div class="drawer" id="drawer"></div>
   <div id="copilot"></div>
 </main>
@@ -351,6 +356,8 @@ robots.forEach(r=>{if(r.status==='active')assign(r);});
 const store={
   thrHist:[], alHist:[], alerts:[], incidents:[], missions:[], tickets:[], commands:[],
   findings:null, findingsReq:false,   // v0.4: maintenance_findings rows (null = not fetched / unavailable → mock tickets)
+  audit:null, auditReq:false,         // v0.9: full commands history for the Audit view (null = not fetched)
+  availOk:0, availTot:0,              // v0.9: availability sampling for the Analytics SLA card
   throughput:132, sla:98.2, alarmHr:6, ackedIds:new Set()
 };
 // seed 60 min of throughput history (dip 14:00-15:00 = incident narrative — dip already recovering)
@@ -519,6 +526,13 @@ function fleetStats(){
   const health=Math.round(100 - faults*9 - store.alerts.filter(a=>!a.ack&&a.sev!=='info').length*2.5 - (avgB<35?6:0));
   const tasks=robots.reduce((s,r)=>s+r.tasksDone,0);
   return {on,faults,avgB,health,tasks,util:Math.round(robots.filter(r=>r.status==='active').length/robots.length*100)};
+}
+/* v0.9 SLA card sampling: one status sample per robot per UI tick (~0.4 s).
+   In follower mode the tick reflects the latest synced pull, so the ratio
+   approximates availability over the pulls seen this session. */
+function sampleAvail(){
+  store.availOk+=robots.filter(r=>r.status!=='fault'&&r.status!=='estop').length;
+  store.availTot+=robots.length;
 }
 
 function rOverview(){
@@ -1013,6 +1027,11 @@ function rAnalytics(){
     if(!causeRows.length)causeRows=null;   // no incident durations recorded → keep demo chart
   }
   const tag=t=>`<span class="pill">${t}</span>`;
+  // v0.9 SLA card — all three figures computed from live session data
+  const availPct=store.availTot?store.availOk/store.availTot*100:null;
+  const slaResolved=store.incidents.filter(i=>String(i.state)==='Resolved'&&isFinite(+i.dur)&&+i.dur>0);
+  const mttr=slaResolved.length?slaResolved.reduce((sum,i)=>sum+ +i.dur,0)/slaResolved.length:null;
+  const openInc=store.incidents.filter(i=>i.state==='Open').length;
   $('#v-analytics').innerHTML=`
   <div class="vhead"><h1>Analytics</h1><span class="sub">shift 2 · ${clock()} · ${live?'live-computed tiles marked "computed", rest are demo':'all demo data (local sim)'}</span>
     <div class="right"><button class="btn sm" onclick="toast('PDF export queued (mock)')">Export PDF</button></div></div>
@@ -1022,6 +1041,18 @@ function rAnalytics(){
     <div class="card stat"><div class="val">${store.sla}<small>%</small></div><div class="lbl">Task SLA (≤6 min) ${tag('demo')}</div><div class="delta down">▼ 0.9pp — INC-1042</div></div>
     <div class="card stat"><div class="val">₹8.4<small>/task</small></div><div class="lbl">Cost per task ${tag('demo')}</div><div class="delta up">▲ improving (₹9.1 last wk)</div></div>
   </div>
+  <div class="card" style="margin-top:14px" id="an-sla"><h3>SLA &amp; reliability — this session <span class="right">all three computed live · nothing illustrative</span></h3>
+    <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat"><div class="val" id="sla-avail" title="Approximation: share of robot status samples this session (one per robot per UI tick / sync pull) where the robot was not in fault or e-stop. Session-scoped sampling, not wall-clock uptime.">${availPct!=null?availPct.toFixed(1):'—'}<small>%</small></div>
+        <div class="lbl">Fleet availability ${tag('computed')}</div>
+        <div class="delta flat">${fmt(store.availTot)} robot-samples this session</div></div>
+      <div class="stat"><div class="val" id="sla-mttr">${mttr!=null?mttr.toFixed(0):'—'}<small>${mttr!=null?' min':''}</small></div>
+        <div class="lbl">MTTR — mean time to resolve ${tag('computed')}</div>
+        <div class="delta flat">${slaResolved.length?'avg of '+slaResolved.length+' resolved incident'+(slaResolved.length===1?'':'s'):'no resolved incidents with a duration yet'}</div></div>
+      <div class="stat"><div class="val" id="sla-open">${openInc}</div>
+        <div class="lbl">Open incidents ${tag('computed')}</div>
+        <div class="delta ${openInc?'down':'up'}">${openInc?'▼ needs attention':'▲ all clear'}</div></div>
+    </div></div>
   <div class="grid g2" style="margin-top:14px">
     <div class="card"><h3>Tasks by robot — this shift <span class="right">${live?'computed from live robots':'demo'}</span></h3><div id="an-rob"></div></div>
     <div class="card"><h3>Time lost by cause — this week <span class="right">minutes · ${causeRows?'computed from incidents':'demo'}</span></h3><div id="an-cause"></div>
@@ -1064,10 +1095,54 @@ function rFleet(){
     </tbody></table></div>`;
 }
 
+/* ---------------- Audit (v0.9: command history + acknowledged alerts) ---------------- */
+let auditFilter='all';
+const AUDIT_FILTERS=['all','pending','approved','executed','failed','rejected'];
+const cmdStBadge=s=>{
+  const m={pending:['◷','var(--warn)'],approved:['✓','var(--s1)'],executed:['✔','var(--s3)'],failed:['✕','var(--crit)'],rejected:['⊘','var(--muted)']};
+  const[ic,c]=m[s]||['○','var(--muted)'];
+  return `<span class="st" style="color:${c}"><i class="ic">${ic}</i>${Copilot.esc(s||'—')}</span>`;
+};
+function setAuditFilter(f){auditFilter=f;if(curView==='audit')rAudit();}
+function rAudit(){
+  const live=liveNow(), e=s=>Copilot.esc(s);
+  // first open while live → pull the full history once; the sync cycle refreshes it afterwards
+  if(live&&!store.auditReq){store.auditReq=true;Sync.pullAudit().then(()=>{if(curView==='audit')rAudit();}).catch(()=>{});}
+  const all=Array.isArray(store.audit)?store.audit:(store.commands||[]);
+  const rows=auditFilter==='all'?all:all.filter(c=>c.status===auditFilter);
+  const tstr=v=>v?e(String(v).slice(11,19)||v):'—';
+  const acked=store.alerts.filter(a=>a.ack).slice(0,10);
+  $('#v-audit').innerHTML=`
+  <div class="vhead"><h1>Audit</h1><span class="sub">${live?'command trail · live from the commands table':'command trail · no live backend connected (the local sim keeps no audit history)'}</span></div>
+  <div class="card"><h3>Command history <span class="right">${all.length} command${all.length===1?'':'s'} · every request, decision and execution</span></h3>
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap" id="audit-chips">
+      ${AUDIT_FILTERS.map(f=>`<button class="btn sm ${auditFilter===f?'primary':''}" data-f="${f}" onclick="setAuditFilter('${f}')">${f==='all'?'All':f}</button>`).join('')}
+    </div>
+    ${rows.length?`<div style="overflow-x:auto"><table class="t"><thead><tr><th>Created</th><th>Cmd</th><th>Robot</th><th>Requested by</th><th>Decided by</th><th>Status</th><th>Note</th><th>Executed at</th></tr></thead><tbody>
+      ${rows.map(c=>`<tr>
+        <td>${tstr(c.created_at)}</td>
+        <td><b>${e(String(c.cmd||'—').toUpperCase())}</b></td>
+        <td><b>${e(c.robot_id||'—')}</b></td>
+        <td>${e(c.requested_by||'—')}</td>
+        <td>${e(c.decided_by||'—')}</td>
+        <td>${cmdStBadge(c.status)}</td>
+        <td style="color:var(--muted)">${e(c.note||'—')}</td>
+        <td>${tstr(c.executed_at)}</td></tr>`).join('')}
+    </tbody></table></div>`
+    :`<div class="empty">${all.length?'No '+e(auditFilter)+' commands recorded — try another filter':'No commands recorded yet — robot commands (pause / charge / e-stop) land here once requested'}</div>`}
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Recently acknowledged alerts <span class="right">${acked.length?'latest '+acked.length:'—'}</span></h3>
+    ${acked.length?acked.map(a=>`<div class="al acked"><span class="tt">${e(clock2(a.t))}</span>
+      <div class="bd"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${sevBadge(a.sev)||''}<span class="pill">${e(a.src)}</span></div>
+      <div class="m" style="margin-top:3px">${e(a.msg)}</div></div></div>`).join('')
+    :'<div class="empty">No acknowledged alerts yet — Ack an alert on Overview and it lands here</div>'}
+  </div>`;
+}
+
 /* ================= Copilot ================= */
 const Copilot={
   open:false, msgs:[],
-  toggle(){this.open=!this.open;$('#copilot').classList.toggle('open',this.open);if(this.open)this.render();},
+  toggle(){this.open=!this.open;$('#copilot').classList.toggle('open',this.open);if(this.open){this.render();this.health();}},
   render(){
     const c=$('#copilot');
     c.innerHTML=`
@@ -1092,14 +1167,35 @@ const Copilot={
      Tries the sarathi service first; on ANY failure falls back to the
      local rule-based answer(q) engine below (unchanged). */
   SARATHI_URL:'http://localhost:8001/ask',
+  SARATHI_HEALTH_URL:'http://localhost:8001/health',
   SARATHI_TIMEOUT_MS:4000,
+  /* ?token=<bearer> in the console URL → Authorization header on /ask + /health.
+     No token → the header is omitted entirely (requests unchanged from before). */
+  SARATHI_TOKEN:new URLSearchParams(location.search).get('token')||null,
+  hdr(extra){
+    const h=Object.assign({},extra||{});
+    if(this.SARATHI_TOKEN)h['Authorization']='Bearer '+this.SARATHI_TOKEN;
+    return h;
+  },
+  /** Best-effort reachability probe on panel open — updates the subtitle only,
+      never gates ask() (the local fallback engine handles failures anyway). */
+  async health(){
+    const sub=()=>$('#copilot .cp-head .s');
+    try{
+      const c=new AbortController(); const t=setTimeout(()=>c.abort(),2500);
+      let ok=false;
+      try{const r=await fetch(this.SARATHI_HEALTH_URL,{signal:c.signal,headers:this.hdr()});ok=r.ok;}
+      finally{clearTimeout(t);}
+      const el=sub(); if(el)el.textContent=ok?'live agent connected · every answer cites evidence':'live agent unhealthy · local engine will answer';
+    }catch(e){const el=sub(); if(el)el.textContent='live agent offline · local engine will answer';}
+  },
   esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');},
   /** POST {question} to sarathi with a hard timeout; resolves {answer,evidence,tier} or throws. */
   async askRemote(q){
     const c=new AbortController(); const t=setTimeout(()=>c.abort(),this.SARATHI_TIMEOUT_MS);
     try{
       const r=await fetch(this.SARATHI_URL,{method:'POST',signal:c.signal,
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+        headers:this.hdr({'Content-Type':'application/json'}),body:JSON.stringify({question:q})});
       if(!r.ok)throw new Error('HTTP '+r.status);
       const d=await r.json();
       if(!d||typeof d.answer!=='string')throw new Error('bad payload: missing answer');
@@ -1384,7 +1480,7 @@ const Palette={
   base(){
     const it=[];
     [['overview','Overview'],['liveops','Live Ops'],['incidents','Incidents'],['missions','Missions'],
-     ['maint','Maintenance'],['analytics','Analytics'],['fleet','Fleet & Connectors']]
+     ['maint','Maintenance'],['analytics','Analytics'],['fleet','Fleet & Connectors'],['audit','Audit']]
       .forEach(([v,l])=>it.push({ic:'◫',label:'Go to '+l,hint:'view',run:()=>go(v)}));
     it.push({ic:'⎙',label:'Shift report',hint:'report',run:()=>ShiftReport.open()});
     it.push({ic:'✓',label:'Ack all info alerts',hint:'action',run:()=>ackAllInfo()});
@@ -1553,7 +1649,15 @@ const Sync={
       // re-render missions only when visible and the operator isn't typing in the intent box
       if(curView==='missions'&&!(document.activeElement&&document.activeElement.tagName==='INPUT'))rMissions();
       if(curView==='maint')await this.pullFindings();  // render loop repaints maint every ~3s
+      if(curView==='audit')await this.pullAudit();     // ditto for the audit trail
     }
+  },
+  /* ---- v0.9 audit trail: full command history, all statuses ---- */
+  async pullAudit(){
+    try{
+      const rows=await this.q('commands?select=*&order=created_at.desc&limit=50');
+      store.audit=rows||[];
+    }catch(e){/* commands table may not exist — keep store.audit as-is (null → graceful empty state) */}
   },
   /* ---- v0.4 missions sync ---- */
   async pullMissions(){
@@ -1634,7 +1738,7 @@ const Sync={
 };
 
 /* ================= Router + main loop ================= */
-const VIEWS={overview:rOverview,liveops:rLiveOps,incidents:rIncidents,missions:rMissions,maint:rMaint,analytics:rAnalytics,fleet:rFleet};
+const VIEWS={overview:rOverview,liveops:rLiveOps,incidents:rIncidents,missions:rMissions,maint:rMaint,analytics:rAnalytics,fleet:rFleet,audit:rAudit};
 let curView='overview';
 function go(v){
   curView=v;
@@ -1666,10 +1770,11 @@ function render(force){
   // live-ops map updates every frame; full view re-render throttled
   if(curView==='liveops'){updateMap();if(force||now-lastFull>2000){renderFleetList();lastFull=now;}}
   else if(force){VIEWS[curView]();lastFull=now;}
-  else if(now-lastFull>3000&&['overview','analytics','maint'].includes(curView)){VIEWS[curView]();lastFull=now;} // never auto-rerender incidents (would reset replay scrub)
+  else if(now-lastFull>3000&&['overview','analytics','maint','audit'].includes(curView)){VIEWS[curView]();lastFull=now;} // never auto-rerender incidents (would reset replay scrub)
 }
 VIEWS.overview();rLiveOps();$('#v-liveops').classList.remove('on');$('#v-overview').classList.add('on');
-setInterval(()=>{ if(Sync.mode!=='follower')step(0.4); render(false); },400);
+sampleAvail();   // seed one availability sample so the SLA card never starts empty
+setInterval(()=>{ if(Sync.mode!=='follower')step(0.4); sampleAvail(); render(false); },400);
 Sync.init();
 Tour.maybeStart();   // first visit only (localStorage-gated) — replay via the header ? button
 setTimeout(()=>toast('👋 Tips: click AMR-07 (red, pulsing) on Live Ops · open INC-1042 replay · ⌘K palette · ⌘J Copilot'),1200);

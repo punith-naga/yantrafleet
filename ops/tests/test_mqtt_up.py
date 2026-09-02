@@ -191,6 +191,94 @@ def test_mqtt_loopback_smoke(tmp_path):
     assert not stack.state_file.exists()
 
 
+class _FakeProc:
+    """Popen stand-in: records nothing, dies instantly on request."""
+
+    _next_pid = 40000
+
+    def __init__(self) -> None:
+        _FakeProc._next_pid += 1
+        self.pid = _FakeProc._next_pid
+        self._dead = False
+
+    def poll(self):
+        return 0 if self._dead else None
+
+    def terminate(self):
+        self._dead = True
+
+    def kill(self):
+        self._dead = True
+
+    def wait(self, timeout=None):
+        self._dead = True
+        return 0
+
+
+def _start_stack_with_captured_argv(tmp_path, monkeypatch, **kwargs):
+    """Start a FleetStack with Popen faked; return {service name: argv}."""
+    from yantraops import orchestrator as orch
+
+    spawned: list[list[str]] = []
+
+    def fake_popen(cmd, **_kw):
+        spawned.append(list(cmd))
+        return _FakeProc()
+
+    monkeypatch.setattr(orch.subprocess, "Popen", fake_popen)
+    stack = FleetStack(
+        loopback=True, copilot=False, mqtt=True,
+        mqtt_broker="127.0.0.1:1883",   # external: no amqtt needed
+        state_file=tmp_path / "state.json", quiet=True, open_browser=False,
+        **kwargs,
+    )
+    try:
+        info = stack.start()
+        by_name = {}
+        for svc, cmd in zip(stack.services, spawned):
+            by_name[svc.name] = cmd
+        return stack, info, by_name
+    finally:
+        stack.stop()
+
+
+def test_mqtt_bridge_argv_has_commands_and_site(tmp_path, monkeypatch):
+    """With mqtt=True the yantrabridge child gets --commands and --site,
+    and every flag we pass parses against yantrabridge's real CLI."""
+    monkeypatch.delenv("YANTRA_SITE_ID", raising=False)
+    stack, info, argvs = _start_stack_with_captured_argv(tmp_path, monkeypatch)
+    argv = argvs["yantrabridge"]
+    assert argv[1:3] == ["-m", "yantrabridge"]
+    flags = argv[3:]
+    assert "--commands" in flags
+    assert flags[flags.index("--site") + 1] == "BLR-DC1"  # default site
+
+    # Round-trip through yantrabridge's own parser: unknown/misspelled flags
+    # would SystemExit here.
+    import yantrabridge.__main__ as bridge_main
+    args = bridge_main.build_parser().parse_args(flags)
+    assert args.commands is True
+    assert args.site == "BLR-DC1"
+    assert args.mqtt_host == "127.0.0.1" and args.mqtt_port == 1883
+    assert args.supabase_url == info.base_url
+    # --commands requires live MQTT without --dry-run (yantrabridge main()
+    # exits 2 otherwise) — make sure the spawned argv satisfies that.
+    assert args.mqtt_host and not args.dry_run and not args.file
+
+
+def test_mqtt_bridge_site_from_param_and_env(tmp_path, monkeypatch):
+    """Explicit site param wins; otherwise YANTRA_SITE_ID is picked up."""
+    monkeypatch.setenv("YANTRA_SITE_ID", "PNQ-WH7")
+    _, _, argvs = _start_stack_with_captured_argv(tmp_path, monkeypatch)
+    flags = argvs["yantrabridge"]
+    assert flags[flags.index("--site") + 1] == "PNQ-WH7"
+
+    _, _, argvs = _start_stack_with_captured_argv(
+        tmp_path, monkeypatch, site="MAA-DC2")
+    flags = argvs["yantrabridge"]
+    assert flags[flags.index("--site") + 1] == "MAA-DC2"
+
+
 def test_no_sim_stack_skips_simulator(tmp_path, monkeypatch):
     """--no-sim: no yantrasim child; the bridge still points at the broker."""
     if not (PAHO_AVAILABLE and AMQTT_AVAILABLE):

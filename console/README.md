@@ -34,7 +34,7 @@ for the command palette and `Cmd/Ctrl+J` for the Copilot panel.
 type; navigate with `↑`/`↓`, run with `Enter`, close with `Esc` (or click the
 backdrop). Entries:
 
-- **Go to `<view>`** — one entry per view (Overview … Fleet & Connectors)
+- **Go to `<view>`** — one entry per view (Overview … Fleet & Connectors, Audit)
 - **`AMR-xx — <vendor>`** — jump to any robot (opens its telemetry drawer)
 - **Shift report** — opens the printable shift report (below)
 - **Ack all info alerts** — acknowledges every unacked `info` alert (and
@@ -155,6 +155,43 @@ original local-sim demo content unchanged.
   unacked, a text-only hint chip appears above the Live-alerts feed noting
   that a notifier would page the on-call operator.
 
+## Audit view (v0.9)
+
+**Audit** (Configure section of the nav, also `⌘K → Go to Audit`) shows the
+human-in-the-loop paper trail:
+
+- **Command history** — the full `commands` table (pulled live, *all*
+  statuses, newest first, limit 50; refreshed every 3rd sync cycle while the
+  view is open). Columns: created, cmd, robot, requested by, decided by,
+  status badge (pending / approved / executed / failed / rejected), note,
+  executed at. Filter chips **All / pending / approved / executed / failed /
+  rejected** narrow the table; every state (no backend, no commands yet, no
+  rows for a filter) has a graceful empty message.
+- **Recently acknowledged alerts** — the latest acked alerts, so a shift
+  lead can see what was handled and by-when.
+
+## SLA card on Analytics (v0.9)
+
+Analytics gains an **SLA & reliability — this session** card whose three
+figures are computed from live data (labelled `computed`, matching the
+existing computed-vs-demo tile pattern):
+
+- **Fleet availability %** — share of robot status samples this session
+  (one per robot per UI tick / sync pull) where the robot was not in `fault`
+  or `estop`. The approximation (session-scoped sampling, not wall-clock
+  uptime) is documented in the value's title tooltip.
+- **MTTR** — average `dur` of Resolved incidents that carry a duration.
+- **Open incidents** — current count of `state === 'Open'` incidents.
+
+## Sarathi bearer token (v0.9)
+
+Pass `?token=<bearer token>` in the console URL and the Copilot sends
+`Authorization: Bearer <token>` on both sarathi requests — `POST /ask` and
+the `GET /health` reachability probe fired when the panel opens. Without the
+param no Authorization header is sent at all (requests unchanged). The health
+probe only updates the panel subtitle; it never gates `ask()` — the local
+fallback engine still answers on any failure.
+
 ## Configuration
 
 All config lives in `index.html` (documented in the comment block at the top):
@@ -177,6 +214,9 @@ index.html?supa=<PostgREST base url>&key=<anon key>&site=<site id>
 - `supa` overrides `SUPA_URL`, `key` overrides `SUPA_KEY`
 - `site` is exposed as `window.SITE` (reserved for per-site filtering; the
   console does not filter by it yet)
+- `token` becomes `Copilot.SARATHI_TOKEN` — sent as
+  `Authorization: Bearer <token>` on the copilot `/ask` and `/health`
+  requests (header omitted entirely when absent)
 
 ## Tests
 
@@ -198,7 +238,14 @@ Two pytest suites live in `tests/`:
   CSS, and the first-run tour (shows on a fresh profile, not after dismissal,
   replayable via the header **?**). An autouse fixture pre-sets the tour flag
   so the overlay never interferes with the other tests. Skips itself cleanly
-  when no Chromium binary is available.
+  when no Chromium binary is available. v0.9 adds: the Audit view rendering
+  seeded command rows of every status (plus the acked-alerts card), the
+  status filter chips (narrowing + per-filter empty state), `Go to Audit`
+  in the palette, the computed SLA/availability card on Analytics (value,
+  `computed` label, tooltip documenting the approximation), and two
+  bearer-token tests against a tiny in-fixture CORS-aware sarathi stub that
+  records request headers for `/ask` and `/health` (`?token=` sends
+  `Authorization: Bearer …`; no param sends no header).
 
 ```bash
 pip install playwright pytest-playwright   # browser suite deps

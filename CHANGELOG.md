@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.0 — 2026-09-02
+- **AWS deployment kit** (`deploy/aws/`): console-UI-only EC2 deployment —
+  cloud-init user-data (EDIT-ME block), systemd units, nginx template that
+  302s / to the configured console, exact walkthrough README, validate.sh
+  (18 checks). ~USD 15-18/mo on t3.small.
+- **VDA instantActions command path over MQTT**: approved commands publish
+  as instantActions, the robot applies them, actionStates in the next state
+  message close the loop (executed/failed with reason) — the approval gate
+  now works end-to-end on the real robot wire. `up --mqtt` wires
+  `--commands --site` automatically.
+- **Security hardening**: opt-in migration 0006 (authenticated-only reads,
+  service-role writes, rollback included), Sarathi bearer-token auth
+  (SARATHI_TOKEN), HMAC-signed webhooks (YANTRA_WEBHOOK_SECRET),
+  docs/SECURITY.md.
+- **Console enterprise views**: Audit (full command history + filters +
+  acked alerts), computed SLA card (availability, MTTR, open incidents),
+  `?token=` for authed Sarathi.
+- **Docs**: docs/index.html landing page, Windows runbook, refreshed
+  README/CONTRIBUTING.
+- 426 tests green across 9 suites.
+
 ## v0.8.0 — 2026-09-02
 - **MQTT VDA 5050 end-to-end**: `yantraops up --loopback --mqtt` runs an
   embedded broker (amqtt) with sim publishing real VDA topics and the

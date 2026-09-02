@@ -22,6 +22,7 @@ under /opt/pw-browsers — the suite never downloads any.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import socket
@@ -29,7 +30,8 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import (BaseHTTPRequestHandler, SimpleHTTPRequestHandler,
+                         ThreadingHTTPServer)
 from pathlib import Path
 from typing import Any, Callable
 
@@ -543,3 +545,236 @@ def test_tour_shows_on_first_visit_not_after_dismissal(
     expect(card).to_contain_text("1 / 5")
     p2.locator("#tour-skip").click()
     p2.close()
+
+
+# ------------------------------------------------------------- audit view
+
+AUDIT_CMDS = [
+    {"id": "CMD-A1", "robot_id": "AMR-01", "cmd": "pause", "status": "pending",
+     "requested_by": "console:PN", "created_at": _now_iso(-300)},
+    {"id": "CMD-A2", "robot_id": "AMR-02", "cmd": "charge", "status": "executed",
+     "requested_by": "console:PN", "decided_by": "console:PN",
+     "note": "battery low", "executed_at": _now_iso(-100),
+     "created_at": _now_iso(-200)},
+    {"id": "CMD-A3", "robot_id": "AMR-01", "cmd": "estop", "status": "rejected",
+     "requested_by": "ops:XY", "decided_by": "console:PN",
+     "created_at": _now_iso(-50)},
+]
+
+ACKED_ALERT_MSG = "Seeded acked alert - conveyor cleared earlier"
+
+
+def _seed_audit(store: ConsoleFake) -> None:
+    with store.lock:
+        store.tables["commands"] += [dict(r) for r in AUDIT_CMDS]
+        store.tables["alerts"].append({
+            "id": "AL-A2", "sev": "warn", "msg": ACKED_ALERT_MSG,
+            "src": "AMR-02", "tlabel": "13:10", "ack": True,
+            "created_at": _now_iso(-500),
+        })
+
+
+def test_audit_view_renders_command_history(page: Page, console_url: str, fake) -> None:
+    """The Audit view lists ALL commands (every status) plus acked alerts."""
+    _, store = fake
+    _seed_audit(store)
+    open_live(page, console_url)
+    page.locator("#nav button[data-v='audit']").click()
+    view = page.locator("#v-audit")
+    expect(view.locator(".vhead h1")).to_have_text("Audit")
+    table = view.locator("table.t")
+    expect(table).to_contain_text("PAUSE", timeout=15_000)   # pending
+    expect(table).to_contain_text("CHARGE")                  # executed
+    expect(table).to_contain_text("ESTOP")                   # rejected
+    for col in ("Created", "Cmd", "Robot", "Requested by", "Decided by",
+                "Status", "Note", "Executed at"):
+        expect(table).to_contain_text(col)
+    expect(table).to_contain_text("console:PN")
+    expect(table).to_contain_text("ops:XY")
+    expect(table).to_contain_text("battery low")             # note column
+    expect(table).to_contain_text("rejected")                # status badge text
+    expect(table).to_contain_text("executed")
+    # acked alerts land in the second card; the unacked crit one does not
+    acked_card = view.locator(".card", has_text="Recently acknowledged alerts")
+    expect(acked_card).to_contain_text(ACKED_ALERT_MSG, timeout=15_000)
+    expect(acked_card).not_to_contain_text(SEED_ALERT_MSG)
+
+
+def test_audit_filter_chips(page: Page, console_url: str, fake) -> None:
+    """Status chips narrow the table; an empty status shows a graceful note."""
+    _, store = fake
+    _seed_audit(store)
+    open_live(page, console_url)
+    page.locator("#nav button[data-v='audit']").click()
+    expect(page.locator("#v-audit table.t")).to_contain_text("PAUSE",
+                                                             timeout=15_000)
+    # all six chips render
+    for f in ("all", "pending", "approved", "executed", "failed", "rejected"):
+        expect(page.locator(f"#audit-chips button[data-f='{f}']")).to_be_visible()
+    page.locator("#audit-chips button[data-f='executed']").click()
+    tbody = page.locator("#v-audit table.t tbody")
+    expect(tbody).to_contain_text("CHARGE")
+    expect(tbody).not_to_contain_text("PAUSE")
+    expect(tbody).not_to_contain_text("ESTOP")
+    # no 'failed' rows seeded -> per-filter empty state, chips still shown
+    page.locator("#audit-chips button[data-f='failed']").click()
+    expect(page.locator("#v-audit .empty").first).to_contain_text(
+        "No failed commands")
+    page.locator("#audit-chips button[data-f='all']").click()
+    expect(page.locator("#v-audit table.t tbody tr")).to_have_count(3)
+
+
+def test_palette_navigates_to_audit(page: Page, console_url: str) -> None:
+    """'Go to Audit' is a palette entry and lands on the Audit view."""
+    open_live(page, console_url)
+    page.keyboard.press("Control+k")
+    page.locator("#pal-in").fill("go to audit")
+    expect(page.locator("#pal-list .pal-it.sel")).to_contain_text("Go to Audit")
+    page.keyboard.press("Enter")
+    expect(page.locator("#palette")).to_be_hidden()
+    expect(page.locator("#v-audit")).to_be_visible()
+    expect(page.locator("#v-audit .vhead h1")).to_have_text("Audit")
+    expect(page.locator("#nav button[data-v='audit']")).to_have_class(
+        re.compile(r"\bon\b"))
+
+
+# ------------------------------------------------------------ SLA card
+
+def test_sla_card_shows_computed_availability(page: Page, console_url: str) -> None:
+    """Analytics gains an SLA card: availability %, MTTR, open incidents —
+    all computed from live session data and labelled per the existing
+    computed-vs-demo pattern, with the approximation documented in a title."""
+    open_live(page, console_url)
+    page.locator("#nav button[data-v='analytics']").click()
+    card = page.locator("#an-sla")
+    expect(card).to_be_visible()
+    expect(card).to_contain_text("Fleet availability")
+    expect(card).to_contain_text("MTTR")
+    expect(card).to_contain_text("Open incidents")
+    expect(card).to_contain_text("computed")
+    avail = page.locator("#sla-avail")
+    expect(avail).to_contain_text(re.compile(r"\d"), timeout=15_000)
+    text = avail.inner_text().strip()
+    m = re.match(r"(\d+(?:\.\d+)?)%$", text)
+    assert m, f"availability is not a percentage: {text!r}"
+    assert 0.0 <= float(m.group(1)) <= 100.0
+    # the approximation is documented in a tooltip
+    title = (avail.get_attribute("title") or "").lower()
+    assert "sample" in title and "fault" in title, f"tooltip missing: {title!r}"
+    # the single seeded incident is Open -> open-incident count is 1
+    expect(page.locator("#sla-open")).to_have_text("1")
+
+
+# ------------------------------------------------- sarathi bearer token
+
+class _SarathiStub(BaseHTTPRequestHandler):
+    """Tiny CORS-aware sarathi stand-in recording (method, path, headers)."""
+
+    calls: list  # type: ignore[type-arg]  # set on the per-fixture subclass
+    lock: threading.Lock
+
+    def log_message(self, fmt: str, *a: Any) -> None:
+        pass
+
+    def _cors(self) -> None:
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers",
+                         "authorization, content-type")
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 (http.server API)
+        self.send_response(204)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _record(self) -> None:
+        with self.lock:
+            self.calls.append((self.command, self.path,
+                               {k.lower(): v for k, v in self.headers.items()}))
+
+    def _json(self, payload: dict) -> None:
+        data = json.dumps(payload).encode()
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self) -> None:  # noqa: N802
+        self._record()
+        self._json({"status": "ok"})
+
+    def do_POST(self) -> None:  # noqa: N802
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self._record()
+        self._json({"answer": "stub answer from sarathi",
+                    "evidence": ["stub-ev"], "tier": "grounded"})
+
+
+@pytest.fixture()
+def sarathi_stub():
+    """An /ask + /health HTTP stub on an ephemeral port, with a call log."""
+    calls: list = []
+    lock = threading.Lock()
+    handler = type("Handler", (_SarathiStub,), {"calls": calls, "lock": lock})
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    t = threading.Thread(target=httpd.serve_forever,
+                         name="sarathi-stub", daemon=True)
+    t.start()
+    host, port = httpd.server_address[:2]
+    yield f"http://{host}:{port}", calls, lock
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def _stub_calls(calls: list, lock: threading.Lock,
+                method: str, path: str) -> list:
+    with lock:
+        return [c for c in calls if c[0] == method and c[1] == path]
+
+
+def _point_copilot_at(page: Page, base: str) -> None:
+    page.evaluate("Copilot.SARATHI_URL = %r; Copilot.SARATHI_HEALTH_URL = %r"
+                  % (base + "/ask", base + "/health"))
+
+
+def test_token_param_sends_authorization_header(
+        page: Page, console_url: str, sarathi_stub) -> None:
+    """?token=... => 'Authorization: Bearer <token>' on /ask AND /health."""
+    base, calls, lock = sarathi_stub
+    page.goto(console_url + "&token=tok-secret-42")
+    expect(page.locator("#cloud-lbl")).to_contain_text("LIVE", timeout=15_000)
+    assert page.evaluate("Copilot.SARATHI_TOKEN") == "tok-secret-42"
+    _point_copilot_at(page, base)
+    page.evaluate("Copilot.ask('hello from the token test')")
+    wait_until(lambda: _stub_calls(calls, lock, "POST", "/ask"),
+               "stub to receive POST /ask")
+    wait_until(lambda: _stub_calls(calls, lock, "GET", "/health"),
+               "stub to receive GET /health")
+    ask_headers = _stub_calls(calls, lock, "POST", "/ask")[0][2]
+    assert ask_headers.get("authorization") == "Bearer tok-secret-42"
+    health_headers = _stub_calls(calls, lock, "GET", "/health")[0][2]
+    assert health_headers.get("authorization") == "Bearer tok-secret-42"
+    # and the stub's reply rendered through the live-agent path
+    expect(page.locator("#cp-body .msg.ai").last).to_contain_text(
+        "stub answer from sarathi", timeout=15_000)
+    expect(page.locator("#cp-body")).to_contain_text("live agent")
+
+
+def test_no_token_param_no_authorization_header(
+        page: Page, console_url: str, sarathi_stub) -> None:
+    """Without ?token= the requests carry no Authorization header at all."""
+    base, calls, lock = sarathi_stub
+    open_live(page, console_url)
+    assert page.evaluate("Copilot.SARATHI_TOKEN") is None
+    _point_copilot_at(page, base)
+    page.evaluate("Copilot.ask('hello without a token')")
+    wait_until(lambda: _stub_calls(calls, lock, "POST", "/ask"),
+               "stub to receive POST /ask")
+    wait_until(lambda: _stub_calls(calls, lock, "GET", "/health"),
+               "stub to receive GET /health")
+    for method, path in (("POST", "/ask"), ("GET", "/health")):
+        headers = _stub_calls(calls, lock, method, path)[0][2]
+        assert "authorization" not in headers, (method, path, headers)

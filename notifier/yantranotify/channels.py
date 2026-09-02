@@ -15,6 +15,9 @@ return value.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
 import os
 from typing import Protocol, Sequence
@@ -63,9 +66,17 @@ class WebhookChannel:
     * ``discord`` — Discord embeds.
 
     Format precedence: ``fmt`` arg > ``WEBHOOK_FORMAT`` env > ``json``.
+
+    Optional signing: when ``YANTRA_WEBHOOK_SECRET`` is set (env, or the
+    ``secret`` arg), every POST carries an
+    ``X-Yantra-Signature: sha256=<hex>`` header — an HMAC-SHA256 of the
+    exact request body, keyed by the secret — so receivers can verify
+    authenticity. Unset: no header, unchanged behaviour.
     """
 
     name = "webhook"
+
+    SIGNATURE_HEADER = "X-Yantra-Signature"
 
     def __init__(
         self,
@@ -74,11 +85,13 @@ class WebhookChannel:
         dry_run: bool = False,
         timeout_s: float = WEBHOOK_TIMEOUT_S,
         fmt: str | None = None,
+        secret: str | None = None,
     ) -> None:
         self.url = url or os.environ.get("WEBHOOK_URL") or None
         self.dry_run = dry_run
         self.fmt = (fmt or os.environ.get("WEBHOOK_FORMAT")
                     or DEFAULT_FORMAT).lower()
+        self.secret = secret or os.environ.get("YANTRA_WEBHOOK_SECRET") or None
         self._client = client or httpx.Client(timeout=timeout_s)
 
     def _post(self, payload: dict) -> bool:
@@ -86,8 +99,16 @@ class WebhookChannel:
             reason = "dry-run" if self.dry_run else "WEBHOOK_URL unset"
             print(f"[webhook {reason}] would POST {payload!r}")
             return True
+        # Serialize once so the signature covers the exact bytes on the wire.
+        body = json.dumps(payload, separators=(",", ":"),
+                          ensure_ascii=False).encode("utf-8")
+        headers = {"content-type": "application/json"}
+        if self.secret:
+            digest = hmac.new(self.secret.encode("utf-8"), body,
+                              hashlib.sha256).hexdigest()
+            headers[self.SIGNATURE_HEADER] = f"sha256={digest}"
         try:
-            resp = self._client.post(self.url, json=payload)
+            resp = self._client.post(self.url, content=body, headers=headers)
             resp.raise_for_status()
             return True
         except httpx.HTTPError as exc:

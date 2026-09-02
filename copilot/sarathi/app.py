@@ -3,14 +3,23 @@
 CORS is wide open (including the ``null`` origin a file:// console sends)
 because the API is read-only over client-safe data.
 
+Optional bearer auth: when the ``SARATHI_TOKEN`` environment variable is
+set at app creation, POST /ask requires ``Authorization: Bearer <token>``
+and answers 401 (JSON) otherwise. GET /health stays open either way but
+reports ``auth_required``. When the env var is unset, behaviour is
+unchanged (fully open).
+
 Run:  uvicorn sarathi.app:app --port 8001
 """
 from __future__ import annotations
 
+import hmac
+import os
 import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
@@ -53,6 +62,10 @@ def create_app(
 
     app = FastAPI(title="sarathi", version=__version__)
     app.state.service = service
+    # Optional bearer auth (see module docstring). Resolved once at app
+    # creation; empty string counts as unset.
+    auth_token = os.environ.get("SARATHI_TOKEN") or None
+    app.state.auth_token = auth_token
 
     # file:// pages send Origin: null — allow_origins=["*"] covers it as long
     # as credentials stay disabled (they do; the anon key is baked in).
@@ -64,8 +77,30 @@ def create_app(
         allow_headers=["*"],
     )
 
+    def _authorized(request: Request) -> bool:
+        """True when no token is configured, or the caller presented it."""
+        token = request.app.state.auth_token
+        if token is None:
+            return True
+        supplied = request.headers.get("authorization") or ""
+        # Constant-time comparison of the full header vs the expectation:
+        # covers wrong scheme, wrong token, and absent header alike.
+        return hmac.compare_digest(
+            supplied.encode("utf-8"), f"Bearer {token}".encode("utf-8")
+        )
+
     @app.post("/ask", response_model=AskResponse)
-    def ask(req: AskRequest, request: Request) -> AskResponse:
+    def ask(req: AskRequest, request: Request):
+        if not _authorized(request):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "unauthorized",
+                    "detail": "missing or invalid bearer token "
+                              "(Authorization: Bearer <SARATHI_TOKEN>)",
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         t0 = time.perf_counter()
         result = request.app.state.service.ask(req.question.strip())
         return AskResponse(
@@ -79,7 +114,9 @@ def create_app(
 
     @app.get("/health")
     def health(request: Request) -> dict:
-        return request.app.state.service.health()
+        payload = request.app.state.service.health()
+        payload["auth_required"] = request.app.state.auth_token is not None
+        return payload
 
     return app
 

@@ -143,6 +143,11 @@ def transport() -> StaticTransport:
 
 @pytest.fixture(autouse=True)
 def no_llm_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tests are offline: strip any LLM keys so tier selection is 'offline'."""
-    for var in ("GEMINI_API_KEY", "OPENAI_API_KEY", "SARATHI_MODEL"):
+    """Tests are offline: strip any LLM keys so tier selection is 'offline'.
+
+    SARATHI_TOKEN is stripped too so the API is open by default; auth tests
+    set it explicitly.
+    """
+    for var in ("GEMINI_API_KEY", "OPENAI_API_KEY", "SARATHI_MODEL",
+                "SARATHI_TOKEN"):
         monkeypatch.delenv(var, raising=False)

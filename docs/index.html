@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YantraFleet — the operations platform for Physical AI</title>
+<meta name="description" content="YantraFleet: an out-of-the-box fleet-operations platform for Physical AI. VDA 5050, Supabase, grounded AI copilot, one-command demo.">
+<style>
+  :root{
+    --bg:#0d0d0d; --surface:#1a1a19; --border:rgba(255,255,255,.08);
+    --border-strong:rgba(255,255,255,.16);
+    --ink:#fff; --muted:#c3c2b7; --dim:#8a8a82;
+    --accent:#3987e5; --good:#0ca30c; --crit:#d03b3b;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html{color-scheme:dark}
+  body{
+    margin:0; background:var(--bg); color:var(--muted);
+    font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  h1,h2,h3{color:var(--ink); line-height:1.25; font-weight:650}
+  h2{font-size:24px; margin:0 0 6px}
+  h3{font-size:16px; margin:0 0 4px}
+  .wrap{max-width:980px; margin:0 auto; padding:0 24px}
+  section{padding:56px 0; border-top:1px solid var(--border)}
+  .kicker{font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:0 0 18px}
+  code,pre{font-family:var(--mono); font-size:13px}
+  code{background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:1px 5px; color:var(--ink)}
+  pre{
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:14px 16px; overflow-x:auto; line-height:1.55; margin:12px 0;
+  }
+  pre code{background:none; border:none; padding:0}
+  .cmt{color:var(--dim)}
+  .out{color:var(--good)}
+
+  /* header */
+  header.site{padding:14px 0; border-bottom:1px solid var(--border)}
+  header.site .wrap{display:flex; align-items:baseline; gap:18px; flex-wrap:wrap}
+  .brand{color:var(--ink); font-weight:700; font-size:16px}
+  .brand b{color:var(--accent); font-weight:700}
+  nav.top{margin-left:auto; display:flex; gap:16px; flex-wrap:wrap; font-size:14px}
+  nav.top a{color:var(--muted)}
+  nav.top a:hover{color:var(--ink); text-decoration:none}
+
+  /* hero */
+  .hero{padding:72px 0 60px; border-top:none}
+  .hero h1{font-size:clamp(28px,5vw,44px); margin:0 0 16px; max-width:22ch}
+  .hero h1 .tag{color:var(--muted); font-weight:500}
+  .hero p.pitch{font-size:17px; max-width:64ch; margin:0 0 26px}
+  .runline{
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    background:var(--surface); border:1px solid var(--border-strong); border-radius:10px;
+    padding:16px 20px; margin:0 0 14px; max-width:640px;
+  }
+  .runline code{
+    background:none; border:none; padding:0;
+    font-size:16px; color:var(--ink); white-space:nowrap; overflow-x:auto;
+  }
+  .runline .dollar{color:var(--good); font-family:var(--mono); font-size:16px}
+  .subline{font-size:13px; color:var(--dim)}
+  .pillrow{display:flex; gap:10px; flex-wrap:wrap; margin-top:22px; font-size:13px}
+  .pill{border:1px solid var(--border); border-radius:999px; padding:3px 12px; color:var(--muted)}
+
+  /* feature grid */
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; margin-top:22px}
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 18px}
+  .card h3{font-family:var(--mono); font-size:14px; font-weight:600}
+  .card h3 span{color:var(--dim); font-family:system-ui,sans-serif; font-weight:400; font-size:12px}
+  .card p{margin:6px 0 0; font-size:13.5px; color:var(--muted)}
+
+  /* diagram */
+  .diagram{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px; overflow-x:auto; margin-top:22px}
+  .diagram svg{display:block; min-width:760px; width:100%; height:auto}
+  .diagram text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+
+  /* tabs (CSS only) */
+  .tabs{margin-top:22px; position:relative}
+  .tabs>input{position:absolute; opacity:0; pointer-events:none}
+  .tabbar{display:flex; gap:4px; flex-wrap:wrap; border-bottom:1px solid var(--border)}
+  .tabbar label{
+    padding:8px 16px; font-size:14px; color:var(--dim); cursor:pointer;
+    border:1px solid transparent; border-bottom:none; border-radius:8px 8px 0 0;
+    position:relative; top:1px;
+  }
+  .tabbar label:hover{color:var(--ink)}
+  .panel{display:none; border:1px solid var(--border); border-top:none; border-radius:0 0 10px 10px; padding:8px 20px 18px; background:rgba(255,255,255,.015)}
+  #t-win:checked ~ .tabbar label[for=t-win],
+  #t-lin:checked ~ .tabbar label[for=t-lin],
+  #t-doc:checked ~ .tabbar label[for=t-doc],
+  #t-aws:checked ~ .tabbar label[for=t-aws]{
+    color:var(--ink); background:var(--surface);
+    border-color:var(--border); border-bottom:1px solid var(--surface);
+  }
+  #t-win:checked ~ #p-win, #t-lin:checked ~ #p-lin,
+  #t-doc:checked ~ #p-doc, #t-aws:checked ~ #p-aws{display:block}
+
+  /* faq */
+  details{border:1px solid var(--border); border-radius:8px; background:var(--surface); margin:10px 0; padding:0 18px}
+  summary{cursor:pointer; padding:13px 0; color:var(--ink); font-weight:600; font-size:15px; list-style:none; position:relative; padding-right:28px}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+"; position:absolute; right:2px; top:10px; color:var(--dim); font-size:18px}
+  details[open] summary::after{content:"–"}
+  details div{padding:0 0 14px; font-size:14px}
+
+  /* not yet */
+  .notyet{border:1px solid var(--border); border-left:3px solid var(--crit); border-radius:8px; background:var(--surface); padding:16px 20px; margin-top:22px}
+  .notyet ul{margin:8px 0 0; padding-left:20px}
+  .notyet li{margin:6px 0; font-size:14px}
+  .notyet li b{color:var(--ink); font-weight:600}
+
+  footer{padding:32px 0 48px; border-top:1px solid var(--border); font-size:13px; color:var(--dim)}
+  footer .wrap{display:flex; gap:18px; flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <span class="brand">Yantra<b>Fleet</b></span>
+    <nav class="top">
+      <a href="#features">Modules</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="#faq">FAQ</a>
+      <a href="#notyet">Not yet</a>
+      <a href="RUNBOOK-WINDOWS.md">Windows runbook</a>
+      <a href="SECURITY.md">Security</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <h1>YantraFleet<br><span class="tag">the operations platform for Physical AI</span></h1>
+    <p class="pitch">
+      Robots are getting cheap; operating a mixed fleet of them is not. YantraFleet is an
+      open-source, out-of-the-box operations layer for AMR fleets: a VDA&nbsp;5050 wire in,
+      a Supabase/PostgREST backend in the middle, and on top a live web console, automatic
+      incidents, predictive maintenance, real alert delivery, and an AI copilot that only
+      answers from your fleet's actual data. Every robot-affecting action passes a human
+      approval gate. It runs end-to-end on your laptop in about 60 seconds — no cloud
+      account, no API keys, no robots required.
+    </p>
+    <div class="runline">
+      <span class="dollar">$</span>
+      <code>python -m yantraops up --loopback</code>
+    </div>
+    <p class="subline">
+      The whole platform — simulated fleet, detector, notifier, copilot, console — against an
+      embedded in-memory backend. One process tree, one Ctrl-C.
+    </p>
+    <div class="pillrow">
+      <span class="pill">VDA 5050 v2.1</span>
+      <span class="pill">MQTT + MCAP import</span>
+      <span class="pill">400+ offline tests</span>
+      <span class="pill">MIT license</span>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <p class="kicker">Modules</p>
+    <h2>Eight small parts, one row shape</h2>
+    <p>Every module reads and writes the same Supabase tables and the same canonical
+       status vocabulary. Each is independently installable and offline-tested.</p>
+    <div class="grid">
+      <div class="card">
+        <h3>yantracore <span>· core/</span></h3>
+        <p>The canonical status contract: one vocabulary (<code>active · idle · charging ·
+        paused · estop · degraded · fault</code>) plus the multi-site id helper, enforced
+        end-to-end by a DB CHECK constraint. Small on purpose.</p>
+      </div>
+      <div class="card">
+        <h3>yantrasim <span>· sim/</span></h3>
+        <p>Deterministic 10-AMR warehouse simulator (3 vendors, waypoint grid, chargers,
+        faults, rolling missions). Emits real VDA&nbsp;5050 v2.1 state to Supabase, MQTT,
+        or stdout — the stand-in until your robots show up.</p>
+      </div>
+      <div class="card">
+        <h3>yantrabridge <span>· connector/</span></h3>
+        <p>The VDA&nbsp;5050 ⇄ backend connector: MQTT or JSONL state in, deduped
+        rows/alerts out; imports existing MCAP/JSONL recordings; publishes approved
+        operator commands back to robots as VDA <code>instantActions</code>.</p>
+      </div>
+      <div class="card">
+        <h3>yantradetect <span>· detector/</span></h3>
+        <p>Auto-incidents with PagerDuty-style dedup, pending windows, flap counting and
+        idempotent <code>INC-XXXX</code> ids — plus a predictive-maintenance mode that
+        turns telemetry trends into findings with rough RUL estimates.</p>
+      </div>
+      <div class="card">
+        <h3>yantranotify <span>· notifier/</span></h3>
+        <p>Alert and incident fan-out to Slack, Discord and JSON webhooks: retries with
+        backoff, a no-loss pending queue, per-channel circuit breakers, severity-grouped
+        digests, and a 10-second <code>test</code> subcommand.</p>
+      </div>
+      <div class="card">
+        <h3>sarathi <span>· copilot/</span></h3>
+        <p>Grounded AI copilot with three degradation tiers: LLM + live fleet tools →
+        LLM only → offline template answers (no key needed). A grounding guard checks the
+        numbers in every answer against tool payloads. Also an MCP server.</p>
+      </div>
+      <div class="card">
+        <h3>yantraops <span>· ops/</span></h3>
+        <p>The one-command orchestrator: <code>up --loopback</code> (zero-config demo),
+        <code>--supabase</code>, <code>--mqtt</code>; <code>migrate</code> applies the
+        schema with tracking and checksums; <code>doctor</code> preflights your
+        environment; <code>status</code> pings a running stack.</p>
+      </div>
+      <div class="card">
+        <h3>console <span>· console/</span></h3>
+        <p>A single HTML file, no build step: live map, robot drill-down, the command
+        approval gate, incident replay from recorded telemetry, printable shift report,
+        command palette, and a first-run tour. Falls back to an in-browser sim offline.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="wrap">
+    <p class="kicker">Architecture</p>
+    <h2>State flows right, commands flow back</h2>
+    <p>Robots (or the simulator) publish VDA&nbsp;5050 state over MQTT; the bridge turns it
+       into rows; everything else reads those rows over PostgREST. Nothing touches a robot
+       without an operator-approved command row.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 920 400" role="img" aria-label="Architecture: robots publish VDA 5050 state over MQTT to yantrabridge, which writes to Supabase/PostgREST; console, sarathi, yantradetect and yantranotify read from Supabase; operator-approved commands loop back to robots as instantActions.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#8a8a82"/>
+          </marker>
+          <marker id="ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#3987e5"/>
+          </marker>
+        </defs>
+
+        <!-- approval-gate loop (console -> robots) -->
+        <path d="M830,96 L830,52 L86,52 L86,146" fill="none" stroke="#3987e5"
+              stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ahb)"/>
+        <text x="458" y="42" text-anchor="middle" font-size="12" fill="#3987e5">approval gate — operator-approved commands return to robots as VDA instantActions</text>
+
+        <!-- main flow arrows -->
+        <line x1="152" y1="212" x2="198" y2="212" stroke="#8a8a82" stroke-width="1.5" marker-end="url(#ah)"/>
+        <line x1="332" y1="212" x2="378" y2="212" stroke="#8a8a82" stroke-width="1.5" marker-end="url(#ah)"/>
+        <line x1="512" y1="212" x2="558" y2="212" stroke="#8a8a82" stroke-width="1.5" marker-end="url(#ah)"/>
+        <text x="175" y="202" text-anchor="middle" font-size="10.5" fill="#8a8a82">state</text>
+        <text x="355" y="202" text-anchor="middle" font-size="10.5" fill="#8a8a82">state</text>
+        <text x="535" y="202" text-anchor="middle" font-size="10.5" fill="#8a8a82">rows</text>
+
+        <!-- supabase -> readers fan-out -->
+        <path d="M700,182 L728,182 L728,122 L756,122" fill="none" stroke="#8a8a82" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path d="M700,202 L732,202 L732,188 L756,188" fill="none" stroke="#8a8a82" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path d="M700,222 L732,222 L732,254 L756,254" fill="none" stroke="#8a8a82" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path d="M700,242 L728,242 L728,320 L756,320" fill="none" stroke="#8a8a82" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- robots -->
+        <rect x="20" y="180" width="132" height="64" rx="8" fill="#1a1a19" stroke="rgba(255,255,255,.16)"/>
+        <text x="86" y="207" text-anchor="middle" font-size="13.5" font-weight="600" fill="#fff">Robots</text>
+        <text x="86" y="226" text-anchor="middle" font-size="11" fill="#c3c2b7">real AMRs or yantrasim</text>
+
+        <!-- mqtt -->
+        <rect x="200" y="180" width="132" height="64" rx="8" fill="#1a1a19" stroke="rgba(255,255,255,.16)"/>
+        <text x="266" y="207" text-anchor="middle" font-size="13.5" font-weight="600" fill="#fff">MQTT broker</text>
+        <text x="266" y="226" text-anchor="middle" font-size="11" fill="#c3c2b7">VDA 5050 v2.1 topics</text>
+
+        <!-- bridge -->
+        <rect x="380" y="180" width="132" height="64" rx="8" fill="#1a1a19" stroke="rgba(255,255,255,.16)"/>
+        <text x="446" y="207" text-anchor="middle" font-size="13.5" font-weight="600" fill="#fff">yantrabridge</text>
+        <text x="446" y="226" text-anchor="middle" font-size="11" fill="#c3c2b7">translate · dedup · sink</text>
+
+        <!-- supabase -->
+        <rect x="560" y="140" width="140" height="144" rx="8" fill="#1a1a19" stroke="rgba(57,135,229,.55)"/>
+        <text x="630" y="176" text-anchor="middle" font-size="13.5" font-weight="600" fill="#fff">Supabase</text>
+        <text x="630" y="194" text-anchor="middle" font-size="11" fill="#c3c2b7">PostgREST</text>
+        <text x="630" y="222" text-anchor="middle" font-size="10.5" fill="#8a8a82">robots · alerts · incidents</text>
+        <text x="630" y="238" text-anchor="middle" font-size="10.5" fill="#8a8a82">commands · missions</text>
+        <text x="630" y="254" text-anchor="middle" font-size="10.5" fill="#8a8a82">telemetry · findings</text>
+
+        <!-- readers -->
+        <rect x="756" y="96" width="144" height="52" rx="8" fill="#1a1a19" stroke="rgba(255,255,255,.16)"/>
+        <text x="828" y="118" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">console</text>
+        <text x="828" y="136" text-anchor="middle" font-size="10.5" fill="#c3c2b7">map · approvals · replay</text>
+
+        <rect x="756" y="162" width="144" height="52" rx="8" fill="#1a1a19" stroke="rgba(255,255,255,.16)"/>
+        <text x="828" y="184" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">sarathi</text>
+        <text x="828" y="202" text-anchor="middle" font-size="10.5" fill="#c3c2b7">grounded copilot + MCP</text>
+
+        <rect x="756" y="228" width="144" height="52" rx="8" fill="#1a1a19" stroke="rgba(255,255,255,.16)"/>
+        <text x="828" y="250" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">yantradetect</text>
+        <text x="828" y="268" text-anchor="middle" font-size="10.5" fill="#c3c2b7">incidents · maintenance</text>
+
+        <rect x="756" y="294" width="144" height="52" rx="8" fill="#1a1a19" stroke="rgba(255,255,255,.16)"/>
+        <text x="828" y="316" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">yantranotify</text>
+        <text x="828" y="334" text-anchor="middle" font-size="10.5" fill="#c3c2b7">Slack · Discord · webhook</text>
+      </svg>
+    </div>
+    <p class="subline" style="margin-top:10px">
+      In <code>--loopback</code> mode the Supabase box is an in-process fake PostgREST and the MQTT hop is
+      optional (<code>--mqtt</code> adds an embedded broker). In production the boxes are your broker and your
+      Supabase project — same code, same tables.
+    </p>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <p class="kicker">Quickstart</p>
+    <h2>Pick your platform</h2>
+    <div class="tabs">
+      <input type="radio" name="qs" id="t-win" checked>
+      <input type="radio" name="qs" id="t-lin">
+      <input type="radio" name="qs" id="t-doc">
+      <input type="radio" name="qs" id="t-aws">
+      <div class="tabbar">
+        <label for="t-win">Windows</label>
+        <label for="t-lin">Linux / macOS</label>
+        <label for="t-doc">Docker</label>
+        <label for="t-aws">AWS EC2</label>
+      </div>
+      <div class="panel" id="p-win">
+        <p>PowerShell 5.1+ and Python 3.10+ (the installer finds a suitable Python or tells
+           you where to get one). From the repo root:</p>
+<pre><code><span class="cmt"># install: venv + all packages + preflight (idempotent, safe to re-run)</span>
+powershell -ExecutionPolicy Bypass -File install.ps1
+
+<span class="cmt"># start the full loopback demo — prints the console URL and opens your browser</span>
+.venv\Scripts\python.exe -m yantraops up --loopback</code></pre>
+        <p>Or <code>install.ps1 -Run</code> to do both in one go. Full walkthrough — manual
+           venv path, MQTT demo, real Supabase, troubleshooting:
+           <a href="RUNBOOK-WINDOWS.md">docs/RUNBOOK-WINDOWS.md</a>.</p>
+      </div>
+      <div class="panel" id="p-lin">
+        <p>Python 3.10+. From the repo root:</p>
+<pre><code><span class="cmt"># install + start in one command</span>
+./install.sh --run
+
+<span class="cmt"># or by hand, in a venv of your choosing</span>
+pip install -e core -e sim -e connector -e detector -e notifier -e ops
+pip install -r copilot/requirements.txt
+python -m yantraops up --loopback</code></pre>
+        <p>Open the console URL from the <code>READY</code> banner. <code>python -m yantraops
+           doctor</code> preflights the environment; <code>status</code> health-checks a
+           running stack.</p>
+      </div>
+      <div class="panel" id="p-doc">
+        <p>Host networking is the supported path (the stack binds 127.0.0.1 on ephemeral
+           ports, so <code>-p</code> publishing cannot reach it):</p>
+<pre><code>docker build -f docker/Dockerfile -t yantrafleet .
+docker run --rm --init --network host yantrafleet   <span class="cmt"># Linux</span>
+
+<span class="cmt"># or</span>
+docker compose -f docker/docker-compose.yml up --build</code></pre>
+        <p>Open the console URL from the <code>READY</code> line. Docker Desktop
+           (macOS/Windows) needs its host-networking option; details and headless/CI usage
+           in <a href="../docker/README.md">docker/README.md</a>.</p>
+      </div>
+      <div class="panel" id="p-aws">
+        <p>A single small EC2 instance runs the whole demo stack; a step-by-step guide
+           (instance size, security group, install, keeping it running) lives in
+           <a href="../deploy/aws/README.md">deploy/aws/README.md</a>. The short version:</p>
+<pre><code><span class="cmt"># on a fresh Ubuntu instance</span>
+sudo apt-get update &amp;&amp; sudo apt-get install -y python3-venv git
+git clone &lt;this repo&gt; &amp;&amp; cd yantrafleet
+./install.sh
+.venv/bin/python -m yantraops up --loopback --no-open</code></pre>
+        <p>The stack binds 127.0.0.1 by design — reach the console over an SSH tunnel rather
+           than opening ports to the internet (see the deploy guide and
+           <a href="SECURITY.md">SECURITY.md</a>).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <p class="kicker">FAQ</p>
+    <h2>Honest answers</h2>
+
+    <details>
+      <summary>Can I use it with my own robots?</summary>
+      <div>
+        If they speak VDA&nbsp;5050 over MQTT — yes, today: point the stack at your broker with
+        <code>python -m yantraops up --supabase --mqtt --broker host:1883 --no-sim</code> and
+        yantrabridge ingests their state; approved operator commands go back as VDA
+        <code>instantActions</code>. Robots that don't speak VDA&nbsp;5050 need an adapter on
+        your side, but you can already import their recordings (MCAP or JSONL, with a topic
+        map) via <code>python -m yantrabridge import</code> to use the replay, incident and
+        analytics side of the platform.
+      </div>
+    </details>
+
+    <details>
+      <summary>What if I don't have robots at all?</summary>
+      <div>
+        That's the default. <code>python -m yantraops up --loopback</code> runs a deterministic
+        10-robot warehouse simulation with real VDA&nbsp;5050 messages, faults, missions,
+        incidents and maintenance findings — the full platform, entirely on your machine, no
+        accounts and no keys. Add <code>--mqtt</code> to run the same demo over a real MQTT wire.
+      </div>
+    </details>
+
+    <details>
+      <summary>What does it cost to run?</summary>
+      <div>
+        The software is free (MIT). The loopback demo costs nothing and touches no cloud. A real
+        deployment needs a Supabase project (the free tier is enough to evaluate), optionally an
+        LLM API key for the copilot's higher tiers (billed by your provider; not required), and
+        whatever your broker/VM costs — the AWS guide fits on one small EC2 instance.
+      </div>
+    </details>
+
+    <details>
+      <summary>Is an LLM required?</summary>
+      <div>
+        No. Sarathi degrades through three tiers: with a key (<code>GEMINI_API_KEY</code> or
+        <code>OPENAI_API_KEY</code>) it answers with an LLM grounded in live fleet tools, and a
+        grounding guard verifies the numbers in every answer against the tool payloads; without
+        a key it serves offline template answers computed directly from your data — still
+        cited, just less conversational. Everything else on the platform is LLM-free.
+      </div>
+    </details>
+
+    <details>
+      <summary>What's the security story?</summary>
+      <div>
+        The demo stack binds 127.0.0.1 only. Components talk to Supabase with the anon key, so
+        row-level security and your key handling matter in real deployments; there is no
+        built-in login UI yet, so anything exposed beyond localhost belongs behind your own
+        reverse proxy or tunnel. Robot-affecting actions always pass the human approval gate
+        (the <code>commands</code> table, with a full audit trail). Details and hardening
+        checklist: <a href="SECURITY.md">docs/SECURITY.md</a>.
+      </div>
+    </details>
+
+    <details>
+      <summary>What's the license?</summary>
+      <div>
+        MIT — see <a href="../LICENSE">LICENSE</a>. Use it commercially, fork it, embed it;
+        contributions are welcome under <a href="../CONTRIBUTING.md">CONTRIBUTING.md</a>.
+      </div>
+    </details>
+  </div>
+</section>
+
+<section id="notyet">
+  <div class="wrap">
+    <p class="kicker">Scope</p>
+    <h2>Not yet</h2>
+    <p>Things YantraFleet does <em>not</em> do today, so you don't find out the hard way:</p>
+    <div class="notyet">
+      <ul>
+        <li><b>No auth UI.</b> The console has no login; access control is whatever you put in
+            front of it (localhost, SSH tunnel, reverse proxy) plus Supabase RLS on the data.</li>
+        <li><b>Single region, single writer.</b> Multi-site columns exist (migration 0005), but
+            <code>fleet_meta</code> still assumes one active writer; there is no multi-region story.</li>
+        <li><b>The embedded MQTT broker is demo-grade.</b> No TLS, no auth — fine for
+            <code>--loopback --mqtt</code> on your laptop; bring your own mosquitto (or managed
+            broker) for anything real via <code>--broker host:port</code>.</li>
+        <li><b>LLM tiers need your key.</b> Without one the copilot runs in its offline tier —
+            grounded template answers only. Live LLM behavior is exercised in CI with fakes;
+            your first keyed run is the first real one.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>YantraFleet · MIT</span>
+    <a href="../README.md">README</a>
+    <a href="RUNBOOK-WINDOWS.md">Windows runbook</a>
+    <a href="SECURITY.md">Security</a>
+    <a href="../deploy/aws/README.md">Deploy on AWS</a>
+    <a href="../CONTRIBUTING.md">Contributing</a>
+  </div>
+</footer>
+
+</body>
+</html>

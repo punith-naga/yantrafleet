@@ -1,0 +1,24 @@
+# Demo fleet simulator. NOT enabled by default — only for demo/eval boxes
+# with no real robots. Turn it on with:
+#   sudo systemctl enable --now yantra-sim
+
+[Unit]
+Description=YantraFleet demo fleet simulator (yantrasim, optional)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yantra
+Group=yantra
+EnvironmentFile=/etc/yantrafleet.env
+WorkingDirectory=/opt/yantrafleet
+ExecStart=/opt/yantrafleet/.venv/bin/python -m yantrasim --supabase --interval 2
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

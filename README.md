@@ -1,12 +1,33 @@
 # YantraFleet
 
-A small, end-to-end fleet-operations stack for multi-vendor AMR (autonomous
-mobile robot) fleets. A simulator emits VDA 5050 v2.1 state, a connector
-translates it into a shared Supabase schema, an AI copilot answers questions
-grounded in that data, and a single-file web console visualises and controls
-the fleet.
+**v0.9.0** · 9 test suites, 400+ offline tests, all green · MIT license
 
-All four components share one Supabase (PostgREST) backend and one `robots`
+An end-to-end fleet-operations platform for multi-vendor AMR (autonomous
+mobile robot) fleets — the operations layer for Physical AI. Robots (or the
+bundled simulator) speak VDA 5050 v2.1 over MQTT; a connector translates that
+into a shared Supabase schema; on top sit a live web console with a human
+approval gate, automatic incidents, predictive maintenance, real alert
+delivery, and an AI copilot grounded in your fleet's actual data.
+
+## Quickstart — 3 commands, zero config
+
+```bash
+git clone <this repo> && cd yantrafleet
+./install.sh                                  # Windows: powershell -ExecutionPolicy Bypass -File install.ps1
+.venv/bin/python -m yantraops up --loopback   # Windows: .venv\Scripts\python.exe -m yantraops up --loopback
+```
+
+Open the console URL from the `READY` banner (it auto-opens your browser).
+That is the FULL platform — simulated fleet, auto-incidents, predictive
+maintenance, notifier, Sarathi copilot — against an embedded in-memory
+backend. No cloud, no keys, no robots.
+
+**Docs:** [docs/index.html](docs/index.html) (overview, architecture, FAQ) ·
+[docs/RUNBOOK-WINDOWS.md](docs/RUNBOOK-WINDOWS.md) (PowerShell runbook) ·
+[deploy/aws/](deploy/aws/README.md) (run it on EC2) ·
+[docs/SECURITY.md](docs/SECURITY.md) (security posture & hardening)
+
+All components share one Supabase (PostgREST) backend and one `robots`
 row shape:
 
 ```
@@ -37,31 +58,26 @@ maintenance_findings(id, robot_id, component, finding, rul_days, confidence,
 | `detector/`  | `yantradetect`| Incident detector: polls `robots`, maintains `incidents` — PagerDuty-style dedup with deterministic idempotent `INC-XXXX` ids, Prometheus-style pending window + clear hold, re-open window with flap counting, stale auto-resolve. `python -m yantradetect --interval 5` (or `--once`, `--dry-run`). With `--maintenance` it instead reads `robot_telemetry` windows and maintains `maintenance_findings` (predictive trends, see v0.5 below). |
 | `notifier/`  | `yantranotify`| Notification fan-out: polls unacked `crit`/`serious` alerts and `Open` incidents, dedups per event, and pushes through console / webhook (`WEBHOOK_URL`) / WhatsApp (Twilio env vars) channels. `python -m yantranotify --interval 10` (or `--once`, `--dry-run`, `--state-file`). |
 | `e2e/`       | —             | Offline end-to-end suite: `fakerest.py` (in-process fake PostgREST on 127.0.0.1) + `test_e2e.py` driving sim transport → command gate → copilot toolbox → detector sink over real localhost HTTP, zero network egress. |
+| `core/`      | `yantracore`  | Canonical status contract shared by every component (`active · idle · charging · paused · estop · degraded · fault`) plus the multi-site `site_id()` helper. Enforced by a DB CHECK constraint. |
+| `ops/`       | `yantraops`   | One-command orchestrator: `up --loopback` (zero-config demo) / `--supabase` / `--mqtt`, `migrate --db-url` (tracked, checksummed schema apply), `doctor` (environment preflight), `status`. |
+| `supabase/`  | —             | Ordered, idempotent SQL migrations `0001`–`0005` (schema for every table above) + where to find your `--db-url`. |
+| `docker/`    | —             | Container packaging for the demo stack (host networking; Linux/CI). |
+| `deploy/`    | —             | Cloud deployment guides — currently `deploy/aws/` for a single-EC2 demo. |
+| `docs/`      | —             | Project docs: landing page (`index.html`), Windows runbook, security notes. |
 
-## Quickstart — 60 seconds, zero config
+## Install
 
-```bash
-./install.sh --run              # Linux/macOS: venv + install + start
-```
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1 -Run   # Windows
-```
-
-Or by hand (any OS, in a venv of your choosing):
+Prefer manual control? Any OS, in a venv of your choosing:
 
 ```bash
 pip install -e core -e sim -e connector -e detector -e notifier -e ops
 pip install -r copilot/requirements.txt
 python -m yantraops up --loopback
 ```
-Open the console URL printed in the banner. That is the FULL platform —
-simulated fleet, auto-incidents, predictive maintenance, notifier, Sarathi
-copilot — running against an embedded in-memory backend. No Supabase, no
-keys, no robots. Add `--supabase` (plus the migrations in supabase/) to run
-against your real project. `python -m yantraops status` health-checks a
-running stack.
 
-## Install
+Add `--supabase` (after applying the migrations in `supabase/`) to run
+against your real project; `python -m yantraops status` health-checks a
+running stack.
 
 The one-shot installers create a `.venv` in the repo root, install the six
 Python packages editable plus the copilot requirements, and print the exact
