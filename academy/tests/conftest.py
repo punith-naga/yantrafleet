@@ -17,14 +17,17 @@ under /opt/pw-browsers — the suite never downloads any.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import (BaseHTTPRequestHandler, SimpleHTTPRequestHandler,
+                         ThreadingHTTPServer)
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
@@ -114,6 +117,128 @@ class _CORSHandler(fakerest._Handler):
         self.send_response(204)
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+
+# ------------------------------------------------------------- auth stub
+#
+# fakerest.py serves ONLY /rest/v1/* (both _route and _rpc_name reject any
+# /auth path with a 404), so sign-in gets its own tiny GoTrue stand-in.
+# The academy page is pointed at it with the ?auth=<base> URL param; data
+# requests keep going to the fake PostgREST via ?supa=.
+
+#: email -> credentials + claims for the stub. Passwords are test-only.
+AUTH_USERS: dict[str, dict[str, str]] = {
+    "priya@example.com": {"password": "fleet-pass-1", "yf_role": "operator",
+                          "site": fakerest.DEFAULT_SITE_ID},
+    "mgr@example.com": {"password": "fleet-pass-2", "yf_role": "manager",
+                        "site": fakerest.DEFAULT_SITE_ID},
+}
+
+
+class AuthStub:
+    """Minimal Supabase-Auth (GoTrue) stand-in on an ephemeral localhost port.
+
+    ``POST /auth/v1/token?grant_type=password`` checks AUTH_USERS and answers
+    with a :func:`fakerest.make_test_jwt` access token (which
+    ``FakePostgREST(rbac=True)`` accepts as an authenticated identity) plus a
+    refresh token; ``grant_type=refresh_token`` rotates the access token.
+    Wrong credentials get GoTrue's 400 ``invalid_grant`` shape. CORS-open,
+    like the real endpoint.
+    """
+
+    def __init__(self) -> None:
+        self._httpd: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self.requests: list[str] = []          # grant_type audit log
+
+    def start(self) -> str:
+        stub = self
+
+        class Handler(_AuthHandler):
+            auth = stub
+
+        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._thread = threading.Thread(
+            target=self._httpd.serve_forever, name="academy-authstub", daemon=True)
+        self._thread.start()
+        host, port = self._httpd.server_address[:2]
+        return f"http://{host}:{port}"
+
+    def stop(self) -> None:
+        if self._httpd:
+            self._httpd.shutdown()
+            self._httpd.server_close()
+        if self._thread:
+            self._thread.join(timeout=5)
+
+
+class _AuthHandler(BaseHTTPRequestHandler):
+    auth: AuthStub  # set by subclass in AuthStub.start
+
+    def log_message(self, fmt: str, *args: Any) -> None:  # silence stderr
+        pass
+
+    def _reply(self, code: int, payload: Any) -> None:
+        data = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers",
+                         "apikey, authorization, content-type")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 (http.server API)
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers",
+                         "apikey, authorization, content-type")
+        self.end_headers()
+
+    @staticmethod
+    def _token_reply(email: str) -> dict[str, Any]:
+        user = AUTH_USERS[email]
+        return {
+            "access_token": fakerest.make_test_jwt(
+                email, user["yf_role"], user["site"]),
+            "token_type": "bearer",
+            "expires_in": 3600,
+            "refresh_token": f"rt-{email}",
+            "user": {"email": email},
+        }
+
+    def do_POST(self) -> None:  # noqa: N802
+        parts = urlsplit(self.path)
+        if parts.path != "/auth/v1/token":
+            return self._reply(404, {"error": "not_found"})
+        grant = dict(parse_qsl(parts.query)).get("grant_type", "")
+        self.auth.requests.append(grant)
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except json.JSONDecodeError:
+            body = {}
+        if grant == "password":
+            email = str(body.get("email") or "")
+            user = AUTH_USERS.get(email)
+            if user is None or user["password"] != body.get("password"):
+                return self._reply(400, {
+                    "error": "invalid_grant",
+                    "error_description": "Invalid login credentials"})
+            return self._reply(200, self._token_reply(email))
+        if grant == "refresh_token":
+            rt = str(body.get("refresh_token") or "")
+            email = rt.removeprefix("rt-")
+            if not rt.startswith("rt-") or email not in AUTH_USERS:
+                return self._reply(400, {
+                    "error": "invalid_grant",
+                    "error_description": "Invalid Refresh Token"})
+            return self._reply(200, self._token_reply(email))
+        return self._reply(400, {"error": "unsupported_grant_type"})
 
 
 # ---------------------------------------------------------------- seed data
@@ -220,6 +345,26 @@ def academy_url(bare_academy_server: str, fake) -> str:
     base, _ = fake
     return (f"{bare_academy_server}/index.html"
             f"?supa={base}&key=test&site=BLR-DC1")
+
+
+@pytest.fixture()
+def rbac_fake():
+    """A fake PostgREST in 0007 RBAC mode: anon reads come back empty,
+    JWT-carrying reads are site-scoped — the hardened-backend scenario."""
+    f = AcademyFake(rbac=True)
+    seed(f)
+    base = f.start()
+    yield base, f
+    f.stop()
+
+
+@pytest.fixture()
+def auth_stub():
+    """The GoTrue stand-in; yields its base URL for the ?auth= param."""
+    stub = AuthStub()
+    base = stub.start()
+    yield base
+    stub.stop()
 
 
 # -------------------------------------------------------------------- helpers

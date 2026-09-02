@@ -192,6 +192,51 @@ param no Authorization header is sent at all (requests unchanged). The health
 probe only updates the panel subtitle; it never gates `ask()` — the local
 fallback engine still answers on any failure.
 
+## Real sign-in (Supabase Auth, v0.11)
+
+The console now carries a real login flow (`YFAuth` module) while staying
+100% demo-compatible — with no auth-gated backend nothing changes.
+
+- **Sign in** — the header **Sign in** button (or an automatic one-time
+  prompt as soon as the data backend answers any request with `401`) opens a
+  centered email/password modal. It POSTs
+  `{SUPA_URL}/auth/v1/token?grant_type=password` with the anon key as
+  `apikey`; GoTrue errors (e.g. *Invalid login credentials*) surface inline.
+  While the backend still allows anonymous access the modal offers a
+  *continue in demo mode* link; once a 401 marked the backend auth-required
+  the link is hidden.
+- **Session** — `{jwt, refresh, email, role, site}` persists in
+  `localStorage` under `yf_auth_v1` (try/catch-wrapped, private-mode safe),
+  so a reload stays signed in. **Sign out** clears state + storage.
+- **Headers** — after sign-in every `Sync.q` PostgREST request sends
+  `Authorization: Bearer <access_token>`; `apikey` remains the anon key
+  (PostgREST convention). On a `401`, one `grant_type=refresh_token`
+  round-trip is attempted and the request retried exactly once; a failed
+  refresh drops the session and re-prompts. Anonymous 401s flip the cloud
+  chip to **Sign in required** and quiet the sync loop (no request
+  hammering, no crash loops).
+- **Role discovery** — for the header badge and UI gating only (the backend
+  RLS from `supabase/0007_rbac.sql` is always the real enforcement):
+  1. `GET /rest/v1/user_roles?select=role,site_id` — the 0007
+     `rbac_user_roles_self_read` policy returns exactly the caller's row;
+  2. fallback: the `yf_role` / `site_id` claims parsed from the JWT payload
+     (covers fakerest `yf-test.…` tokens and custom-claims setups);
+  3. last resort: `operator`, with a WARN toast.
+- **RBAC-aware UI**:
+  - the approvals card renders **Approve / Reject** only for signed-in
+    `manager` / `admin` (a `manager+ approval` pill otherwise); the
+    anonymous demo keeps the legacy buttons;
+  - decisions by signed-in users go through the
+    `POST /rest/v1/rpc/decide_command {p_id, p_decision}` RPC (server-side
+    manager+ + pending-only checks); anonymous/demo mode keeps the legacy
+    `PATCH`;
+  - queued commands carry `requested_by = <signed-in email>` (falling back
+    to `console:PN` in demo), matching the 0007 insert policy's
+    `WITH CHECK`;
+  - on an RBAC backend with nobody signed in, the robot-drawer command
+    buttons are replaced by a *Sign in to send commands* prompt and
+    `cmdRobot()` refuses with a hint toast.
+
 ## Configuration
 
 All config lives in `index.html` (documented in the comment block at the top):
@@ -220,7 +265,8 @@ index.html?supa=<PostgREST base url>&key=<anon key>&site=<site id>
 
 ## Tests
 
-Two pytest suites live in `tests/`:
+Three pytest suites live in `tests/` (shared browser fixtures in
+`tests/conftest.py`):
 
 - `test_console_static.py` — offline checks (no network, no browser): file
   structure, sarathi bridge wiring, the untouched fallback engine, and that
@@ -246,6 +292,18 @@ Two pytest suites live in `tests/`:
   bearer-token tests against a tiny in-fixture CORS-aware sarathi stub that
   records request headers for `/ask` and `/health` (`?token=` sends
   `Authorization: Bearer …`; no param sends no header).
+- `test_console_rbac.py` (v0.11) — the login/RBAC browser suite:
+  `FakePostgREST(rbac=True)` (the 0007 policy emulation) extended in-file
+  with a GoTrue-style `POST /auth/v1/token` stub (password + refresh grants;
+  access tokens built with `fakerest.make_test_jwt`). Covers: anon load
+  auto-prompts sign-in with **no** backend data and no page errors; a bad
+  password surfaces the GoTrue error; operator sign-in loads data, acks an
+  alert under RLS, sees **no** Approve/Reject buttons and queues commands
+  as `requested_by=<email>`; manager sign-in approves via the
+  `decide_command` RPC (and never the legacy PATCH); a dead access token
+  triggers exactly one refresh-token round-trip with a successful retry;
+  the session persists across reload; sign-out returns to the anon state.
+  The default (rbac=False) fake and all pre-existing tests are untouched.
 
 ```bash
 pip install playwright pytest-playwright   # browser suite deps

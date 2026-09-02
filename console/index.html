@@ -28,6 +28,21 @@
      - SUPA_URL / SUPA_KEY constants near the bottom of the script.
      - If unreachable, the console runs its local simulation.
 
+  3. Sign-in (Supabase Auth — optional, RBAC backends per 0007_rbac.sql)
+     - The header "Sign in" button (or an automatic prompt after the first
+       401 from the data backend) opens an email/password modal that POSTs
+       {SUPA_URL}/auth/v1/token?grant_type=password (apikey = anon key).
+     - After sign-in every PostgREST request carries
+       Authorization: Bearer <access_token> (apikey stays the anon key);
+       on a 401 one refresh (grant_type=refresh_token) is attempted, then
+       the request is retried once.
+     - Role for UI gating comes from the user's own user_roles row
+       (rbac_user_roles_self_read policy), falling back to a yf_role JWT
+       claim, then to 'operator' with a WARN toast. The backend RLS is
+       always the real enforcement — the UI only hides what would fail.
+     - Session persists in localStorage (key yf_auth_v1); Sign out clears
+       it. Without an auth-gated backend everything behaves as before.
+
   No build step. Open index.html directly or serve statically.
   ================================================================ -->
 <html lang="en">
@@ -222,6 +237,22 @@ svg text{font-family:var(--font)}
 .pal-empty{padding:14px;color:var(--muted);font-size:12.5px;text-align:center}
 .pal-foot{padding:7px 12px;border-top:1px solid var(--border);font-size:10.5px;color:var(--muted);display:flex;gap:12px}
 
+/* ============ Sign-in modal (YFAuth) ============ */
+#signin{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:none;align-items:center;justify-content:center}
+#signin.open{display:flex}
+.si-box{width:340px;max-width:92vw;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.6);padding:20px 24px 18px}
+.si-box h2{font-size:16px;margin-bottom:2px;display:flex;align-items:center;gap:8px}
+.si-box .si-sub{font-size:11.5px;color:var(--muted);margin-bottom:12px}
+.si-box label{display:block;font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px}
+.si-box input{width:100%;background:var(--surface3);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:9px 11px;font-size:13px;font-family:inherit;outline:none}
+.si-box input:focus{border-color:#2a4a75}
+#si-err{color:#e66767;font-size:12px;min-height:16px;margin-top:10px}
+#si-submit{width:100%;margin-top:4px;padding:9px}
+.si-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;font-size:11.5px}
+.si-foot a{color:var(--muted);cursor:pointer;text-decoration:underline}
+.si-foot a:hover{color:var(--ink2)}
+.role-badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-radius:4px;padding:1px 7px;background:#12253f;border:1px solid #2a4a75;color:#9ec5f4}
+
 /* ============ First-run tour ============ */
 #tour-block{position:fixed;inset:0;z-index:300;display:none}
 #tour-hl{position:fixed;z-index:301;display:none;border:2px solid var(--accent);border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.62);pointer-events:none;transition:left .25s ease,top .25s ease,width .25s ease,height .25s ease}
@@ -247,6 +278,7 @@ svg text{font-family:var(--font)}
   <div class="chip" id="chip-cloud" title="Supabase sync status"><span class="dot" id="cloud-dot" style="background:var(--muted)"></span><span id="cloud-lbl">connecting…</span></div>
   <button class="copilot-btn" id="btn-copilot" onclick="Copilot.toggle()">✦ Copilot <span class="kbd">⌘J</span></button>
   <button class="btn ghost sm" id="btn-tour" title="Replay the first-run tour" onclick="Tour.start()">?</button>
+  <span id="auth-box" style="display:flex;align-items:center;gap:8px"></span>
   <div class="avatar">PN</div>
 </header>
 <nav id="nav">
@@ -594,6 +626,9 @@ function renderApprovals(el){
   const cmds=store.commands||[];
   if(!cmds.length){el.innerHTML='';return;}
   const CMD_IC={pause:'❚❚',resume:'▶',charge:'⚡',estop:'■'};
+  // v0.11 RBAC-aware: signed-in users only get Approve/Reject with a
+  // manager|admin role; the anonymous demo keeps the legacy buttons.
+  const canDecide=typeof YFAuth==='undefined'||!YFAuth.authed()||YFAuth.canDecide();
   el.innerHTML=`<div class="card" style="margin-top:14px;border-color:#4a3d18">
     <h3>Pending approvals <span class="right">human-in-the-loop command gate · executed by the live feed</span></h3>
     ${cmds.map(c=>`<div class="al ${c.status==='pending'?'unack':''}">
@@ -603,8 +638,9 @@ function renderApprovals(el){
         <b>${c.robot_id}</b><span class="pill">${c.requested_by||'console'}</span>
         <span class="pill">${c.status}</span></div>
         ${c.note?`<div class="m" style="margin-top:3px;color:var(--muted)">${c.note}</div>`:''}</div>
-      ${c.status==='pending'?`<button class="btn sm primary ack" onclick="Sync.decideCommand('${c.id}','approved')">Approve</button>
-      <button class="btn sm danger ack" onclick="Sync.decideCommand('${c.id}','rejected')">Reject</button>`:''}
+      ${c.status==='pending'?(canDecide?`<button class="btn sm primary ack" onclick="Sync.decideCommand('${c.id}','approved')">Approve</button>
+      <button class="btn sm danger ack" onclick="Sync.decideCommand('${c.id}','rejected')">Reject</button>`
+      :`<span class="pill" title="Approving or rejecting requires the manager or admin role (enforced by the decide_command RPC)">manager+ approval</span>`):''}
     </div>`).join('')}
     <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Approved commands are executed by the simulator/robot adapter and marked executed/failed with a reason — full audit trail in the commands table.</div>
   </div>`;
@@ -692,11 +728,14 @@ function openRobot(id){
       <div class="kv"><span>Firmware</span><b>${r.fw}</b></div>
       <div class="kv"><span>Current task</span><b>${r.task?r.task.id+' · '+r.task.kind:'—'}</b></div>
     </div>
-    <div class="card"><h3>Actions</h3><div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div class="card"><h3>Actions</h3>${cmdGated()
+      ?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm primary" onclick="YFAuth.show()">Sign in to send commands</button></div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px">This backend enforces RBAC — robot commands need a signed-in operator (or higher)</div>`
+      :`<div style="display:flex;gap:8px;flex-wrap:wrap">
       ${r.status==='paused'?`<button class="btn sm primary" onclick="cmdRobot('${r.id}','resume')">▶ Resume</button>`:`<button class="btn sm" onclick="cmdRobot('${r.id}','pause')">❚❚ Pause</button>`}
       <button class="btn sm" onclick="cmdRobot('${r.id}','charge')">⚡ Send to charge</button>
       <button class="btn sm danger" onclick="cmdRobot('${r.id}','stop')">■ E-stop</button></div>
-      <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Commands are human-approved and audit-logged (mock)</div></div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Commands are human-approved and audit-logged (mock)</div>`}</div>
     <div class="card"><h3>Recent events</h3>
       ${(r.log.length?r.log:[[clock2(simMin-8),'Task '+(r.task?r.task.id:'T-4408')+' started'],[clock2(simMin-22),'Passed node '+r.node.toUpperCase()],[clock2(simMin-40),'Battery check OK']]).slice(0,6).map(l=>`<div class="al"><span class="tt">${l[0]}</span><div class="bd"><span class="m">${l[1]}</span></div></div>`).join('')}
     </div>
@@ -704,7 +743,17 @@ function openRobot(id){
   d.classList.add('open');
 }
 function closeDrawer(){$('#drawer').classList.remove('open');selRobot=null;}
+/** v0.11: true when the backend enforces RBAC and nobody is signed in —
+    command queueing is hidden/refused for anon in that case. */
+function cmdGated(){
+  return typeof Sync!=='undefined'&&Sync.authRequired
+    &&typeof YFAuth!=='undefined'&&!YFAuth.authed();
+}
 function cmdRobot(id,cmd){
+  if(cmdGated()){
+    toast('⚠ Sign in to request robot commands — this backend requires an operator role');
+    YFAuth.show(); return;
+  }
   // v0.2: when a live backend is connected, commands go through the
   // human-approval gate (commands table) instead of acting locally.
   if(typeof Sync!=='undefined'&&(Sync.mode==='leader'||Sync.mode==='follower')){
@@ -1591,22 +1640,186 @@ const _cfg=new URLSearchParams(location.search);
 const SUPA_URL=_cfg.get('supa')||'https://flwyvhsmgrrqpmhcqlzd.supabase.co';
 const SUPA_KEY=_cfg.get('key')||'sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf'; // publishable anon key — safe client-side
 window.SITE=_cfg.get('site')||null;
+
+/* ================= YFAuth — real sign-in via Supabase Auth (v0.11) =================
+   Demo-compatible: with no auth-gated backend nothing changes (anon key,
+   legacy command paths). Against an RBAC backend (supabase/0007_rbac.sql):
+     - login(email, password)  → POST {SUPA_URL}/auth/v1/token?grant_type=password
+       (apikey = anon key); stores {jwt, refresh, email, role, site} in
+       localStorage under 'yf_auth_v1' (try/catch — private mode safe).
+     - role discovery         → own user_roles row (rbac_user_roles_self_read),
+       falling back to the JWT's yf_role claim (fakerest test tokens and
+       custom-claims setups), then 'operator' + a WARN toast. UI gating only —
+       the backend RLS always decides what actually succeeds.
+     - refreshToken()         → grant_type=refresh_token, single-flight;
+       Sync.q retries a 401'd request once after a successful refresh.
+     - logout()/expire()      → clear state + localStorage, back to anon.
+   Sync marks the backend auth-required on any 401 seen while anonymous and
+   shows the sign-in modal exactly once (no crash/prompt loops). */
+const YFAuth={
+  KEY:'yf_auth_v1',
+  state:{jwt:null,refresh:null,email:null,role:null,site:null},
+  _prompted:false,_refreshing:null,
+  esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');},
+  authed(){return !!(this.state.jwt&&this.state.email);},
+  canDecide(){return this.state.role==='manager'||this.state.role==='admin';},
+  load(){try{const s=JSON.parse(localStorage.getItem(this.KEY)||'null');
+    if(s&&typeof s==='object'&&s.jwt)this.state=Object.assign(this.state,s);}catch(e){}},
+  save(){try{localStorage.setItem(this.KEY,JSON.stringify(this.state));}catch(e){}},
+  /** base64url JSON claims from segment [1] — fits both real Supabase JWTs
+      (header.payload.sig) and fakerest 'yf-test.<claims>.sig' test tokens. */
+  parseJwt(tok){try{const seg=String(tok||'').split('.');if(seg.length<2)return null;
+    const b=seg[1].replace(/-/g,'+').replace(/_/g,'/');
+    const j=JSON.parse(atob(b+'='.repeat((4-b.length%4)%4)));
+    return j&&typeof j==='object'?j:null;}catch(e){return null;}},
+  async login(email,password){
+    const r=await fetch(SUPA_URL+'/auth/v1/token?grant_type=password',{method:'POST',
+      headers:{'apikey':SUPA_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({email,password})});
+    const d=await r.json().catch(()=>null);
+    if(!r.ok||!d||!d.access_token)
+      throw new Error((d&&(d.error_description||d.msg||d.message))||('Sign-in failed (HTTP '+r.status+')'));
+    this.state={jwt:d.access_token,refresh:d.refresh_token||null,
+      email:(d.user&&d.user.email)||email,role:null,site:null};
+    await this.fetchRole();
+    this.save();this.renderHeader();
+    if(typeof Sync!=='undefined')Sync.onAuthChange();
+    toast('Signed in as '+this.state.email+' · role: '+(this.state.role||'none'));
+  },
+  /** Role/site for the header badge and UI gating (see module comment). */
+  async fetchRole(){
+    try{ // 0007 own-row policy: authenticated users can read exactly their row
+      const rows=await Sync.q('user_roles?select=role,site_id&limit=1');
+      if(Array.isArray(rows)&&rows[0]&&rows[0].role){
+        this.state.role=rows[0].role;this.state.site=rows[0].site_id||this.state.site;return;}
+    }catch(e){/* table absent (test backends) or unreadable → claims fallback */}
+    const c=this.parseJwt(this.state.jwt);
+    if(c&&c.yf_role){this.state.role=c.yf_role;this.state.site=c.site_id||this.state.site;return;}
+    this.state.role='operator';
+    toast('⚠ WARN: could not determine your role — assuming operator (the backend still enforces real permissions)');
+  },
+  /** grant_type=refresh_token — single-flight so parallel 401s refresh once. */
+  refreshToken(){
+    if(this._refreshing)return this._refreshing;
+    const p=(async()=>{
+      if(!this.state.refresh)throw new Error('no refresh token');
+      const r=await fetch(SUPA_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',
+        headers:{'apikey':SUPA_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify({refresh_token:this.state.refresh})});
+      const d=await r.json().catch(()=>null);
+      if(!r.ok||!d||!d.access_token)throw new Error('refresh failed (HTTP '+r.status+')');
+      this.state.jwt=d.access_token;
+      if(d.refresh_token)this.state.refresh=d.refresh_token;
+      this.save();
+    })().finally(()=>{this._refreshing=null;});
+    this._refreshing=p;return p;
+  },
+  logout(){
+    this.state={jwt:null,refresh:null,email:null,role:null,site:null};
+    try{localStorage.removeItem(this.KEY);}catch(e){}
+    this._prompted=false;this.renderHeader();
+    if(typeof Sync!=='undefined')Sync.onAuthChange();
+    toast('Signed out');
+  },
+  /** Session died server-side (401 + failed refresh) → drop it, re-prompt. */
+  expire(){
+    this.state={jwt:null,refresh:null,email:null,role:null,site:null};
+    try{localStorage.removeItem(this.KEY);}catch(e){}
+    this._prompted=false;this.renderHeader();this.promptOnce();
+  },
+  /** Called by Sync on an unauthenticated 401 — open the modal exactly once. */
+  promptOnce(){if(!this.authed()&&!this._prompted){this._prompted=true;this.show();}},
+  renderHeader(){
+    const el=$('#auth-box');if(!el)return;
+    el.innerHTML=this.authed()
+      ?`<span class="chip" id="auth-user" title="Signed in via Supabase Auth">👤 ${this.esc(this.state.email)}
+          <span class="role-badge" id="auth-role">${this.esc(this.state.role||'…')}</span></span>
+        <button class="btn ghost sm" id="btn-signout" onclick="YFAuth.logout()">Sign out</button>`
+      :`<button class="btn sm" id="btn-signin" onclick="YFAuth.show()">Sign in</button>`;
+  },
+  ensure(){
+    if($('#signin'))return;
+    const d=document.createElement('div');d.id='signin';
+    d.innerHTML=`<div class="si-box">
+      <h2>Sign in <button class="btn ghost sm" style="margin-left:auto" onclick="YFAuth.close()">✕</button></h2>
+      <div class="si-sub">FleetMind console · Supabase Auth</div>
+      <label for="si-email">Email</label><input id="si-email" type="email" autocomplete="username" spellcheck="false">
+      <label for="si-pass">Password</label><input id="si-pass" type="password" autocomplete="current-password">
+      <div id="si-err"></div>
+      <button class="btn primary" id="si-submit">Sign in</button>
+      <div class="si-foot"><span style="color:var(--muted)">Roles are enforced server-side (RLS)</span>
+        <a id="si-demo" onclick="YFAuth.close();toast('Continuing in demo mode — anonymous access')">Continue in demo mode</a></div>
+    </div>`;
+    document.body.appendChild(d);
+    d.addEventListener('mousedown',e=>{if(e.target===d)this.close();});
+    $('#si-submit').addEventListener('click',()=>this.submit());
+    ['si-email','si-pass'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')this.submit();}));
+  },
+  show(){
+    this.ensure();
+    // 'continue in demo mode' only while the backend still allows anon —
+    // once a 401 marked it auth-required the link would just mislead.
+    const demo=$('#si-demo');if(demo)demo.style.display=(typeof Sync!=='undefined'&&Sync.authRequired)?'none':'';
+    $('#si-err').textContent='';
+    $('#signin').classList.add('open');
+    const em=$('#si-email');if(em)em.focus();
+  },
+  close(){const d=$('#signin');if(d)d.classList.remove('open');},
+  async submit(){
+    const email=($('#si-email').value||'').trim(),pass=$('#si-pass').value||'';
+    const err=$('#si-err'),btn=$('#si-submit');
+    if(!email||!pass){err.textContent='Email and password are required';return;}
+    btn.disabled=true;btn.textContent='Signing in…';err.textContent='';
+    try{await this.login(email,pass);this.close();}
+    catch(e){err.textContent=String((e&&e.message)||e);}
+    finally{btn.disabled=false;btn.textContent='Sign in';}
+  }
+};
+YFAuth.load();
+
 const Sync={
-  mode:'connecting',            // connecting | leader | follower | local
+  mode:'connecting',            // connecting | leader | follower | local | auth
   me:'w-'+Math.random().toString(36).slice(2,10),
   lastPush:0,
-  hdr(extra){return Object.assign({'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},extra||{});},
-  async q(path,opt){ // fetch wrapper, 4s timeout
+  authRequired:false,           // v0.11: set on the first 401 — backend enforces RBAC
+  /** apikey is ALWAYS the anon key (PostgREST convention); Authorization
+      carries the user JWT once signed in, else the anon key as before. */
+  hdr(extra){
+    const bearer=(typeof YFAuth!=='undefined'&&YFAuth.state.jwt)?YFAuth.state.jwt:SUPA_KEY;
+    return Object.assign({'apikey':SUPA_KEY,'Authorization':'Bearer '+bearer,'Content-Type':'application/json'},extra||{});},
+  async q(path,opt,_retried){ // fetch wrapper, 4s timeout; one refresh-retry on 401
     const c=new AbortController();const t=setTimeout(()=>c.abort(),4000);
     try{const r=await fetch(SUPA_URL+'/rest/v1/'+path,Object.assign({signal:c.signal},opt,{headers:this.hdr(opt&&opt.headers)}));
       clearTimeout(t);
-      if(!r.ok)throw new Error('HTTP '+r.status);
+      if(r.status===401&&typeof YFAuth!=='undefined'){
+        this.authRequired=true;
+        if(!_retried&&YFAuth.state.jwt&&YFAuth.state.refresh){
+          try{await YFAuth.refreshToken();}
+          catch(e2){YFAuth.expire();const err=new Error('HTTP 401');err.status=401;throw err;}
+          return await this.q(path,opt,true);           // retried exactly once
+        }
+        if(YFAuth.state.jwt)YFAuth.expire();            // token dead, no refresh left
+        else YFAuth.promptOnce();                        // anon on an RBAC backend
+        const err=new Error('HTTP 401');err.status=401;throw err;
+      }
+      if(!r.ok){const err=new Error('HTTP '+r.status);err.status=r.status;throw err;}
       const txt=await r.text();return txt?JSON.parse(txt):null;
     }catch(e){clearTimeout(t);throw e;}
   },
   setChip(){const d=$('#cloud-dot'),l=$('#cloud-lbl');if(!d)return;
-    const m={leader:['var(--good)','Cloud: LIVE · simulating'],follower:['var(--s1)','Cloud: LIVE · viewing'],local:['var(--warn)','Local sim (offline)'],connecting:['var(--muted)','connecting…'],nodb:['var(--crit)','Run schema SQL ⇒ retry']};
+    const m={leader:['var(--good)','Cloud: LIVE · simulating'],follower:['var(--s1)','Cloud: LIVE · viewing'],local:['var(--warn)','Local sim (offline)'],connecting:['var(--muted)','connecting…'],nodb:['var(--crit)','Run schema SQL ⇒ retry'],auth:['var(--warn)','Sign in required']};
     const[c,txt]=m[this.mode]||m.connecting;d.style.background=c;l.textContent=txt;},
+  /* v0.11: identity changed (sign-in/out) — re-elect and re-pull with the new headers */
+  onAuthChange(){
+    if(typeof YFAuth!=='undefined'&&YFAuth.authed()){
+      this.mode='connecting';this.setChip();
+      this.claim().then(()=>this.pullSeed()).then(()=>this.cycle()).catch(()=>{});
+    }else{
+      if(this.authRequired)this.mode='auth';
+      this.setChip();
+    }
+    render(true);
+  },
   async init(){
     try{ await this.q('fleet_meta?select=id&limit=1'); }
     catch(e){ this.mode = String(e).includes('404')||String(e).includes('406')?'nodb':'local'; this.setChip();
@@ -1615,17 +1828,22 @@ const Sync={
       if(this.mode==='nodb')this.mode='local';
       return; }
     await this.claim(); this.setChip();
-    // pull seeded incidents/missions once
+    await this.pullSeed();
+    setInterval(()=>this.cycle().catch(()=>{}),2000);
+    setInterval(()=>this.claim().catch(()=>{}),10000); // failover check
+    if(this.mode!=='auth')toast(this.mode==='leader'?'☁ Connected to Supabase — this tab is running the fleet':'☁ Connected — another tab is simulating; this one is a live viewer');
+  },
+  /* pull seeded incidents/missions (on connect, and again after sign-in) */
+  async pullSeed(){
     try{const inc=await this.q('incidents?select=*&order=created_at.desc');
       if(inc&&inc.length)store.incidents=inc.map(i=>({id:i.id,sev:i.sev,title:i.title,src:i.src,t:i.tlabel,state:i.state,impact:i.impact,rca:i.rca||'Automated detection (yantradetect) — root-cause analysis pending.',fix:i.fix||'Inspect the robot on the floor · acknowledge related alerts · ask the copilot for telemetry around the event.',dur:i.dur,created_at:i.created_at}));
       const ms=await this.q('missions?select=*&order=id');
       if(ms&&ms.length)store.missions=ms.map(m=>({id:m.id,name:m.name,robots:m.robots,state:m.state,prog:m.prog,eta:m.eta}));
     }catch(e){}
-    setInterval(()=>this.cycle().catch(()=>{}),2000);
-    setInterval(()=>this.claim().catch(()=>{}),10000); // failover check
-    toast(this.mode==='leader'?'☁ Connected to Supabase — this tab is running the fleet':'☁ Connected — another tab is simulating; this one is a live viewer');
   },
   async claim(){
+    // RBAC backend + still anonymous: nothing to elect — wait for sign-in.
+    if(this.authRequired&&typeof YFAuth!=='undefined'&&!YFAuth.authed()){this.mode='auth';this.setChip();return;}
     try{
       const rows=await this.q('fleet_meta?id=eq.1&select=writer_id,updated_at');
       const row=rows&&rows[0];
@@ -1633,12 +1851,25 @@ const Sync={
       const simWriter=row&&row.writer_id&&String(row.writer_id).startsWith('yantrasim');
       if(simWriter&&!stale){this.mode='follower';}                 // v0.2: a live simulator/robot feed always outranks the console
       else if(row&&row.writer_id===this.me){this.mode='leader';}
-      else if(stale){ await this.q('fleet_meta?id=eq.1',{method:'PATCH',body:JSON.stringify({writer_id:this.me,updated_at:new Date().toISOString()})}); this.mode='leader'; }
+      else if(stale){
+        try{ await this.q('fleet_meta?id=eq.1',{method:'PATCH',body:JSON.stringify({writer_id:this.me,updated_at:new Date().toISOString()})}); this.mode='leader'; }
+        catch(e){ // RBAC backends: fleet_meta writes are service-only
+          if(e&&e.status===401&&typeof YFAuth!=='undefined'&&!YFAuth.authed())this.mode='auth';
+          else if(e&&(e.status===401||e.status===403))this.mode='follower'; // signed in: view-only
+          else throw e;
+        }
+      }
       else this.mode='follower';
-    }catch(e){ if(this.mode!=='local'){this.mode='local';} }
+    }catch(e){
+      if(e&&e.status===401&&typeof YFAuth!=='undefined'&&!YFAuth.authed())this.mode='auth';
+      else if(this.mode!=='local'){this.mode='local';}
+    }
     this.setChip();
   },
   async cycle(){
+    // anonymous against an RBAC backend: reads are empty and writes 401 —
+    // idle quietly until sign-in instead of hammering the API.
+    if(this.mode==='auth'&&typeof YFAuth!=='undefined'&&!YFAuth.authed())return;
     if(this.mode==='leader')await this.push(); else if(this.mode==='follower')await this.pull();
     await this.pullCommands();
     // v0.4: missions ride the sync cycle too (throttled — small table, every 3rd tick);
@@ -1679,8 +1910,10 @@ const Sync={
   },
   /* ---- v0.2 command queue (human-in-the-loop gate) ---- */
   queueCommand(robotId,cmd){
+    // v0.11: signed-in users request as themselves (0007 WITH CHECK requires it)
+    const who=(typeof YFAuth!=='undefined'&&YFAuth.authed())?YFAuth.state.email:'console:PN';
     this.q('commands',{method:'POST',headers:{'Prefer':'return=minimal'},
-      body:JSON.stringify({robot_id:robotId,cmd,requested_by:'console:PN'})})
+      body:JSON.stringify({robot_id:robotId,cmd,requested_by:who})})
       .then(()=>this.pullCommands()).catch(()=>toast('⚠ Could not queue command (is 0002_commands.sql applied?)'));
   },
   async pullCommands(){
@@ -1691,6 +1924,15 @@ const Sync={
     }catch(e){/* table may not exist yet — silently skip */}
   },
   decideCommand(id,decision){
+    // v0.11: signed in → the 0007 decide_command RPC (server checks manager+
+    // and the pending-only state machine). Anonymous / demo → legacy PATCH.
+    if(typeof YFAuth!=='undefined'&&YFAuth.authed()){
+      this.q('rpc/decide_command',{method:'POST',
+        body:JSON.stringify({p_id:id,p_decision:decision})})
+        .then(()=>{toast('Command '+decision);this.pullCommands();})
+        .catch(e=>toast('⚠ Decision failed'+(e&&e.status===403?' — requires the manager or admin role':'')));
+      return;
+    }
     this.q('commands?id=eq.'+encodeURIComponent(id),{method:'PATCH',
       body:JSON.stringify({status:decision,decided_by:'console:PN',decided_at:new Date().toISOString()})})
       .then(()=>{toast('Command '+decision);this.pullCommands();})
@@ -1773,6 +2015,7 @@ function render(force){
   else if(now-lastFull>3000&&['overview','analytics','maint','audit'].includes(curView)){VIEWS[curView]();lastFull=now;} // never auto-rerender incidents (would reset replay scrub)
 }
 VIEWS.overview();rLiveOps();$('#v-liveops').classList.remove('on');$('#v-overview').classList.add('on');
+YFAuth.renderHeader();   // v0.11: Sign in button / signed-in identity chip
 sampleAvail();   // seed one availability sample so the SLA card never starts empty
 setInterval(()=>{ if(Sync.mode!=='follower')step(0.4); sampleAvail(); render(false); },400);
 Sync.init();

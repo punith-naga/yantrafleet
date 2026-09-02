@@ -24,6 +24,7 @@ a checkride) — everything except backend-verified practicals works offline.
 | `?key=`  | anon key sent as `apikey` + `Authorization: Bearer`             |
 | `?site=` | exposed as `window.SITE` (no filtering yet, matching console)   |
 | `?token=`| bearer token for the sarathi tutor tier (`localhost:8001`)      |
+| `?auth=` | auth base URL (`{auth}/auth/v1/token`); defaults to `?supa=`'s URL — tests point it at a stub |
 
 The **Open console** header button links to `../console/index.html` and
 carries `supa`/`key`/`site`/`token` through, so both apps talk to the same
@@ -137,6 +138,43 @@ raw progress object) plus **Reset**.
   **and** its practical is verified/marked done (missing parts count as done).
 - The quiz records the **first** answer per question; explanations always show.
 
+## Accounts (`window.YFAuth`) — optional; guest mode is the default
+
+The header's **Sign in** button opens a modal (email/password, or **Continue
+as guest**). Sign-in is a Supabase password grant —
+`POST {AUTH_URL}/auth/v1/token?grant_type=password` with the anon key as
+`apikey` — and the session `{jwt, refresh, email, role}` is stored under the
+localStorage key **`yf_auth_v1`**, *shared with the console*, so one login
+serves both apps on the same origin. `role` comes from the JWT claims
+(`yf_role`, as the test tokens and `user_roles`-aware deployments provide).
+On any 401 the access token is refreshed **once**
+(`grant_type=refresh_token`) and the request retried; a failed refresh signs
+out back to guest mode.
+
+**Guest mode is exactly the pre-accounts behaviour** — progress in
+localStorage only, all requests on the anon key, nothing degraded.
+
+While signed in:
+
+- **Requests carry the JWT** — every PostgREST GET/RPC sends
+  `Authorization: Bearer <jwt>` (`apikey` stays the anon key). This is what
+  makes practical/checkride verifies work against RBAC-hardened backends
+  (`supabase/0007_rbac.sql`), where anon reads return nothing.
+- **Progress sync is save-only and local-first.** localStorage remains the
+  source of truth; every change pushes the whole progress blob via
+  `POST /rest/v1/rpc/save_progress` (debounced 2 s), plus one immediate push
+  right after login so pre-login progress lands on the account.
+  *Deliberate tradeoff:* the app never pulls the server copy — under 0007
+  the read path may be revoked or RLS-filtered per deployment, so a reliable
+  pull can't be assumed; save-only last-writer-wins is the honest contract.
+  A brand-new browser therefore starts empty even if the account has
+  server-side rows — use **Export**/**Import** to migrate a browser.
+- **Certificates are recorded to the account.** A checkride pass calls
+  `rpc/issue_certificate` (track, score, verification code) and the cert
+  shows *"Recorded to your account"*. A duplicate-code `409` (same
+  name+date+score already recorded) regenerates the code once with a salt
+  and retries; other failures keep the local certificate and say so.
+
 ## Checkride, certificate, Open Badge
 
 The checkride runs its steps sequentially with a visible timer. Each step is
@@ -239,6 +277,17 @@ embedded-pack fallback, external pack loading, lesson nav + quiz feedback,
 practical Verify pass/fail against the seeded backend, progress persistence
 and export, checkride → certificate → badge happy path, canned tutor answers
 and grading, the param-preserving console link, and the backend status chip.
+
+`academy/tests/test_accounts.py` covers the accounts layer, hermetically:
+guest mode unchanged (local progress, zero RPC traffic), sign-in via a tiny
+GoTrue stand-in in `conftest.py` (fakerest serves only `/rest/v1/*`, so the
+page gets `?auth=<stub>`; the stub returns `make_test_jwt` tokens that
+`FakePostgREST(rbac=True)` accepts), email + role in the header and the
+shared `yf_auth_v1` session, `save_progress` pushes on login and debounced
+on change (asserted against the fake's progress store), checkride pass
+recording via `issue_certificate` (row + code asserted), duplicate-code 409
+regeneration, and RBAC-mode practical verifies passing with the JWT but
+failing as guest.
 
 `academy/tests/test_webllm.py` covers the on-device tier without any
 network: an `add_init_script` stubs WebGPU + storage quota and installs a

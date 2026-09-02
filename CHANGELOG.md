@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.11.0 — 2026-09-02
+- **Real authentication + enforced RBAC** (Supabase Auth):
+  - migration 0007_rbac.sql: user_roles (operator<engineer<manager<admin,
+    per-site), per-role RLS policies, SECURITY DEFINER RPCs
+    (decide_command, save_progress, issue_certificate) — behavior-tested
+    against a real Postgres 16 with a Supabase-faithful harness
+  - console: sign-in modal, JWT on every call with refresh-once,
+    role-aware UI (approve/reject = manager+ via RPC), requested_by /
+    decided_by become real authenticated emails
+  - academy: shared session (one login serves both apps), progress
+    synced to the account, certificates recorded server-side
+  - fakerest rbac=True emulation so the whole auth stack is browser-
+    tested offline
+- **`yantraops audit-security`**: probes the live backend and labels its
+  mode (demo / hardened / rbac), catches anon-writable tables, service
+  keys in browsers, missing tokens/secrets/migrations — PASS/WARN/FAIL
+  with remediations, --json, CI-friendly exit codes.
+- **docs/COMPLIANCE.md**: honest mappings — SOC 2 CC-series, ISO 27001,
+  EU AI Act Art 14 (human oversight by design), VDA 5050 conformance
+  statement (exact fields), ISA-18.2 alarm KPIs, NIST CSF, and the
+  gaps-to-close checklist.
+- 498 tests green across 10 suites.
+
 ## v0.10.0 — 2026-09-02
 - **YantraFleet Academy** (`academy/`) — learn Physical AI by operating the
   live platform. Research-driven design (NVIDIA DLI, MiR/OTTO operator

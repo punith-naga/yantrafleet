@@ -1,6 +1,4 @@
-# YantraFleet — Test Report (v0.10.0)
-
-All suites executed offline, 2026-09-02.
+# YantraFleet — Test Report (v0.11.0)
 
 | Suite | Tests |
 |---|---|
@@ -10,15 +8,16 @@ All suites executed offline, 2026-09-02.
 | detector | 60 |
 | notifier | 64 |
 | copilot | 65 |
-| ops | 48 |
-| e2e | 18 |
-| academy | 20 (browser, incl. fake-WebLLM tier tests) |
-| console | 33 (24 browser via Playwright/Chromium + 9 static) |
-| **Total** | **450** — 0 failed |
+| ops | 65 (incl. 17 audit-security) |
+| e2e | 35 (incl. 17 RBAC enforcement) |
+| academy | 26 (browser; incl. accounts + WebLLM-fake tiers) |
+| console | 41 (browser; incl. 8 login/RBAC) |
+| **Total** | **498** — 0 failed |
 
-Also green: node scripts/check_console.mjs · bash deploy/aws/validate.sh (18 checks).
+Also green: check_console.mjs · check_academy.mjs · deploy/aws/validate.sh.
+0007_rbac.sql additionally executed against real Postgres 16 (Supabase-
+faithful harness): 11 behavioral RBAC tests + rollback + re-apply.
 
-Known gaps: live Supabase RLS/0006, real webhook/Twilio delivery, LLM tiers
-1-2 against real APIs, and an actual EC2 boot of deploy/aws are validated by
-fakes/parsers/linters offline — first live runs are the remaining test.
-QoS-0 instantActions are fire-once (offline robots miss them; re-approve).
+Remaining live-only validation: real Supabase Auth (JWT issuance, own-row
+user_roles read), 0006/0007 on the production project, EC2 boot, WebLLM
+real download, LLM tiers 1-2, webhook/Twilio delivery.

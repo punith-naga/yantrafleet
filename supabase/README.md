@@ -1,16 +1,38 @@
 # supabase/ — schema migrations for YantraFleet
 
-Ordered, idempotent SQL files (`0001_...` → `0005_...`). Apply them **in
-filename order** to a fresh Supabase project and every YantraFleet component
-(sim, detector, notifier, copilot, console) can talk to it.
+Ordered, idempotent SQL files. Apply them **in filename order** to a fresh
+Supabase project and every YantraFleet component (sim, detector, notifier,
+copilot, console) can talk to it.
 
-```
-0001_init.sql         robots, alerts, incidents, missions, fleet_meta
-0002_commands.sql     operator command queue + canonical robot statuses
-0003_telemetry.sql    telemetry history (replay/analytics) + purge function
-0004_maintenance.sql  maintenance tracking
-0005_sites.sql        multi-site support
-```
+## Migration order + modes
+
+| File | Mode | Apply when |
+|---|---|---|
+| `0001_init.sql` | baseline (demo-open) | always — robots, alerts, incidents, missions, fleet_meta |
+| `0002_commands.sql` | baseline | always — operator command queue + canonical robot statuses |
+| `0003_telemetry.sql` | baseline | always — telemetry history + purge function |
+| `0004_maintenance.sql` | baseline | always — predictive-maintenance findings |
+| `0005_sites.sql` | baseline | always — `site_id` on every operational table |
+| `0006_harden.sql` | **opt-in: hardened** | moving beyond demo — drops `demo_all`; authenticated = read-only, writers switch to the service_role key |
+| `0007_rbac.sql` | **opt-in: RBAC** | production — replaces demo/0006 policies with role-based ones (`user_roles`, `yf_role()`/`yf_has_role()`, `decide_command()` RPC, academy tables). Can be applied straight after 0005; drops 0006's policies itself if present |
+
+The three postures (demo / hardened / RBAC), the role capability matrix,
+and what to reconfigure after each opt-in file are documented in
+[`docs/SECURITY.md`](../docs/SECURITY.md). Both opt-in files start with a
+loud warning header and end with a commented **ROLLBACK** block that
+restores the previous posture.
+
+Two caveats for the opt-in files:
+
+* **`yantraops migrate` applies every `*.sql` file it finds**, 0006/0007
+  included — running it against a project you want to keep demo-open will
+  lock that project down. To stay demo-open, apply `0001`–`0005` by hand in
+  the SQL editor (or point `--dir` at a copy of this directory without the
+  opt-in files). If it happens by accident, run the ROLLBACK block at the
+  bottom of the applied file(s).
+* **`0007_rbac.sql` requires a Supabase project** — it references
+  `auth.users`, `auth.uid()` and `auth.email()`, so it will not apply to a
+  vanilla Postgres database (0001–0006 will).
 
 `python -m yantraops migrate --print-order` prints the exact order (needs no
 database and no extra packages).
@@ -64,7 +86,8 @@ No psycopg, or outbound port 5432 blocked? Apply the files by hand:
 
 1. Dashboard → **SQL Editor** → **New query**.
 2. Paste the contents of `0001_init.sql`, click **Run**.
-3. Repeat for `0002` … `0005`, **in order**.
+3. Repeat for `0002` … `0005`, **in order** — and `0006`/`0007` only if
+   you are opting into hardened/RBAC mode (read their headers first).
 
 Every file is idempotent (`create table if not exists`, guarded `alter`s),
 so running one twice is harmless. The manual path does not populate

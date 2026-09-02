@@ -9,6 +9,7 @@
     python -m yantraops status                   # ping the running stack
     python -m yantraops doctor                   # environment preflight
     python -m yantraops migrate --db-url URL     # apply supabase/*.sql
+    python -m yantraops audit-security           # backend/RLS security audit
 """
 from __future__ import annotations
 
@@ -86,6 +87,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "doctor", help="environment preflight: PASS/WARN/FAIL checks")
+
+    from .audit import add_audit_parser
+    add_audit_parser(sub)
     return p
 
 
@@ -167,6 +171,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         from .doctor import run_doctor
         return run_doctor()
+    if args.command == "audit-security":
+        from .audit import run_audit
+        return run_audit(args.url, args.key, json_output=args.json)
     return run_status(args.state_file)
 
 

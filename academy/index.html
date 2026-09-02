@@ -15,10 +15,39 @@
      - ?supa=<PostgREST base url>   overrides SUPA_URL
      - ?key=<anon key>              overrides SUPA_KEY
      - ?site=<site id>              exposed as window.SITE
+     - ?auth=<auth base url>        overrides AUTH_URL (defaults to
+       SUPA_URL) — where /auth/v1/token lives; used by tests to point
+       sign-in at a stub while data stays on the fake PostgREST.
      Practical "Verify" buttons and the checkride query the backend
      read-only (GET /rest/v1/<table>?<filter>). If the backend is
      unreachable, verification fails with a clear message — lessons
      and quizzes still work fully offline.
+
+  2b. Accounts (window.YFAuth — optional, guest mode is the default)
+     - "Sign in" in the header does a Supabase password grant
+       (POST {AUTH_URL}/auth/v1/token?grant_type=password, apikey
+       header) and stores {jwt, refresh, email, role} under the
+       localStorage key `yf_auth_v1` — SHARED with the console, so one
+       login serves both apps on the same origin.
+     - While signed in: every PostgREST request (practical verifies,
+       checkride) carries `Authorization: Bearer <jwt>` — this is what
+       makes verifies work against RBAC-hardened (0007) backends. On a
+       401 the token is refreshed ONCE and the request retried.
+     - Progress sync is SAVE-ONLY, local-first: localStorage stays the
+       source of truth; every change pushes the whole progress blob via
+       POST /rest/v1/rpc/save_progress (debounced 2 s), plus one
+       immediate push right after login. We deliberately do NOT pull
+       the server copy on login: 0007 revokes direct table writes and a
+       fresh browser + revoked/filtered reads make a reliable pull
+       impossible in general, so a last-writer-wins push is the honest
+       contract (tradeoff: a brand-new browser starts from zero even if
+       the account has server-side progress; export/import JSON covers
+       the migration case).
+     - Checkride pass while signed in also records the certificate via
+       rpc/issue_certificate (track, score, verification code). A
+       duplicate-code 409 regenerates the code once (salted hash).
+     - Guest mode is EXACTLY the pre-accounts behaviour: localStorage
+       only, anon-key requests, nothing degraded.
 
   3. Tutor tiers (window.YFTutor — stable interface, swappable guts)
      - 'canned'  : built-in keyword engine over the lesson's
@@ -212,6 +241,17 @@ input.name:focus{border-color:#2a4a75}
 .wl-prog-fill{height:100%;background:var(--s1);border-radius:4px;transition:width .2s ease;width:0}
 .wl-status{margin-top:5px;font-size:10.5px;color:var(--muted)}
 
+/* ============ Auth (sign-in modal + header chip) ============ */
+#auth-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;z-index:90}
+.auth-box{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r);padding:22px 24px;width:min(340px,92vw);box-shadow:0 18px 50px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:10px}
+.auth-box h3{font-size:15px;font-weight:700}
+.auth-box .auth-sub{font-size:12px;color:var(--muted);line-height:1.5}
+.auth-box input{background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:9px 12px;font-size:13px;font-family:inherit;outline:none}
+.auth-box input:focus{border-color:#2a4a75}
+.auth-err{font-size:12px;color:#e88;background:#2a1414;border:1px solid #5c2a2a;border-radius:var(--r-sm);padding:8px 11px}
+.auth-row{display:flex;gap:8px;margin-top:2px}
+#auth-chip .who{max-width:180px;overflow:hidden;text-overflow:ellipsis}
+
 /* ============ Toast ============ */
 #toasts{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:100}
 .toast{background:var(--surface2);border:1px solid var(--border2);border-left:3px solid var(--accent);border-radius:var(--r-sm);padding:10px 14px;font-size:12.5px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:tin .2s ease}
@@ -239,6 +279,9 @@ input.name:focus{border-color:#2a4a75}
   <div class="spacer"></div>
   <div class="chip" id="chip-backend" title="Live backend used by the practical Verify checks"><span class="dot" id="be-dot" style="background:var(--muted)"></span><span id="be-lbl">backend: probing…</span></div>
   <div class="chip" title="Active tutor tier (see YFTutor in the page script)">✦ tutor: <b id="tutor-tier" style="color:var(--ink)">canned</b></div>
+  <div class="chip" id="auth-chip" hidden title="Signed in — progress and certificates sync to this account"><span class="dot" style="background:var(--good)"></span><span class="who" id="auth-email"></span></div>
+  <button class="btn" id="btn-signin" title="Sign in to sync progress and record certificates">Sign in</button>
+  <button class="btn ghost sm" id="btn-signout" hidden title="Back to guest mode (local progress only)">Sign out</button>
   <a class="btn" id="btn-open-console" href="../console/index.html" target="_blank" rel="noopener">⬡ Open console</a>
   <button class="btn ghost sm" id="btn-tutor-toggle" title="Show / hide the tutor panel">✦ Tutor</button>
 </header>
@@ -276,6 +319,19 @@ input.name:focus{border-color:#2a4a75}
   </div>
 </aside>
 </div>
+<div id="auth-modal" hidden>
+  <div class="auth-box" role="dialog" aria-label="Sign in">
+    <h3>Sign in to your fleet account</h3>
+    <div class="auth-sub">Signing in syncs your progress and records certificates to your account, and lets practicals verify against role-protected backends. <b>Guest mode keeps everything in this browser</b> — nothing is lost either way.</div>
+    <input id="auth-em" type="email" placeholder="email" autocomplete="username">
+    <input id="auth-pw" type="password" placeholder="password" autocomplete="current-password">
+    <div class="auth-err" id="auth-err" hidden></div>
+    <div class="auth-row">
+      <button class="btn primary" id="auth-submit">Sign in</button>
+      <button class="btn ghost" id="auth-guest">Continue as guest</button>
+    </div>
+  </div>
+</div>
 <div id="toasts"></div>
 <input type="file" id="imp-file" accept="application/json" style="display:none">
 
@@ -295,17 +351,111 @@ function toast(m){const d=document.createElement('div');d.className='toast';d.te
 const _cfg=new URLSearchParams(location.search);
 const SUPA_URL=_cfg.get('supa')||'https://flwyvhsmgrrqpmhcqlzd.supabase.co';
 const SUPA_KEY=_cfg.get('key')||'sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf'; // publishable anon key — safe client-side
+const AUTH_URL=_cfg.get('auth')||SUPA_URL;   // /auth/v1 base (tests point it at a stub)
 window.SITE=_cfg.get('site')||null;
 
+/* ================================================================
+   window.YFAuth — accounts (same pattern as the console's module).
+   Small + self-contained: password grant against {AUTH_URL}/auth/v1,
+   session {jwt, refresh, email, role} persisted under the SHARED
+   localStorage key `yf_auth_v1` (one login serves console + academy
+   on the same origin). Guest mode (no session) leaves every request
+   exactly as before — anon key only.
+   ================================================================ */
+const Auth=window.YFAuth={
+  KEY:'yf_auth_v1',                    // SHARED with the console — do not rename
+  s:null,                              // {jwt, refresh, email, role} | null
+  _refreshing:null,                    // in-flight refresh (single-flight)
+  load(){try{const j=JSON.parse(localStorage.getItem(this.KEY)||'null');
+    if(j&&typeof j==='object'&&j.jwt)this.s=j;}catch(e){}},
+  save(){try{if(this.s)localStorage.setItem(this.KEY,JSON.stringify(this.s));
+    else localStorage.removeItem(this.KEY);}catch(e){}},
+  signedIn(){return !!(this.s&&this.s.jwt);},
+  email(){return this.s?this.s.email:null;},
+  /* Claims from a JWT-shaped token. Works for real Supabase JWTs
+     (header.payload.sig) AND the yf-test tokens the fake backend uses
+     (yf-test.<b64url claims>.sig) — both carry the claims in part [1]. */
+  claims(tok){
+    try{
+      const p=String(tok||'').split('.')[1]||'';
+      const b=p.replace(/-/g,'+').replace(/_/g,'/');
+      return JSON.parse(atob(b+'='.repeat((4-b.length%4)%4)))||{};
+    }catch(e){return {};}
+  },
+  async login(email,password){
+    const r=await fetch(AUTH_URL+'/auth/v1/token?grant_type=password',{
+      method:'POST',headers:{'apikey':SUPA_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({email,password})});
+    if(!r.ok){
+      let msg='HTTP '+r.status;
+      try{const j=await r.json();msg=j.error_description||j.msg||j.message||msg;}catch(e){}
+      throw new Error(msg);
+    }
+    const d=await r.json();
+    if(!d||!d.access_token)throw new Error('auth reply had no access_token');
+    const c=this.claims(d.access_token);
+    this.s={jwt:d.access_token,refresh:d.refresh_token||null,
+      email:(d.user&&d.user.email)||c.email||email,
+      role:c.yf_role||null};                       // yf-test claims carry yf_role
+    this.save();authChanged();
+    return this.s;
+  },
+  logout(){this.s=null;this.save();authChanged();},
+  /* Refresh the JWT once (single-flight). false = session is gone. */
+  async tryRefresh(){
+    if(!this.s||!this.s.refresh)return false;
+    if(this._refreshing)return this._refreshing;
+    this._refreshing=(async()=>{
+      try{
+        const r=await fetch(AUTH_URL+'/auth/v1/token?grant_type=refresh_token',{
+          method:'POST',headers:{'apikey':SUPA_KEY,'Content-Type':'application/json'},
+          body:JSON.stringify({refresh_token:this.s.refresh})});
+        if(!r.ok)throw new Error('HTTP '+r.status);
+        const d=await r.json();
+        if(!d||!d.access_token)throw new Error('no access_token');
+        this.s.jwt=d.access_token;
+        if(d.refresh_token)this.s.refresh=d.refresh_token;
+        this.save();
+        return true;
+      }catch(e){
+        this.logout();
+        toast('Session expired — signed out, continuing as guest');
+        return false;
+      }finally{this._refreshing=null;}
+    })();
+    return this._refreshing;
+  }
+};
+
 const API={
-  hdr(extra){return Object.assign({'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},extra||{});},
-  /* fetch wrapper, 4 s timeout — mirrors the console's Sync.q */
-  async q(path,opt){
+  /* Signed in -> Bearer <jwt> (RBAC backends need it); guest -> Bearer
+     <anon key>, byte-for-byte the pre-accounts behaviour. */
+  hdr(extra){
+    const bearer=Auth.signedIn()?Auth.s.jwt:SUPA_KEY;
+    return Object.assign({'apikey':SUPA_KEY,'Authorization':'Bearer '+bearer,
+      'Content-Type':'application/json'},extra||{});
+  },
+  /* fetch wrapper, 4 s timeout — mirrors the console's Sync.q.
+     While signed in, a 401 refreshes the token ONCE and retries. */
+  async q(path,opt){return this._req(SUPA_URL+'/rest/v1/'+path,opt);},
+  async rpc(fn,args){
+    return this._req(SUPA_URL+'/rest/v1/rpc/'+fn,
+      {method:'POST',body:JSON.stringify(args||{})});
+  },
+  async _req(url,opt,_retried){
     const c=new AbortController();const t=setTimeout(()=>c.abort(),4000);
-    try{const r=await fetch(SUPA_URL+'/rest/v1/'+path,Object.assign({signal:c.signal},opt,{headers:this.hdr(opt&&opt.headers)}));
+    try{
+      const r=await fetch(url,Object.assign({signal:c.signal},opt,{headers:this.hdr(opt&&opt.headers)}));
       clearTimeout(t);
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      const txt=await r.text();return txt?JSON.parse(txt):null;
+      if(r.status===401&&!_retried&&Auth.signedIn()&&await Auth.tryRefresh())
+        return this._req(url,opt,true);
+      const txt=await r.text();
+      if(!r.ok){
+        let msg='HTTP '+r.status;
+        try{const j=txt?JSON.parse(txt):null;if(j&&j.message)msg+=' — '+j.message;}catch(e2){}
+        const err=new Error(msg);err.status=r.status;throw err;
+      }
+      return txt?JSON.parse(txt):null;
     }catch(e){clearTimeout(t);throw e;}
   },
   reachable:null,
@@ -464,7 +614,8 @@ const Progress={
   KEY:'yfa_progress_v1',
   data:{quiz:{},practicals:{},checkride:null,cert:null,lastLesson:null},
   load(){try{const s=localStorage.getItem(this.KEY);if(s){const j=JSON.parse(s);if(j&&typeof j==='object')this.data=Object.assign(this.data,j);}}catch(e){}},
-  save(){try{localStorage.setItem(this.KEY,JSON.stringify(this.data));}catch(e){}},
+  save(){try{localStorage.setItem(this.KEY,JSON.stringify(this.data));}catch(e){}
+    Sync.schedule();},
   quizDone(l){if(!l.quiz||!l.quiz.length)return true;
     const q=this.data.quiz[l.id];return !!q&&Object.keys(q.answers||{}).length>=l.quiz.length;},
   practicalDone(l){if(!l.practical)return true;return !!this.data.practicals[l.id];},
@@ -488,6 +639,42 @@ const Progress={
     }catch(e){toast('⚠ Import failed: '+e.message);}
   }
 };
+/* ================================================================
+   Progress sync (signed-in only) — SAVE-ONLY, LOCAL-FIRST.
+   localStorage stays the source of truth; every Progress.save() while
+   signed in schedules a debounced (2 s) push of the whole progress
+   blob through POST /rest/v1/rpc/save_progress (0007's SECURITY
+   DEFINER upsert — direct table writes are revoked). Login also
+   pushes immediately, so pre-login local progress lands on the
+   account at once.
+
+   Deliberate tradeoff (documented in the header comment + README):
+   we never PULL the server copy. Under 0007 the read path can be
+   revoked or RLS-filtered per deployment, so a reliable pull cannot
+   be assumed; a save-only last-writer-wins push is the honest
+   contract. A brand-new browser therefore starts from empty local
+   progress even when the account has server-side rows — the JSON
+   export/import buttons cover that migration. Guest mode never calls
+   any of this. */
+const Sync={
+  DEBOUNCE_MS:2000, _timer:null,
+  schedule(){
+    if(!Auth.signedIn())return;                     // guest: no-op, by design
+    clearTimeout(this._timer);
+    this._timer=setTimeout(()=>this.push(),this.DEBOUNCE_MS);
+  },
+  pushNow(){clearTimeout(this._timer);this._timer=null;return this.push();},
+  async push(){
+    if(!Auth.signedIn()||!Content.pack)return false;
+    try{
+      await API.rpc('save_progress',{p_pack:Content.pack.id,p_data:Progress.data});
+      return true;
+    }catch(e){/* transient — next change re-schedules; local copy is safe */
+      return false;
+    }
+  }
+};
+
 function download(name,text){
   const b=new Blob([text],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;
@@ -690,7 +877,9 @@ const Rail={
         <button class="btn sm" id="btn-import" title="Restore progress from a JSON export">⤒ Import</button>
         <button class="btn sm ghost" id="btn-reset" title="Clear all local progress">Reset</button>
       </div>
-      <div class="note">progress lives in this browser (localStorage)</div>
+      <div class="note">${Auth.signedIn()
+        ?'progress syncs to '+esc(Auth.email())+' (local copy kept)'
+        :'progress lives in this browser (localStorage)'}</div>
     </div>`;
     $('#rail').innerHTML=h;
     $$('#rail button.lsn[data-lesson]').forEach(b=>b.addEventListener('click',()=>Lesson.open(b.dataset.lesson)));
@@ -955,6 +1144,30 @@ const Cert={
     Progress.save();Rail.render();
     this.render();
     toast('Certificate issued 🏅');
+    if(Auth.signedIn())this.record();   // async — records to the account
+  },
+  /* Signed-in only: persist the certificate server-side via 0007's
+     issue_certificate RPC. A duplicate verification code (409 / 23505,
+     e.g. same name+date+score already recorded) regenerates the code
+     ONCE with a salt and retries; any other failure keeps the local
+     certificate and says so. */
+  async record(_retried){
+    const d=Progress.data.cert;
+    if(!d||!Auth.signedIn())return;
+    try{
+      await API.rpc('issue_certificate',{p_track:d.track,p_score:d.scorePct,p_code:d.code});
+      d.recorded=Auth.email();Progress.save();
+      if(state.view==='cert')this.render();
+      toast('✓ Certificate recorded to your account');
+    }catch(e){
+      if(e.status===409&&!_retried){
+        d.code=vcode(d.name+'|'+d.date+'|'+d.scorePct+'|2'); // salted regen, once
+        Progress.save();
+        if(state.view==='cert')this.render();
+        return this.record(true);
+      }
+      toast('⚠ Could not record certificate ('+e.message+') — it is still saved locally');
+    }
   },
   render(){
     const d=Progress.data.cert;
@@ -975,6 +1188,7 @@ const Cert={
           <div class="kv">Pack<b>${esc(d.pack)}</b></div>
         </div>
         <div class="code">Verification code <b id="cert-code">${esc(d.code)}</b> — deterministic hash of name + date + score; recompute to verify.</div>
+        ${d.recorded?`<div class="code" id="cert-recorded">✓ Recorded to your account — <b>${esc(d.recorded)}</b></div>`:''}
         <div class="foot">Demo credential issued client-side by the YantraFleet Academy sample app. Unsigned — not a claim of accreditation.</div>
       </div>
       <div class="cert-actions no-print">
@@ -1071,6 +1285,57 @@ function wireConsoleLink(){
   const a=$('#btn-open-console');
   a.href='../console/index.html'+(qs.toString()?('?'+qs.toString()):'');
 }
+
+/* ---------------- Auth UI (header + modal) ---------------- */
+function authChanged(){
+  const on=Auth.signedIn();
+  const si=$('#btn-signin'),so=$('#btn-signout'),ch=$('#auth-chip'),em=$('#auth-email');
+  if(si)si.hidden=on;
+  if(so)so.hidden=!on;
+  if(ch)ch.hidden=!on;
+  if(em)em.textContent=on?(Auth.s.email+(Auth.s.role?' · '+Auth.s.role:'')):'';
+  if(Content.pack)Rail.render();       // rail-foot note reflects sync target
+}
+const AuthUI={
+  open(){
+    const m=$('#auth-modal');if(!m)return;
+    m.hidden=false;
+    const err=$('#auth-err');if(err)err.hidden=true;
+    const em=$('#auth-em');if(em)em.focus();
+  },
+  close(){const m=$('#auth-modal');if(m)m.hidden=true;},
+  _err(msg){const e=$('#auth-err');if(e){e.textContent=msg;e.hidden=false;}},
+  async submit(){
+    const em=$('#auth-em').value.trim(),pw=$('#auth-pw').value;
+    if(!em||!pw){this._err('Enter email and password (or continue as guest).');return;}
+    const b=$('#auth-submit');b.disabled=true;b.textContent='Signing in…';
+    try{
+      const s=await Auth.login(em,pw);
+      this.close();
+      $('#auth-pw').value='';
+      toast('Signed in as '+s.email+' — progress will sync to this account');
+      Sync.pushNow();                  // push pre-login local progress at once
+    }catch(e){
+      this._err('Sign-in failed: '+(e&&e.message?e.message:e));
+    }finally{b.disabled=false;b.textContent='Sign in';}
+  },
+  init(){
+    $('#btn-signin').addEventListener('click',()=>this.open());
+    $('#btn-signout').addEventListener('click',()=>{
+      Auth.logout();
+      toast('Signed out — guest mode (progress stays in this browser)');
+    });
+    $('#auth-guest').addEventListener('click',()=>this.close());
+    $('#auth-submit').addEventListener('click',()=>this.submit());
+    $('#auth-modal').addEventListener('keydown',e=>{
+      if(e.key==='Enter')this.submit();
+      if(e.key==='Escape')this.close();
+    });
+    $('#auth-modal').addEventListener('click',e=>{
+      if(e.target===$('#auth-modal'))this.close();   // click outside = guest
+    });
+  }
+};
 
 /* ---------------- Import wiring ---------------- */
 $('#imp-file').addEventListener('change',e=>{
@@ -1288,13 +1553,16 @@ window.YFWebLLM=WebLLM;                      // hook surface for tests
 window.YFA={ // small hook surface for tests / integrations
   get pack(){return Content.pack;},
   get source(){return Content.source;},
-  Progress, runVerify, sanitize, vcode
+  Progress, runVerify, sanitize, vcode, Auth, Sync
 };
 (async function boot(){
+  Auth.load();                 // restore a shared yf_auth_v1 session, if any
   Progress.load();
   await Content.load();
   wireConsoleLink();
   Tutor.init();
+  AuthUI.init();
+  authChanged();
   Rail.render();
   const first=Progress.data.lastLesson&&Content.lesson(Progress.data.lastLesson)
     ?Progress.data.lastLesson:Content.pack.lessons[0].id;
