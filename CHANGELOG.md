@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.12.0 — 2026-09-03
+- **Account signup** in console + academy: Sign in / Create account tabs,
+  POST /auth/v1/signup with both Supabase outcomes handled (instant
+  session -> auto-login; email-confirmation-required -> clear guidance);
+  weak-password/duplicate errors surfaced; role-less users get a
+  next-step hint.
+- **Bulletproof discovery**: console header gains a 🎓 Academy link (and
+  palette entry) and academy links back — params (supa/key/site/token)
+  preserved; works under yantraops/nginx docroot and file://.
+- **Physical AI Foundations track** — 7 new lessons (19 total, 4 tracks):
+  how Physical AI actually works (sense→plan→act, perception/SLAM,
+  planning & control, robot learning & VLA foundation models, sim-first
+  methodology, the 2026 industry landscape, safety & human oversight) —
+  every platform fact read from this repo's source, every 2026 industry
+  fact web-verified (GR00T, π0/openpi, Gemini Robotics 1.5, Amazon 1M
+  robots + DeepFleet, IFR India #6).
+- 511 tests green across 10 suites.
+
 ## v0.11.0 — 2026-09-02
 - **Real authentication + enforced RBAC** (Supabase Auth):
   - migration 0007_rbac.sql: user_roles (operator<engineer<manager<admin,

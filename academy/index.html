@@ -29,6 +29,13 @@
        header) and stores {jwt, refresh, email, role} under the
        localStorage key `yf_auth_v1` — SHARED with the console, so one
        login serves both apps on the same origin.
+     - The modal's "Create account" tab (email + password + confirm)
+       POSTs {AUTH_URL}/auth/v1/signup and handles both real Supabase
+       outcomes: session returned → signed in immediately; user without
+       a session (email confirmation ON — the default) → "check your
+       email" note; errors (weak password, already registered) surface
+       the server's message. On the loopback demo backend (no /auth/v1)
+       both tabs explain guest/demo mode instead.
      - While signed in: every PostgREST request (practical verifies,
        checkride) carries `Authorization: Bearer <jwt>` — this is what
        makes verifies work against RBAC-hardened (0007) backends. On a
@@ -65,8 +72,11 @@
                    seam: window.__YF_WEBLLM_FACTORY (see the WEBLLM
                    TIER section at the bottom of the script).
 
-  4. 'Open console' links to ../console/index.html preserving the
-     supa/key/site/token query params.
+  4. '⬡ Open console' links back to the console preserving the
+     supa/key/site/token query params. Served (nginx docroot: console
+     at /, academy at /academy/) that is ../index.html; opened from a
+     file:// repo checkout it is the sibling ../console/index.html —
+     computed via location.
 
   No build step. Open index.html directly or serve statically:
       cd academy && python3 -m http.server 8090
@@ -249,6 +259,10 @@ input.name:focus{border-color:#2a4a75}
 .auth-box input{background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:9px 12px;font-size:13px;font-family:inherit;outline:none}
 .auth-box input:focus{border-color:#2a4a75}
 .auth-err{font-size:12px;color:#e88;background:#2a1414;border:1px solid #5c2a2a;border-radius:var(--r-sm);padding:8px 11px}
+.auth-msg{font-size:12px;color:#7dc98a;background:#122612;border:1px solid #2a4a2a;border-radius:var(--r-sm);padding:8px 11px;line-height:1.5}
+.auth-tabs{display:flex;border:1px solid var(--border2);border-radius:var(--r-sm);overflow:hidden}
+.auth-tab{flex:1;background:var(--surface2);border:none;color:var(--muted);padding:7px 0;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.auth-tab.on{background:#12253f;color:#9ec5f4}
 .auth-row{display:flex;gap:8px;margin-top:2px}
 #auth-chip .who{max-width:180px;overflow:hidden;text-overflow:ellipsis}
 
@@ -320,12 +334,18 @@ input.name:focus{border-color:#2a4a75}
 </aside>
 </div>
 <div id="auth-modal" hidden>
-  <div class="auth-box" role="dialog" aria-label="Sign in">
-    <h3>Sign in to your fleet account</h3>
+  <div class="auth-box" role="dialog" aria-label="Sign in or create account">
+    <h3>Your fleet account</h3>
     <div class="auth-sub">Signing in syncs your progress and records certificates to your account, and lets practicals verify against role-protected backends. <b>Guest mode keeps everything in this browser</b> — nothing is lost either way.</div>
+    <div class="auth-tabs" role="tablist">
+      <button class="auth-tab on" id="auth-tab-in" role="tab">Sign in</button>
+      <button class="auth-tab" id="auth-tab-up" role="tab">Create account</button>
+    </div>
     <input id="auth-em" type="email" placeholder="email" autocomplete="username">
     <input id="auth-pw" type="password" placeholder="password" autocomplete="current-password">
+    <input id="auth-pw2" type="password" placeholder="confirm password" autocomplete="new-password" hidden>
     <div class="auth-err" id="auth-err" hidden></div>
+    <div class="auth-msg" id="auth-msg" hidden></div>
     <div class="auth-row">
       <button class="btn primary" id="auth-submit">Sign in</button>
       <button class="btn ghost" id="auth-guest">Continue as guest</button>
@@ -382,10 +402,30 @@ const Auth=window.YFAuth={
       return JSON.parse(atob(b+'='.repeat((4-b.length%4)%4)))||{};
     }catch(e){return {};}
   },
+  /* No /auth/v1 behind AUTH_URL (loopback fakerest 404s it, or the fetch
+     itself fails) → a flagged error so the modal can explain guest/demo
+     mode instead of dumping a raw HTTP/network error. */
+  NOAUTH_MSG:'Accounts need a real Supabase backend — you are on the local demo (loopback). Continue in demo mode as a guest.',
+  async _post(path,body){
+    let r;
+    try{
+      r=await fetch(AUTH_URL+path,{
+        method:'POST',headers:{'apikey':SUPA_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify(body)});
+    }catch(e){const err=new Error(this.NOAUTH_MSG);err.noAuth=true;throw err;}
+    if(r.status===404){const err=new Error(this.NOAUTH_MSG);err.noAuth=true;throw err;}
+    return r;
+  },
+  _adopt(d,email){
+    const c=this.claims(d.access_token);
+    this.s={jwt:d.access_token,refresh:d.refresh_token||null,
+      email:(d.user&&d.user.email)||c.email||email,
+      role:c.yf_role||null};                       // yf-test claims carry yf_role
+    this.save();authChanged();
+    return this.s;
+  },
   async login(email,password){
-    const r=await fetch(AUTH_URL+'/auth/v1/token?grant_type=password',{
-      method:'POST',headers:{'apikey':SUPA_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({email,password})});
+    const r=await this._post('/auth/v1/token?grant_type=password',{email,password});
     if(!r.ok){
       let msg='HTTP '+r.status;
       try{const j=await r.json();msg=j.error_description||j.msg||j.message||msg;}catch(e){}
@@ -393,12 +433,21 @@ const Auth=window.YFAuth={
     }
     const d=await r.json();
     if(!d||!d.access_token)throw new Error('auth reply had no access_token');
-    const c=this.claims(d.access_token);
-    this.s={jwt:d.access_token,refresh:d.refresh_token||null,
-      email:(d.user&&d.user.email)||c.email||email,
-      role:c.yf_role||null};                       // yf-test claims carry yf_role
-    this.save();authChanged();
-    return this.s;
+    return this._adopt(d,email);
+  },
+  /* Create account → POST {AUTH_URL}/auth/v1/signup (same contract as the
+     console): session returned → signed in now, resolves 'session'; user
+     without a session (email confirmation ON — the Supabase default) →
+     resolves 'confirm'; error → throws with the server's message. */
+  async signup(email,password){
+    const r=await this._post('/auth/v1/signup',{email,password});
+    let d=null;try{d=await r.json();}catch(e){}
+    if(!r.ok)
+      throw new Error((d&&(d.error_description||d.msg||d.message))||('HTTP '+r.status));
+    if(d&&d.access_token){this._adopt(d,email);return 'session';}
+    const u=(d&&d.user)||d;                        // GoTrue returns the bare user when confirmation is on
+    if(u&&(u.id||u.email||u.confirmation_sent_at))return 'confirm';
+    throw new Error('unexpected reply from the auth server');
   },
   logout(){this.s=null;this.save();authChanged();},
   /* Refresh the JWT once (single-flight). false = session is gone. */
@@ -1278,12 +1327,17 @@ const Tutor={
   }
 };
 
-/* ---------------- Open-console link (preserves backend params) ------------- */
+/* ---------------- Open-console link (preserves backend params) -------------
+   Served (nginx template / ops static server) the academy lives at
+   /academy/index.html with the console at /index.html → '../index.html'.
+   Opened from a file:// repo checkout the console is the SIBLING directory
+   → '../console/index.html'. Computed via location so both work. */
 function wireConsoleLink(){
   const qs=new URLSearchParams();
   for(const k of ['supa','key','site','token']){const v=_cfg.get(k);if(v)qs.set(k,v);}
   const a=$('#btn-open-console');
-  a.href='../console/index.html'+(qs.toString()?('?'+qs.toString()):'');
+  const base=location.protocol==='file:'?'../console/index.html':'../index.html';
+  a.href=base+(qs.toString()?('?'+qs.toString()):'');
 }
 
 /* ---------------- Auth UI (header + modal) ---------------- */
@@ -1297,27 +1351,58 @@ function authChanged(){
   if(Content.pack)Rail.render();       // rail-foot note reflects sync target
 }
 const AuthUI={
+  mode:'in',                            // 'in' = sign in · 'up' = create account
   open(){
     const m=$('#auth-modal');if(!m)return;
     m.hidden=false;
-    const err=$('#auth-err');if(err)err.hidden=true;
+    this.setMode(this.mode);
     const em=$('#auth-em');if(em)em.focus();
   },
   close(){const m=$('#auth-modal');if(m)m.hidden=true;},
   _err(msg){const e=$('#auth-err');if(e){e.textContent=msg;e.hidden=false;}},
+  _msg(msg){const e=$('#auth-msg');if(e){e.textContent=msg;e.hidden=false;}},
+  setMode(m){
+    this.mode=m;
+    $('#auth-tab-in').classList.toggle('on',m==='in');
+    $('#auth-tab-up').classList.toggle('on',m==='up');
+    const up=m==='up';
+    $('#auth-submit').textContent=up?'Create account':'Sign in';
+    $('#auth-pw').setAttribute('autocomplete',up?'new-password':'current-password');
+    const pw2=$('#auth-pw2');pw2.hidden=!up;if(!up)pw2.value='';
+    $('#auth-err').hidden=true;$('#auth-msg').hidden=true;
+  },
   async submit(){
     const em=$('#auth-em').value.trim(),pw=$('#auth-pw').value;
+    const up=this.mode==='up',lbl=up?'Create account':'Sign in';
     if(!em||!pw){this._err('Enter email and password (or continue as guest).');return;}
-    const b=$('#auth-submit');b.disabled=true;b.textContent='Signing in…';
+    if(up&&pw!==$('#auth-pw2').value){this._err('Passwords do not match.');return;}
+    const b=$('#auth-submit');b.disabled=true;
+    b.textContent=up?'Creating account…':'Signing in…';
+    $('#auth-err').hidden=true;$('#auth-msg').hidden=true;
     try{
-      const s=await Auth.login(em,pw);
-      this.close();
-      $('#auth-pw').value='';
-      toast('Signed in as '+s.email+' — progress will sync to this account');
-      Sync.pushNow();                  // push pre-login local progress at once
+      if(up){
+        const out=await Auth.signup(em,pw);
+        if(out==='session'){                      // (a) instant session → signed in
+          this.close();$('#auth-pw').value='';$('#auth-pw2').value='';
+          toast('Account created — signed in as '+Auth.s.email
+            +' — progress will sync to this account');
+          Sync.pushNow();
+        }else{                                     // (b) user, no session → confirm email
+          this._msg('Account created — check your email to confirm, then sign in. '
+            +'(Project owners: disable Confirm email in Supabase → Authentication → '
+            +'Sign In / Up for instant signup.)');
+        }
+      }else{
+        const s=await Auth.login(em,pw);
+        this.close();
+        $('#auth-pw').value='';
+        toast('Signed in as '+s.email+' — progress will sync to this account');
+        Sync.pushNow();                // push pre-login local progress at once
+      }
     }catch(e){
-      this._err('Sign-in failed: '+(e&&e.message?e.message:e));
-    }finally{b.disabled=false;b.textContent='Sign in';}
+      if(e&&e.noAuth)this._msg(e.message);         // demo backend → note, not error dump
+      else this._err((up?'Sign-up failed: ':'Sign-in failed: ')+(e&&e.message?e.message:e));
+    }finally{b.disabled=false;b.textContent=lbl;}
   },
   init(){
     $('#btn-signin').addEventListener('click',()=>this.open());
@@ -1325,6 +1410,8 @@ const AuthUI={
       Auth.logout();
       toast('Signed out — guest mode (progress stays in this browser)');
     });
+    $('#auth-tab-in').addEventListener('click',()=>this.setMode('in'));
+    $('#auth-tab-up').addEventListener('click',()=>this.setMode('up'));
     $('#auth-guest').addEventListener('click',()=>this.close());
     $('#auth-submit').addEventListener('click',()=>this.submit());
     $('#auth-modal').addEventListener('keydown',e=>{

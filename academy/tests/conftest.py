@@ -138,18 +138,24 @@ AUTH_USERS: dict[str, dict[str, str]] = {
 class AuthStub:
     """Minimal Supabase-Auth (GoTrue) stand-in on an ephemeral localhost port.
 
-    ``POST /auth/v1/token?grant_type=password`` checks AUTH_USERS and answers
-    with a :func:`fakerest.make_test_jwt` access token (which
+    ``POST /auth/v1/token?grant_type=password`` checks the stub's users and
+    answers with a :func:`fakerest.make_test_jwt` access token (which
     ``FakePostgREST(rbac=True)`` accepts as an authenticated identity) plus a
     refresh token; ``grant_type=refresh_token`` rotates the access token.
-    Wrong credentials get GoTrue's 400 ``invalid_grant`` shape. CORS-open,
-    like the real endpoint.
+    Wrong credentials get GoTrue's 400 ``invalid_grant`` shape.
+    ``POST /auth/v1/signup`` registers a new user and answers per
+    ``signup_mode``: 'session' (email confirmation OFF) returns tokens for
+    an instant login, 'confirm' (the Supabase default) returns the bare
+    user with no session; duplicates and short passwords get GoTrue's 422
+    shapes. CORS-open, like the real endpoint.
     """
 
     def __init__(self) -> None:
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
-        self.requests: list[str] = []          # grant_type audit log
+        self.requests: list[str] = []          # grant_type / 'signup' audit log
+        self.users = {k: dict(v) for k, v in AUTH_USERS.items()}
+        self.signup_mode = "session"           # 'session' | 'confirm'
 
     def start(self) -> str:
         stub = self
@@ -199,9 +205,8 @@ class _AuthHandler(BaseHTTPRequestHandler):
                          "apikey, authorization, content-type")
         self.end_headers()
 
-    @staticmethod
-    def _token_reply(email: str) -> dict[str, Any]:
-        user = AUTH_USERS[email]
+    def _token_reply(self, email: str) -> dict[str, Any]:
+        user = self.auth.users[email]
         return {
             "access_token": fakerest.make_test_jwt(
                 email, user["yf_role"], user["site"]),
@@ -213,18 +218,22 @@ class _AuthHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parts = urlsplit(self.path)
-        if parts.path != "/auth/v1/token":
-            return self._reply(404, {"error": "not_found"})
-        grant = dict(parse_qsl(parts.query)).get("grant_type", "")
-        self.auth.requests.append(grant)
         length = int(self.headers.get("Content-Length") or 0)
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
             body = {}
+        if not isinstance(body, dict):
+            body = {}
+        if parts.path == "/auth/v1/signup":
+            return self._signup(body)
+        if parts.path != "/auth/v1/token":
+            return self._reply(404, {"error": "not_found"})
+        grant = dict(parse_qsl(parts.query)).get("grant_type", "")
+        self.auth.requests.append(grant)
         if grant == "password":
             email = str(body.get("email") or "")
-            user = AUTH_USERS.get(email)
+            user = self.auth.users.get(email)
             if user is None or user["password"] != body.get("password"):
                 return self._reply(400, {
                     "error": "invalid_grant",
@@ -233,12 +242,37 @@ class _AuthHandler(BaseHTTPRequestHandler):
         if grant == "refresh_token":
             rt = str(body.get("refresh_token") or "")
             email = rt.removeprefix("rt-")
-            if not rt.startswith("rt-") or email not in AUTH_USERS:
+            if not rt.startswith("rt-") or email not in self.auth.users:
                 return self._reply(400, {
                     "error": "invalid_grant",
                     "error_description": "Invalid Refresh Token"})
             return self._reply(200, self._token_reply(email))
         return self._reply(400, {"error": "unsupported_grant_type"})
+
+    def _signup(self, body: dict) -> None:
+        """GoTrue-style /auth/v1/signup, outcome per ``auth.signup_mode``."""
+        self.auth.requests.append("signup")
+        email = str(body.get("email") or "")
+        password = str(body.get("password") or "")
+        if not email or not password:
+            return self._reply(400, {
+                "code": 400,
+                "msg": "Signup requires a valid email and password"})
+        if email in self.auth.users:                     # GoTrue's 422 shape
+            return self._reply(422, {
+                "code": 422, "msg": "User already registered"})
+        if len(password) < 6:
+            return self._reply(422, {
+                "code": 422, "msg": "Password should be at least 6 characters"})
+        self.auth.users[email] = {
+            "password": password, "yf_role": "operator",
+            "site": fakerest.DEFAULT_SITE_ID}
+        if self.auth.signup_mode == "session":           # confirmation OFF
+            return self._reply(200, self._token_reply(email))
+        # confirmation ON (Supabase default): bare user, NO session
+        return self._reply(200, {
+            "id": f"user-{email}", "aud": "authenticated", "email": email,
+            "confirmation_sent_at": now_iso()})
 
 
 # ---------------------------------------------------------------- seed data
@@ -359,12 +393,34 @@ def rbac_fake():
 
 
 @pytest.fixture()
-def auth_stub():
-    """The GoTrue stand-in; yields its base URL for the ?auth= param."""
+def auth_stub_obj():
+    """The GoTrue stand-in; yields (base URL, stub) so tests can flip
+    ``signup_mode`` or inspect the request log."""
     stub = AuthStub()
     base = stub.start()
-    yield base
+    yield base, stub
     stub.stop()
+
+
+@pytest.fixture()
+def auth_stub(auth_stub_obj) -> str:
+    """Back-compat: just the stub's base URL for the ?auth= param."""
+    return auth_stub_obj[0]
+
+
+@pytest.fixture(scope="session")
+def docroot_server(tmp_path_factory):
+    """Serve a stand-in for the PRODUCTION docroot layout (yantraops static
+    server / nginx template): console files at /, the academy at /academy/ —
+    the layout the header cross-links are computed for."""
+    root = tmp_path_factory.mktemp("docroot")
+    root.joinpath("index.html").symlink_to(REPO_ROOT / "console" / "index.html")
+    root.joinpath("academy").symlink_to(ACADEMY_DIR, target_is_directory=True)
+    httpd = _serve_dir(root, "docroot-http")
+    host, port = httpd.server_address[:2]
+    yield f"http://{host}:{port}"
+    httpd.shutdown()
+    httpd.server_close()
 
 
 # -------------------------------------------------------------------- helpers

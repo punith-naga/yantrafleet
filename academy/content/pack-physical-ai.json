@@ -2,7 +2,7 @@
   "pack": {
     "id": "pack-physical-ai",
     "title": "Physical AI Operations",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "tracks": [
       {
         "id": "operator",
@@ -35,6 +35,20 @@
           "lesson-10-architecture-tour",
           "lesson-11-connecting-real-robots",
           "lesson-12-copilots-and-grounding"
+        ]
+      },
+      {
+        "id": "physical-ai-foundations",
+        "title": "Physical AI Foundations",
+        "role": "Everyone — how Physical AI actually works",
+        "lesson_ids": [
+          "lesson-13-the-sense-plan-act-loop",
+          "lesson-14-sensing-and-perception",
+          "lesson-15-planning-and-control",
+          "lesson-16-robot-learning-and-foundation-models",
+          "lesson-17-simulation-where-robots-are-born",
+          "lesson-18-industry-landscape-2026",
+          "lesson-19-safety-standards-and-humans"
         ]
       }
     ],
@@ -840,6 +854,409 @@
           }
         },
         "tutor_context": "Lesson: Copilots and grounding. Sarathi: FastAPI service, POST /ask on :8001. Toolbox (each result carries a source_id citation key): fleet_summary, query_robots, query_alerts, query_incidents, query_commands, robot_history, query_telemetry (windowed samples + battery/speed/motor-temp stats + status-transition counts). Tiers: grounded (LLM agent loop over live tools; needs API key AND data backend), llm_only (LLM without live data — backend down), offline (computed template answers from tool data, no LLM). Always HTTP 200 with tier field; degrades t1->t2 on backend failure, t1/t2->t3 on LLM failure. Keys: GEMINI_API_KEY or OPENAI_API_KEY (or SARATHI_MODEL); no key = offline. Grounding guard (post-hoc, LLM tiers only): extracts numeric tokens from the answer, skipping ISO timestamps, clock times, entity ids (AMR-07, INC-2 style), evidence refs; each remaining number must appear in the tool-result payloads; tolerances: int/float equivalence, 1-decimal rounding (54.16 supports 54.2). Labels: verified / unverified (offending tokens listed) / computed (offline tier, grounded by construction). Console panel: calls localhost:8001/ask with 4s timeout, silent fallback to a built-in local rule engine. MCP: python -m sarathi.mcp_server exposes the same toolbox over Model Context Protocol (stdio) for external agents. SARATHI_TOKEN gates /ask with Bearer auth when set. Integrator contract: every capability is a citable tool; every answer declares its tier; every number traces to evidence."
+      },
+      {
+        "id": "lesson-13-the-sense-plan-act-loop",
+        "title": "What is Physical AI",
+        "minutes": 16,
+        "track": "physical-ai-foundations",
+        "body_html": "<h3>AI that touches the world</h3><p>Physical AI is artificial intelligence that <em>senses</em> the physical world, <em>decides</em> what to do, and <em>acts</em> back on it through motors, wheels, or grippers. A chatbot's worst-case output is a wrong sentence; a robot's worst-case output is a forklift-sized machine driving through a wall. That single difference — consequences are physical and irreversible — shapes everything about how the field works.</p><h3>The loop every robot runs</h3><p>Strip away the vendor branding and every autonomous machine runs the same pipeline, dozens of times per second:</p><ul><li><strong>Sensors</strong> — LiDAR, cameras, IMUs, wheel encoders produce raw measurements.</li><li><strong>Perception</strong> — algorithms turn raw data into meaning: obstacles, people, pallets, free space.</li><li><strong>State estimation</strong> — the robot fuses evidence into a belief about itself: <em>where am I, how fast, how charged?</em></li><li><strong>Planning</strong> — pick a goal and a route: which waypoint next, which task, which speed.</li><li><strong>Control</strong> — convert the plan into precise motor commands hundreds of times per second.</li><li><strong>Actuation</strong> — motors and brakes move the machine, changing the world, which the sensors then re-measure. The loop closes.</li></ul><p>Watch any robot on the YantraFleet console map and you are watching this loop's output: the <code>pos</code> updates are state estimation, the route it follows is planning, the smooth motion between waypoints is control.</p><h3>Why this is harder than software AI</h3><p>Four properties make Physical AI a different sport:</p><ul><li><strong>Partial observability.</strong> Sensors are noisy and see only part of the scene. The robot never knows the world; it maintains a probabilistic <em>belief</em> — and beliefs can be wrong, which is exactly what happens when our simulated AMR-07 loses localization.</li><li><strong>Real time.</strong> A language model may think for thirty seconds; a robot rolling at 1.2 m/s toward a person may not. Perception and control run on hard deadlines, often on small onboard computers.</li><li><strong>Safety.</strong> Mistakes cost equipment and can injure people, so safety-rated hardware (scanner fields, e-stops) sits below the AI and overrides it.</li><li><strong>The sim-to-real gap.</strong> Most training and testing happens in simulation because reality is slow and expensive — but simulators are never perfectly faithful, so behavior that works in sim can fail on the floor.</li></ul><h3>Embodiments: one loop, many bodies</h3><p>The same loop wears different bodies. Fixed <em>industrial arms</em> weld and pick with sub-millimeter repeatability. <em>AMRs</em> (autonomous mobile robots, like this platform's simulated fleet) haul goods across warehouse floors. <em>Humanoids</em> aim at human-shaped spaces and tools and, as of 2026, are mostly in pilots rather than production. <em>Drones</em> run the loop in 3D under tight weight and power budgets. <em>Autonomous vehicles</em> run it at highway speed among the public — the hardest safety case of all. The economics differ wildly, but a perception bug or a bad state estimate looks remarkably similar in all of them, which is why the concepts in this track transfer across the whole industry.</p>",
+        "key_points": [
+          "Physical AI = AI that senses, decides, and acts in the physical world, where mistakes are irreversible.",
+          "Every robot runs the same loop: sensors → perception → state estimation → planning → control → actuation.",
+          "It is harder than software AI because of partial observability, hard real-time deadlines, safety stakes, and the sim-to-real gap.",
+          "A robot never knows the world — it maintains a belief, and wrong beliefs (like AMR-07's lost localization) are a routine failure class.",
+          "Embodiments differ — arms, AMRs, humanoids, drones, AVs — but the loop and its failure modes are shared."
+        ],
+        "quiz": [
+          {
+            "q": "Which ordering correctly describes the robot autonomy loop?",
+            "options": [
+              "Planning → sensors → actuation → perception",
+              "Sensors → perception → state estimation → planning → control → actuation",
+              "Control → planning → sensors → state estimation",
+              "Perception → actuation → sensors → planning"
+            ],
+            "answer_idx": 1,
+            "explain": "Raw sensor data is interpreted by perception, fused into a state estimate (where am I?), used to plan, executed by control, and finally actuated — which changes the world the sensors measure next. The loop repeats many times per second."
+          },
+          {
+            "q": "Why does a robot maintain a 'belief' about its position instead of simply knowing it?",
+            "options": [
+              "Because GPS is illegal indoors",
+              "Because sensors are noisy and only partially observe the world, so position must be estimated probabilistically",
+              "Because robot vendors encrypt the true position",
+              "Because positions are only computed once at startup"
+            ],
+            "answer_idx": 1,
+            "explain": "Partial observability is fundamental: every sensor is noisy and sees only part of the scene, so the robot fuses evidence into a probabilistic estimate. When the evidence stops matching the map, the belief degrades — that is a localization loss."
+          },
+          {
+            "q": "What most fundamentally separates Physical AI from a purely digital AI system?",
+            "options": [
+              "It uses larger neural networks",
+              "It always runs in the cloud",
+              "Its outputs cause physical, irreversible effects under real-time and safety constraints",
+              "It cannot use machine learning"
+            ],
+            "answer_idx": 2,
+            "explain": "A wrong token can be regenerated; a wrong motor command moves mass through space. Physical consequences plus hard deadlines plus safety stakes are what make the discipline different, not model size or hosting."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>See the loop with your own eyes.</p><ul><li>Start the platform (<code>python -m yantraops up --loopback</code>) and open the console map.</li><li>Pick one robot and follow it for two minutes. Identify each loop stage in what you observe: its <code>pos</code> updating (state estimation), the waypoint route it takes (planning), the smooth motion and speed changes (control), and the battery/motor readings (sensing).</li><li>Around sim tick 20, watch AMR-07: its localization belief fails and it stops doing useful work — a perception-layer failure propagating through the whole loop.</li></ul>",
+          "verify": {
+            "kind": "self_check",
+            "prompt": "For the robot you watched, name one observed behavior for each of: state estimation, planning, and control. What happened to AMR-07's loop when its localization belief failed?"
+          }
+        },
+        "tutor_context": "Physical AI: AI that senses, decides, acts in the physical world; mistakes are irreversible. The autonomy loop (runs many times/second): sensors (LiDAR, cameras, IMU, wheel encoders) -> perception (raw data to meaning: obstacles, free space) -> state estimation (fused belief: pose, speed, battery) -> planning (goal + route/waypoints) -> control (motor commands, hundreds of Hz) -> actuation (motors move robot; world changes; sensors re-measure; loop closes). Harder than software AI: (1) partial observability — noisy, incomplete sensing; robot holds a probabilistic belief, not truth; (2) hard real-time deadlines on small onboard computers; (3) safety — safety-rated hardware (scanner fields, e-stop) sits below the AI and overrides it; (4) sim-to-real gap — trained/tested in simulation, sim is never perfectly faithful. Embodiments: industrial arms (fixed, sub-mm repeatability), AMRs (this platform's fleet: 10 simulated AMRs), humanoids (mostly pilots as of 2026), drones (3D, tight power budget), autonomous vehicles (hardest safety case). Platform tie-ins: console map pos = state estimation output; waypoint route = planning; smooth motion = control; sim AMR-07 deterministically loses localization at sim tick 20 (message: 'Localization lost: LiDAR scan does not match map') for 12 ticks — a perception/belief failure that halts useful work. Robots cruise at 1.2 m/s in the sim."
+      },
+      {
+        "id": "lesson-14-sensing-and-perception",
+        "title": "Sensing and Perception",
+        "minutes": 17,
+        "track": "physical-ai-foundations",
+        "body_html": "<h3>The sensor suite</h3><p>Four sensor families cover most mobile robots:</p><ul><li><strong>LiDAR</strong> fires laser pulses and times the reflections, producing a precise 2D or 3D point cloud of distances. It works in the dark and measures range directly, which is why nearly every industrial AMR carries a laser scanner.</li><li><strong>Cameras</strong> are cheap and information-rich (color, texture, text on labels) but need interpretation and good lighting; depth cameras add per-pixel distance at short range.</li><li><strong>IMUs</strong> (inertial measurement units) measure acceleration and rotation rate. They are fast but drift — integrate them alone and your position estimate wanders within seconds.</li><li><strong>Wheel encoders</strong> count wheel rotations to give odometry — accurate over short distances until wheels slip.</li></ul><p>No single sensor is trustworthy alone, so robots run <em>sensor fusion</em>: fast-but-drifting sources (IMU, odometry) are continuously corrected by slower absolute references (LiDAR matched against a map).</p><h3>SLAM in plain language</h3><p>SLAM — simultaneous localization and mapping — answers a chicken-and-egg question: you need a map to know where you are, and you need to know where you are to build a map. SLAM does both at once: as the robot moves, it stitches sensor scans into a map while tracking its own pose within it. Once a warehouse map exists, day-to-day operation is mostly <em>localization</em>: match the current LiDAR scan against the stored map and find the pose that lines them up.</p><p>That matching step is exactly where our simulated fleet's scripted fault lives. AMR-07's failure message reads <code>Localization lost: LiDAR scan does not match map</code>. In real warehouses this happens when the environment stops matching the map: a reflector or wall gets moved, pallets pile up in a mapped-empty aisle, or a long featureless corridor gives the matcher nothing to grip. The robot's belief about its own position collapses, and a robot that does not know where it is cannot plan or drive safely — so it stops and raises a fault. The fix is human: re-initialize the pose or re-map the changed area.</p><h3>Object detection: then and now</h3><p>Perception's second job is recognizing <em>things</em>, and the last decade rewrote it twice. From around 2014, convolutional neural networks (R-CNN, then fast single-shot detectors like YOLO and SSD) made real-time detection practical — but only for a <em>fixed list</em> of classes the network was trained on. Miss a class at training time and the robot is blind to it forever. As of 2026 the frontier has shifted to open-vocabulary detection built on vision-language models: because they align images with text, they can find objects described in words at runtime — <em>the tipped-over pallet near the charger</em> — without retraining. The tradeoff is compute: fixed-class detectors still dominate onboard real-time loops, while VLM perception increasingly runs alongside for the long tail.</p><h3>Where perception lands in our tables</h3><p>Every row in <code>robot_telemetry</code> is condensed perception output: <code>pos</code> is the localization estimate (x, y on the warehouse map), <code>speed</code> comes from fused odometry, <code>battery</code> and <code>motor_temp</code> are proprioception — the robot sensing itself — and <code>status</code> summarizes what the autonomy stack believes it is doing. When you replay an incident from telemetry history, you are reading the robot's beliefs over time, not ground truth. Keeping that distinction in mind is what separates good fleet operators from confused ones.</p>",
+        "key_points": [
+          "LiDAR gives direct range measurements; cameras give rich context; IMUs are fast but drift; encoders slip — fusion combines them because none is trustworthy alone.",
+          "SLAM builds a map and tracks pose simultaneously; daily operation is mostly localization: matching the live LiDAR scan against a stored map.",
+          "Localization is lost when the world stops matching the map — a moved reflector, stacked pallets, or a featureless corridor. That is AMR-07's scripted fault.",
+          "Object detection evolved from fixed-class CNN detectors (R-CNN, YOLO era) to open-vocabulary vision-language models that find objects described in text, as of 2026.",
+          "robot_telemetry stores perception outputs: pos = localization estimate, speed = fused odometry, battery/motor_temp = proprioception. Telemetry is belief, not ground truth."
+        ],
+        "quiz": [
+          {
+            "q": "Why does an IMU alone make a poor position sensor?",
+            "options": [
+              "It only works outdoors",
+              "Its measurements must be integrated, so small errors accumulate and the estimate drifts within seconds",
+              "It is too expensive to run continuously",
+              "It measures temperature, not motion"
+            ],
+            "answer_idx": 1,
+            "explain": "An IMU measures acceleration and rotation rate; getting position requires integrating twice, so tiny noise compounds fast. That is why IMU data is fused with absolute references like LiDAR scan matching."
+          },
+          {
+            "q": "AMR-07 reports 'Localization lost: LiDAR scan does not match map'. Which real-world event most plausibly causes this class of failure?",
+            "options": [
+              "The robot's battery dropped below 20%",
+              "Someone moved a reflector or stacked pallets, so the environment no longer matches the stored map",
+              "The Wi-Fi network changed its password",
+              "The robot exceeded its speed limit"
+            ],
+            "answer_idx": 1,
+            "explain": "Localization works by matching the live scan against the stored map. Change the environment — move a reflector, fill a mapped-empty aisle — and the match fails; the robot's pose belief collapses and it stops for safety."
+          },
+          {
+            "q": "What can an open-vocabulary VLM detector do that a classic fixed-class CNN detector cannot?",
+            "options": [
+              "Run faster on any hardware",
+              "Detect objects described in natural language at runtime without retraining",
+              "Work without any camera",
+              "Guarantee zero false positives"
+            ],
+            "answer_idx": 1,
+            "explain": "Fixed-class detectors only see classes present at training time. VLM-based detectors align vision with text, so a new object can be found from a written description — at the cost of more compute, which is why both coexist as of 2026."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Read a robot's beliefs straight from the telemetry history.</p><ul><li>With the loopback platform running, open the console and select AMR-07.</li><li>Watch its <code>pos</code>, <code>speed</code>, and <code>motor_temp</code> update — each field is a perception or proprioception output, sampled into <code>robot_telemetry</code> roughly every 6 seconds of sim time.</li><li>Let the sim pass tick 20 so AMR-07's localization fault fires and telemetry for the faulted period is recorded.</li></ul><p>Verification passes once AMR-07 has telemetry history rows in the backend.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "robot_telemetry",
+            "filter": "robot_id=eq.AMR-07&select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Sensors: LiDAR = laser time-of-flight, direct range, point clouds, works in dark — standard on industrial AMRs. Cameras = cheap, rich (color/text), need light + interpretation; depth cameras add short-range per-pixel distance. IMU = acceleration + rotation rate, fast but drifts (double integration compounds noise in seconds). Wheel encoders = odometry, fails on slip. Sensor fusion: fast-drifting sources (IMU, odometry) corrected by absolute references (LiDAR scan-to-map matching). SLAM = simultaneous localization and mapping — build map + track pose at once; daily ops = localization: match live scan to stored map. Localization loss causes: moved reflector/wall, pallets in mapped-empty aisle, featureless corridor. Sim: AMR-07 scripted fault at tick 20, 12 ticks, message 'Localization lost: LiDAR scan does not match map'; fix is human re-init/re-map. Detection history: ~2014+ CNN detectors (R-CNN, YOLO, SSD) = real-time but fixed class list; as of 2026 open-vocabulary VLM detectors find objects from text descriptions without retraining, cost more compute; fixed-class still dominates onboard loops. robot_telemetry columns: robot_id, ts, battery, speed, motor_temp, status, pos (jsonb x,y) — pos = localization estimate, speed = fused odometry, battery/motor_temp = proprioception; sampled ~1 per robot per 6s sim time, 72h retention. Telemetry = robot's belief, not ground truth."
+      },
+      {
+        "id": "lesson-15-planning-and-control",
+        "title": "Planning and Control",
+        "minutes": 17,
+        "track": "physical-ai-foundations",
+        "body_html": "<h3>Two planners, not one</h3><p>Navigation splits into layers because the problems differ. The <strong>global planner</strong> works on a map and answers <em>which route?</em> — graph search (Dijkstra, A*) over the free space. The <strong>local planner</strong> works on live sensor data and answers <em>what do I do this instant?</em> — steering around the pallet that is not on the map, slowing for a person, replanning when blocked. Global plans are recomputed in seconds; local decisions in tens of milliseconds.</p><h3>Waypoint graphs: what yantrasim actually uses</h3><p>Most industrial sites simplify the global problem further: instead of planning through continuous free space, robots travel a <em>waypoint graph</em> — named nodes joined by allowed edges, like a rail network painted in software. Our simulator is a faithful miniature: map <code>warehouse-L1</code> is an 8x5 grid of waypoints spaced 4 m apart, nodes named <code>n0_0</code> through <code>n4_7</code>, edges connecting 4-neighbours only (no diagonals), chargers at <code>n0_0</code> and <code>n4_7</code>, docks at <code>n0_7</code> and <code>n4_0</code>. Routes come from breadth-first shortest-path search over that graph, and robots cruise the edges at 1.2 m/s. Watch the console map and you can predict a robot's route yourself — that predictability is precisely why industry prefers graphs over free-form navigation.</p><h3>Fleet coordination</h3><p>One robot planning is easy; forty robots sharing aisles is where fleets earn their keep. A traffic layer assigns tasks to robots, reserves graph edges so two robots do not claim the same narrow aisle head-on, breaks deadlocks, and sequences chargers. And because real sites mix robot vendors, coordination needs an interop contract: <strong>VDA 5050</strong>, the open standard from the German automotive industry, defines the MQTT messages between any compliant robot and any master control system — the robot publishes <code>state</code> (position, battery, errors, safety state), the fleet system sends orders and <code>instantActions</code>. YantraFleet consumes VDA 5050 v2.1 state messages and publishes instantActions; the simulator emits the same messages a real AGV would, which is why the platform cannot tell them apart.</p><h3>Control: the innermost loop</h3><p>Below planning sits control: take the planned path and produce wheel torques that actually follow it. Feedback controllers (the classic is PID — proportional, integral, derivative) compare commanded versus measured motion and correct the error hundreds of times per second. Control is boring when done well, which is the point: it must be deterministic and fast, so it runs on dedicated onboard controllers, never in the cloud.</p><h3>Safety is below everything</h3><p>One paragraph you should never forget: industrial mobile robot safety is governed by <strong>ISO 3691-4</strong>, the standard for driverless industrial trucks. It requires safety-rated functions — certified laser-scanner <em>fields</em> that force a slowdown when someone enters the warning zone and a stop in the protective zone, plus emergency stops — implemented in certified hardware that overrides all software above it, including every planner and every AI model. YantraFleet only <em>reports</em> the robot's <code>safetyState</code> (eStop, fieldViolation) from VDA 5050; it is never in the e-stop path, and no fleet software should be. Autonomy decides; safety hardware vetoes.</p>",
+        "key_points": [
+          "Global planning finds routes on a map (graph search); local planning reacts to live sensor data in tens of milliseconds.",
+          "yantrasim uses a real industrial pattern: waypoint graph warehouse-L1, 8x5 nodes, 4 m spacing, 4-neighbour edges, BFS shortest paths, chargers at n0_0/n4_7.",
+          "Fleet coordination reserves edges, breaks deadlocks, and schedules chargers; VDA 5050 is the vendor-neutral MQTT contract (state + instantActions) that makes mixed fleets possible.",
+          "Control is the fast feedback loop (e.g. PID) that turns plans into motor commands, running deterministically onboard.",
+          "ISO 3691-4 safety functions — scanner fields, e-stops — live in certified hardware below all software; YantraFleet only reports safetyState and is never the e-stop path."
+        ],
+        "quiz": [
+          {
+            "q": "A robot swerves around a pallet that was left in an aisle and is not on the map. Which layer made that decision?",
+            "options": [
+              "The global planner",
+              "The local planner, reacting to live sensor data",
+              "The VDA 5050 broker",
+              "The fleet's billing system"
+            ],
+            "answer_idx": 1,
+            "explain": "The global planner only knows the map. Unmapped obstacles are the local planner's job: it reacts to live perception within tens of milliseconds, deviating from or pausing the global route."
+          },
+          {
+            "q": "In yantrasim's warehouse-L1 graph, why can a robot never move diagonally between waypoints?",
+            "options": [
+              "Diagonal motion drains the battery too fast",
+              "The graph only defines edges between 4-neighbours, and robots travel edges of the graph",
+              "VDA 5050 forbids diagonal movement",
+              "The simulator's physics engine cannot render diagonals"
+            ],
+            "answer_idx": 1,
+            "explain": "In waypoint-graph navigation, legal motion is exactly the edge set. warehouse-L1 connects each node to its 4-neighbours only, so all routes are rectilinear — and therefore predictable, which is why industry likes graphs."
+          },
+          {
+            "q": "Why must the e-stop path never run through fleet software like YantraFleet?",
+            "options": [
+              "Fleet software is too expensive to certify aesthetically",
+              "ISO 3691-4 safety functions must be safety-rated hardware that overrides all software; a network or server failure must not be able to disable stopping",
+              "E-stops are a legacy feature modern robots no longer need",
+              "Because operators would press it too often"
+            ],
+            "answer_idx": 1,
+            "explain": "Safety-rated functions (scanner fields, e-stop) are certified under ISO 3691-4 and implemented below all software so they work even when software, networks, or AI fail. The platform reports safetyState; it does not implement it."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Predict a route, then check yourself against the planner.</p><ul><li>Open the console map and pick a moving robot. Note its current waypoint area and where its task is taking it.</li><li>Predict its route: on a 4-neighbour grid, the shortest path length is the horizontal plus vertical node distance. Sketch one such route.</li><li>Watch it drive. Confirm every move is rectilinear (no diagonals) and the hop count matches your prediction.</li><li>Watch a low-battery robot (below 20%) divert to a corner charger — that is the planner switching goals.</li></ul>",
+          "verify": {
+            "kind": "self_check",
+            "prompt": "How many hops did your predicted route have versus the route the robot drove? Name the two charger nodes in warehouse-L1 and describe what triggered a robot you watched to divert to one."
+          }
+        },
+        "tutor_context": "Global planner: route on the map, graph search (Dijkstra/A*), recomputed in seconds. Local planner: instant decisions from live sensors (unmapped obstacles, people), tens of ms. Waypoint graphs = industrial norm: nodes + allowed edges, predictable. yantrasim map warehouse-L1: 8x5 grid, 4 m spacing (~28x16 m floor), nodes n0_0..n4_7, edges = 4-neighbours only (no diagonals), chargers n0_0 + n4_7, docks n0_7 + n4_0, BFS shortest paths, cruise 1.2 m/s, robots go charge below 20% battery. Fleet coordination: task assignment, edge reservation (head-on conflicts), deadlock breaking, charger scheduling. VDA 5050 = open interop standard (German automotive/VDMA) over MQTT: robot publishes state (position, battery, errors, safetyState), master control sends orders + instantActions. YantraFleet implements VDA 5050 v2.1, state + instantActions topics only (uagv/v2/<manufacturer>/<serial>/state), actions yantra.pause|resume|charge|estop; sim emits identical messages to a real AGV. Control: feedback loops (PID = proportional-integral-derivative) correcting error hundreds of times/s, deterministic, onboard, never cloud. Safety: ISO 3691-4 (driverless industrial trucks) — safety-rated laser scanner fields (warning zone = slow, protective zone = stop) + e-stop in certified hardware overriding ALL software incl. AI. Platform only reports safetyState (eStop, fieldViolation); never wire e-stop through fleet software."
+      },
+      {
+        "id": "lesson-16-robot-learning-and-foundation-models",
+        "title": "Robot Learning and Foundation Models",
+        "minutes": 18,
+        "track": "physical-ai-foundations",
+        "body_html": "<h3>How robots learn skills</h3><p>Classical robotics programs every motion by hand. Learning-based robotics trades programming for data, through three main routes:</p><ul><li><strong>Imitation learning</strong> — a human teleoperates the robot through a task a few hundred times; a neural network learns to map what the robot sees to what the human did. Simple and effective, but the robot inherits both the demonstrator's skill and their blind spots.</li><li><strong>Reinforcement learning (RL)</strong> — the robot practices by trial and error against a reward signal, typically millions of attempts. Almost nobody runs those attempts on hardware; they run in simulation.</li><li><strong>Sim-to-real with domain randomization</strong> — because simulators are imperfect, training randomizes what the simulator gets wrong (friction, lighting, masses, latency). A policy that survives thousands of randomized worlds treats messy reality as just one more variation.</li></ul><h3>VLA models, explained simply</h3><p>The current wave is <strong>vision-language-action (VLA)</strong> models. Take a vision-language model that already understands images and instructions, then train it further on robot demonstration data so its output is not text but <em>actions</em> — streams of joint or gripper commands. Camera frames plus an instruction like <em>fold the towel</em> go in; motor commands come out. Because the backbone saw internet-scale data, one model can generalize across tasks and even across robot bodies — the same bet that made large language models work, applied to motion.</p><h3>The 2026 landscape, verified</h3><ul><li><strong>NVIDIA Isaac GR00T</strong> — announced as the first <em>open</em> humanoid foundation model (GR00T N1, March 2025), with open weights and successive N-series updates since. It anchors NVIDIA's three-computer strategy: train on DGX systems, simulate and generate synthetic data in Omniverse/Isaac Sim, deploy on Jetson Thor onboard computers.</li><li><strong>Physical Intelligence</strong> — its &#960;0 VLA was open-sourced in early 2025 in the Apache-licensed <code>openpi</code> repository; &#960;0.5 followed, demonstrating open-world generalization such as tidying homes the robot had never seen.</li><li><strong>Google DeepMind Gemini Robotics</strong> — Gemini-based VLA models (first shown March 2025); the 1.5 generation, as of late 2025, splits an embodied-reasoning planner (ER, available through the Gemini API) from the action model, enabling multi-step 'agentic' tasks.</li><li><strong>Tesla</strong> — trains Optimus with the end-to-end neural approach from its driving stack: cameras in, actions out, leaning on its vehicle data engine and large training clusters rather than open models.</li></ul><h3>What foundation models still cannot do</h3><p>As of 2026, honest practitioners agree on the gaps. <strong>Reliability:</strong> demo success rates of 70–90% are common in papers; industry needs several nines before removing humans. <strong>Long horizon:</strong> multi-hour jobs still need scripted task logic or a human supervisor stitching skills together. <strong>Safety certification:</strong> there is no accepted path to certify a learned policy under standards like ISO 3691-4 — which is why learned policies ride on top of certified safety hardware, and why the sense-plan-act structure from earlier lessons has not disappeared. Foundation models are becoming the planner and the perception; the safety floor and the human oversight remain engineered exactly as before.</p>",
+        "key_points": [
+          "Imitation learning copies human teleoperation demos; RL learns by trial and error against a reward — mostly in simulation.",
+          "Domain randomization deliberately varies what the simulator gets wrong so a policy treats reality as one more variation — the standard sim-to-real bridge.",
+          "VLA models fine-tune vision-language backbones on robot data: camera frames + a text instruction in, motor actions out.",
+          "As of 2026: NVIDIA GR00T (open weights, train/simulate/deploy three-computer strategy), Physical Intelligence pi0/pi0.5 (Apache-licensed openpi), Google Gemini Robotics 1.5 (agentic ER + action split), Tesla (closed end-to-end).",
+          "Open gaps: reliability (70-90% demo success is not several nines), long-horizon autonomy, and no certification path for learned policies — so certified safety hardware and human oversight remain."
+        ],
+        "quiz": [
+          {
+            "q": "What does a VLA (vision-language-action) model output?",
+            "options": [
+              "A text description of the scene",
+              "Robot actions — joint and gripper commands — conditioned on camera input and a language instruction",
+              "A new training dataset",
+              "A 3D map of the building"
+            ],
+            "answer_idx": 1,
+            "explain": "A VLA reuses a vision-language backbone but is trained on robot demonstrations so its output head produces actions. Images plus an instruction go in; motor commands come out."
+          },
+          {
+            "q": "Why is domain randomization used when training robot policies in simulation?",
+            "options": [
+              "To make training videos more entertaining",
+              "Because randomizing physics and appearance in sim makes the real world look like just another variation, bridging the sim-to-real gap",
+              "To reduce the electricity cost of GPUs",
+              "Because simulators cannot render fixed scenes"
+            ],
+            "answer_idx": 1,
+            "explain": "No simulator matches reality exactly. By training across thousands of randomized frictions, lightings, and masses, the policy learns robustness — reality then falls inside the distribution it has already seen."
+          },
+          {
+            "q": "Which statement about 2026 robot foundation models is accurate?",
+            "options": [
+              "They are certified safe under ISO 3691-4, replacing hardware safety",
+              "They reliably run multi-hour tasks with no human oversight",
+              "Several are open (NVIDIA GR00T weights, Physical Intelligence's Apache-licensed openpi), yet none has a safety certification path, so certified hardware and oversight remain",
+              "Only closed-source models exist"
+            ],
+            "answer_idx": 2,
+            "explain": "Openness is real — GR00T N1 was released as an open humanoid foundation model and pi0/pi0.5 ship under Apache in openpi — but learned policies cannot yet be certified, so they run above safety-rated hardware with humans in oversight."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Test the difference between grounded AI and a general model — on this platform's own copilot.</p><ul><li>Open the tutor panel in this Academy (or the Sarathi copilot in the console).</li><li>Ask a grounded question: <em>which robot has a localization fault?</em> Note that the answer cites live platform data.</li><li>Then consider what it would take for an AI to not just <em>answer</em> but <em>act</em> — issue the pause itself. List which safeguards from this platform (command gate, approval, audit) would have to stand between a model's decision and the motor.</li></ul>",
+          "verify": {
+            "kind": "self_check",
+            "prompt": "In your own words: what goes in and what comes out of a VLA model, and name two reasons (from reliability, long-horizon, certification) why a 2026 VLA still is not allowed to command robots on a production floor without oversight."
+          }
+        },
+        "tutor_context": "Learning routes: imitation learning = human teleop demos (hundreds), network maps observations->human actions, inherits demonstrator blind spots. RL = trial-and-error vs reward, millions of attempts, done in simulation. Sim-to-real: domain randomization = randomize friction/lighting/mass/latency in sim so reality is one more variation. VLA = vision-language-action: VLM backbone fine-tuned on robot demos; input camera frames + text instruction, output motor/gripper actions; generalizes across tasks and bodies. 2026 landscape (verified): NVIDIA Isaac GR00T — GR00T N1 (March 2025) first open humanoid foundation model, open weights, N-series updates since; three-computer strategy: DGX to train, Omniverse/Isaac Sim to simulate + synthetic data, Jetson Thor onboard to deploy. Physical Intelligence: pi0 open-sourced early 2025, Apache license, repo 'openpi'; pi0.5 adds open-world generalization (cleans unseen homes). Google DeepMind Gemini Robotics (March 2025); Gemini Robotics 1.5 (late 2025) splits embodied-reasoning ER model (Gemini API) from action model, agentic multi-step tasks. Tesla Optimus: end-to-end neural, cameras->actions, closed, leverages driving data engine. Gaps as of 2026: reliability (70-90% demo success vs several nines needed), long-horizon tasks need scripted logic/human stitching, no certification path for learned policies under ISO 3691-4 — so learned policies sit above certified safety hardware + human oversight."
+      },
+      {
+        "id": "lesson-17-simulation-where-robots-are-born",
+        "title": "Simulation: Where Robots Are Born",
+        "minutes": 16,
+        "track": "physical-ai-foundations",
+        "body_html": "<h3>Why sim-first is the industry default</h3><p>Nobody debugs a planner by driving a 600 kg robot into a rack. Simulation-first development won for three hard reasons:</p><ul><li><strong>Cost</strong> — a crashed simulated robot costs a restart; a crashed real one costs hardware, downtime, and sometimes a customer.</li><li><strong>Safety</strong> — dangerous edge cases (person steps out, brake failure, sensor blackout) can be rehearsed thousands of times without risking anyone.</li><li><strong>Scale and repeatability</strong> — simulators run faster than real time and in parallel: thousands of robot-years of practice per day on a GPU cluster, and any bug can be replayed with the exact same inputs — something the physical world never grants you.</li></ul><h3>The tools and their roles</h3><p>Three names cover most of the field. <strong>Gazebo</strong> is the long-standing open-source workhorse of the ROS ecosystem — good physics, modest visuals, the default for research and AMR development. <strong>NVIDIA Isaac Sim</strong>, built on Omniverse, adds photorealistic rendering and GPU-parallel physics; its job in the pipeline is mass-producing <em>synthetic data</em> (labeled camera images, LiDAR scans with perfect ground truth) and, with Isaac Lab, running large-scale reinforcement learning. <strong>MuJoCo</strong>, open-sourced by DeepMind, is the precision instrument for contact-rich physics — manipulation and locomotion research lean on it. Teams routinely use more than one: train perception on Isaac synthetic data, tune locomotion in MuJoCo, integration-test in Gazebo.</p><h3>Synthetic data and the reality gap</h3><p>Simulators give something reality cannot: perfect labels for free. Every rendered frame comes with exact object poses, depth, and segmentation — no human annotators. But everything a simulator generates carries the <em>reality gap</em>: rendered light is too clean, friction models are approximations, sensor noise is stylized. The previous lesson's answer — domain randomization — exists precisely because the gap cannot be closed, only blurred. The honest workflow is: develop in sim, validate on hardware, and treat every sim-passed milestone as provisional until the floor confirms it.</p><h3>Our loopback demo is this methodology in miniature</h3><p>When you run <code>python -m yantraops up --loopback</code>, you are doing exactly what the industry does, scaled down. The deterministic simulator stands in for real robots: 10 AMRs on the <code>warehouse-L1</code> waypoint graph emit the <em>same VDA 5050 messages a real AGV would</em>, so the detector, console, and copilot cannot tell the difference — which means everything you build and test against the sim transfers to hardware unchanged. The scripted fault is the repeatability principle applied: AMR-07 loses localization at sim tick 20, every run, for 12 ticks. A flaky, once-a-week real-world failure becomes a test case you can replay on demand — the entire reason regression testing of autonomy is done in simulation. When a checkride asks you to handle AMR-07's fault, you are being trained the same way the robots are: in sim, on a scenario chosen because it is safe, cheap, and perfectly repeatable.</p>",
+        "key_points": [
+          "Sim-first wins on cost (crashes are free), safety (rehearse dangerous cases), and scale (parallel, faster-than-real-time, perfectly replayable).",
+          "Gazebo = open-source ROS workhorse; Isaac Sim = photorealistic GPU sim for synthetic data and large-scale RL (Isaac Lab); MuJoCo = precise contact physics for manipulation/locomotion.",
+          "Synthetic data gives perfect labels for free, but everything from sim carries the reality gap — domain randomization blurs it, hardware validation closes the loop.",
+          "The loopback demo is the same methodology in miniature: a deterministic sim emitting real VDA 5050 messages, so software tested against it transfers to real robots unchanged.",
+          "Scripted determinism (AMR-07 faults at tick 20, every run) turns a flaky real-world failure into a replayable test case — the core value of sim for autonomy testing."
+        ],
+        "quiz": [
+          {
+            "q": "Why is a scripted, deterministic fault (AMR-07 at tick 20) more valuable for testing than a random one?",
+            "options": [
+              "Random faults are impossible to simulate",
+              "Determinism makes the failure replayable on demand, so fixes and training scenarios can be verified against the exact same conditions",
+              "Scripted faults use less CPU",
+              "Regulators require faults at tick 20"
+            ],
+            "answer_idx": 1,
+            "explain": "Repeatability is simulation's superpower. A once-a-week flaky failure becomes a regression test you can run every commit — and a training scenario every learner sees identically."
+          },
+          {
+            "q": "What is the main pipeline role of a photorealistic simulator like Isaac Sim?",
+            "options": [
+              "Replacing the robot's onboard computer at runtime",
+              "Generating labeled synthetic data (images, LiDAR with ground truth) and running large-scale RL",
+              "Hosting the fleet's production database",
+              "Rendering marketing videos only"
+            ],
+            "answer_idx": 1,
+            "explain": "Photorealism plus GPU-parallel physics makes Isaac Sim a data factory and RL gym: every rendered frame carries perfect labels, and thousands of environments train policies in parallel."
+          },
+          {
+            "q": "Why can YantraFleet's software not tell the loopback simulator from real robots?",
+            "options": [
+              "The simulator hacks the database directly",
+              "The simulator emits the same VDA 5050 state messages a real AGV would, so the whole stack sees an identical interface",
+              "Real robots are disabled while the sim runs",
+              "It can always tell; the console shows a big SIM banner on every robot"
+            ],
+            "answer_idx": 1,
+            "explain": "The sim speaks the same contract (VDA 5050 state/instantActions) as hardware. Interface-identical simulation is what makes sim-tested software transfer to the real floor unchanged — the industry's core methodology."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Prove determinism to yourself — run the experiment twice.</p><ul><li>Start the loopback platform and note when AMR-07 raises its localization fault (sim tick 20) and when it recovers (12 ticks later).</li><li>Stop the platform completely and start it again from scratch.</li><li>Watch AMR-07 a second time: same fault, same tick, same message. You have just replayed an autonomy failure — the thing the physical world never lets you do.</li></ul>",
+          "verify": {
+            "kind": "self_check",
+            "prompt": "Did AMR-07 fault at the same sim tick in both runs? Explain in one sentence why this repeatability makes simulation the industry's primary tool for testing autonomy, and name one thing the sim still cannot prove (reality gap)."
+          }
+        },
+        "tutor_context": "Why sim-first: cost (sim crash = restart; real crash = hardware + downtime), safety (rehearse dangerous edge cases: person steps out, sensor blackout), scale + repeatability (faster than real time, thousands of parallel envs = robot-years/day on GPU clusters, exact replay of any bug). Tools: Gazebo = open-source ROS-ecosystem workhorse, research + AMR default. NVIDIA Isaac Sim (Omniverse) = photorealistic, GPU-parallel physics; role = synthetic data factory (frames with perfect pose/depth/segmentation labels, LiDAR ground truth) + Isaac Lab for large-scale RL. MuJoCo (open-sourced by DeepMind) = precise contact physics, manipulation/locomotion research. Teams combine all three. Reality gap: sim light too clean, friction approximate, noise stylized — cannot be closed, only blurred via domain randomization; validate on hardware. Loopback demo = same methodology in miniature: python -m yantraops up --loopback runs deterministic sim, 10 AMRs, 3 vendors, warehouse-L1 8x5 waypoint graph; sim emits the SAME VDA 5050 state/instantActions messages as a real AGV so detector, console, copilot cannot tell sim from hardware — sim-tested software transfers unchanged. Scripted determinism: AMR-07 loses localization at sim tick 20, lasts 12 ticks, every run — flaky real failure becomes replayable regression test + repeatable training scenario for checkrides."
+      },
+      {
+        "id": "lesson-18-industry-landscape-2026",
+        "title": "The Industry Landscape 2026",
+        "minutes": 17,
+        "track": "physical-ai-foundations",
+        "body_html": "<h3>Reading the map, not the hype</h3><p>The Physical AI industry of 2026 sorts into four layers, and knowing which layer a company occupies tells you more than any demo video.</p><h3>The picks-and-shovels layer: NVIDIA</h3><p>NVIDIA sells to everyone and competes with almost no one: GPUs for training, Isaac Sim for simulation and synthetic data, the open GR00T foundation models, and Jetson Thor computers for onboard inference — the three-computer strategy (train, simulate, deploy) as a product line. Its stated ambition, repeated at CES 2026, is to be the platform layer of generalist robotics the way Android became the platform of phones. Whether any single robot maker wins, the arms dealer profits.</p><h3>The humanoid OEMs</h3><p>One verified anchor fact each, as of 2026:</p><ul><li><strong>Figure</strong> — its Helix VLA drives the robot from cameras and language using a two-system design (a slow reasoning model steering a fast ~200 Hz motor policy); the Figure 03 hardware generation, unveiled in late 2025, was designed around Helix and high-volume manufacturing.</li><li><strong>Tesla</strong> — applies its end-to-end, camera-first driving approach to Optimus, betting on its data engine and factory scale; timelines have slipped repeatedly, and Optimus remains pre-mass-production as of 2026.</li><li><strong>Agility Robotics</strong> — Digit was the first humanoid formally deployed under robots-as-a-service at a customer site: GXO Logistics' operations, moving totes — narrow work, real invoices.</li><li><strong>Unitree</strong> — the cost disruptor: its G1 humanoid launched at roughly $16,000, an order of magnitude below Western prototypes, flooding research labs with affordable platforms.</li></ul><h3>The pragmatists already at scale</h3><p>While humanoids pilot, wheeled robots work. <strong>Amazon</strong> deployed its one millionth warehouse robot in mid-2025 and introduced <strong>DeepFleet</strong>, a foundation model for coordinating robot traffic that it credits with cutting fleet travel time by about 10%. Note what that is: not a humanoid, not a gripper — a <em>fleet coordination</em> model. The biggest robot operator on Earth decided the frontier worth an AI foundation model was traffic optimization across its fleet.</p><h3>The software and operations layer</h3><p>Every deployed robot needs what no OEM fully provides for mixed fleets: interoperability (VDA 5050), monitoring, alarm management, human approval workflows, telemetry history, and integration with warehouse systems. That is the layer where YantraFleet-class platforms sit. The economics favor it: robots earn nothing sitting still, so once fleets are deployed the recurring money follows utilization, uptime, and operations — software revenue that scales with every robot from every vendor on the floor. Amazon building DeepFleet is the same thesis proven at maximum scale.</p><h3>India's position</h3><p>India is a fast riser rather than an incumbent: the IFR's World Robotics 2025 report ranks it sixth in the world for annual industrial robot installations — up from seventh — on record installation growth driven by automotive and general manufacturing. A large installed base plus scarce robotics operations talent is exactly the gap fleet-operations platforms and trained operators fill.</p>",
+        "key_points": [
+          "Four layers: platform (NVIDIA), humanoid OEMs (Figure, Tesla, Agility, Unitree), deployed pragmatists (Amazon-scale AMR fleets), and the software/ops layer where fleet platforms sit.",
+          "NVIDIA's three-computer strategy (train on DGX, simulate in Omniverse/Isaac, deploy on Jetson Thor) aims to be the Android of robotics — it profits whichever OEM wins.",
+          "Verified 2026 anchors: Figure's Helix two-system VLA; Agility's Digit earning RaaS revenue at GXO; Unitree's ~$16k G1; Tesla Optimus end-to-end but pre-mass-production.",
+          "Amazon passed 1,000,000 deployed robots (2025) and built DeepFleet, a fleet-coordination foundation model credited with ~10% travel-time reduction — the ops layer is where its AI investment went.",
+          "India ranks 6th in annual industrial robot installations (IFR World Robotics 2025), rising fast on automotive-led growth — installed base is outpacing operations talent."
+        ],
+        "quiz": [
+          {
+            "q": "What is Amazon's DeepFleet a foundation model for?",
+            "options": [
+              "Humanoid manipulation",
+              "Coordinating warehouse robot traffic to cut fleet travel time (about 10%)",
+              "Generating product images",
+              "Autonomous highway trucking"
+            ],
+            "answer_idx": 1,
+            "explain": "DeepFleet, announced alongside Amazon's one-millionth deployed robot in 2025, optimizes how its robot fleet moves — evidence that at real scale, fleet coordination and operations are where AI pays off."
+          },
+          {
+            "q": "Why does NVIDIA's position get called 'picks and shovels'?",
+            "options": [
+              "It manufactures mining robots",
+              "It sells the training GPUs, simulator, open models, and onboard computers to every robot maker, profiting regardless of which OEM wins",
+              "It only sells hand tools",
+              "It owns all the humanoid patents"
+            ],
+            "answer_idx": 1,
+            "explain": "Like tool-sellers in a gold rush, NVIDIA supplies the whole industry — DGX to train, Isaac Sim to simulate, GR00T models, Jetson Thor to deploy — so it captures value from every competitor simultaneously."
+          },
+          {
+            "q": "Which is the accurate India fact as of the IFR World Robotics 2025 report?",
+            "options": [
+              "India leads the world in robot installations",
+              "India ranks sixth globally in annual industrial robot installations, up from seventh",
+              "India has banned industrial robots",
+              "India installs fewer robots each year"
+            ],
+            "answer_idx": 1,
+            "explain": "The IFR's 2025 report places India sixth worldwide for annual installations (previously seventh), on record growth led by automotive — a rising market where robot deployment is outpacing operations expertise."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Place this very platform on the industry map.</p><ul><li>With the loopback demo running, count the distinct <em>vendors</em> in your robots list (the sim runs three: nexomotion, agilus, boturo).</li><li>Note what the console gives you that no single robot vendor's own app could: one map, one alarm stream, one command gate across all three vendors — that is the interop/ops layer in action.</li><li>Write one sentence on why a site running robots from three vendors cannot operate from three separate vendor dashboards.</li></ul>",
+          "verify": {
+            "kind": "self_check",
+            "prompt": "How many vendors are in your simulated fleet, and which industry layer (platform / OEM / pragmatist ops / software-ops) does YantraFleet occupy? Why does recurring money in robotics follow deployments rather than demos?"
+          }
+        },
+        "tutor_context": "Four layers of the 2026 industry. 1) Platform/picks-and-shovels: NVIDIA — DGX training GPUs, Omniverse/Isaac Sim simulation + synthetic data, open GR00T models, Jetson Thor onboard; three-computer strategy = train/simulate/deploy; CES 2026 ambition: be the Android of generalist robotics; profits whichever OEM wins. 2) Humanoid OEMs (one anchor each, as of 2026): Figure — Helix VLA, two-system design (slow reasoning model + fast ~200 Hz motor policy), Figure 03 hardware (late 2025) built for Helix + volume manufacturing. Tesla — Optimus, end-to-end camera-first like FSD, factory-scale ambition, timelines slipped, pre-mass-production. Agility Robotics — Digit, first humanoid formally deployed under robots-as-a-service at GXO Logistics, moving totes. Unitree — G1 humanoid ~$16,000, cost disruptor, ubiquitous in research labs. 3) Deployed pragmatists: Amazon — 1,000,000th warehouse robot deployed mid-2025 + DeepFleet foundation model for fleet traffic coordination, ~10% travel-time reduction; at max scale the AI investment went to fleet ops, not grippers. 4) Software/ops layer (YantraFleet's layer): interop (VDA 5050), monitoring, alarms, approval gates, telemetry across mixed fleets; money follows deployments because robots earn only when utilized; sim fleet has 3 vendors (nexomotion, agilus, boturo) under one console. India: 6th in annual industrial robot installations, up from 7th (IFR World Robotics 2025), automotive-led record growth; ops talent gap = opportunity."
+      },
+      {
+        "id": "lesson-19-safety-standards-and-humans",
+        "title": "Safety, Standards, and Humans",
+        "minutes": 18,
+        "track": "physical-ai-foundations",
+        "body_html": "<h3>Human oversight is an architecture, not a promise</h3><p>Every robotics company says humans stay in control. The ones that mean it can show you the mechanism. On this platform the mechanism is the command gate: a robot action (pause, resume, charge, e-stop request) is created as a <code>pending</code> row in the <code>commands</code> table, naming who requested it; a human approves or rejects it; only approved commands are published to the robot, and the who/when trail is kept forever. This is precisely the shape the <strong>EU AI Act's Article 14</strong> asks for — human oversight designed into the system, with the ability to intervene or interrupt — rather than a policy document stapled on afterward. The checkable property: <em>there is no code path from an AI suggestion to a robot actuator that does not pass through a human decision</em>.</p><h3>Alarm discipline: the ISA-18.2 idea</h3><p>Humans can only oversee what they can attend to. Process industries learned this through disasters and wrote it down as <strong>ISA-18.2</strong>, the alarm-management standard: every alarm must require an operator response, and the alarm <em>rate</em> must stay within what a human can actually handle — the commonly used target being on the order of one or two alarms per operator per ten minutes. This console enforces a derived budget of <strong>at most 12 alarms per hour</strong>, tracks the live rate on the header chip, and colors it red when over budget. An over-budget alarm system is not extra-safe; it is training its operators to ignore alarms — the failure mode behind many industrial accidents.</p><h3>Certification versus monitoring</h3><p>Two different tools keep robots safe, and they are not interchangeable. <strong>Certification</strong> proves a component correct <em>before</em> deployment: ISO 3691-4 safety functions — protective scanner fields, e-stops — are engineered simply enough to be exhaustively verified, then locked in certified hardware. <strong>Monitoring</strong> watches behavior <em>after</em> deployment: telemetry, alarms, incident review — because the interesting failures (a moved reflector, a novel obstacle, a bad model output) cannot be enumerated in advance. Learned policies cannot yet be certified, so the industry's working architecture as of 2026 is: certified hardware floor, monitored software above it, humans above that.</p><h3>In the loop, on the loop</h3><p><strong>Human-in-the-loop</strong> means a person approves each consequential action before it happens — our command gate. <strong>Human-on-the-loop</strong> means the system acts autonomously while a person supervises with the power to intervene — how deployed AMR fleets, robotaxi operations with remote-assistance centers, and warehouse automation actually run. Full autonomy — no human anywhere — is, as of 2026, marketing more than practice: even the most advanced operators staff supervision and remote-intervention desks. The honest end-state the industry is converging on is graduated autonomy: routine actions on the loop, consequential and unusual actions in the loop, safety-critical stopping below the loop in certified hardware. That layered picture — hardware floor, monitored autonomy, alarm-budgeted humans, audited approvals — is what this entire course has been teaching you to operate.</p>",
+        "key_points": [
+          "Human oversight must be architectural: on this platform no path leads from AI suggestion to actuator except through a pending → human-approved command row — the EU AI Act Article 14 pattern.",
+          "ISA-18.2 alarm discipline: every alarm needs a response and the rate must stay humanly manageable — this console budgets ≤ 12 alarms/hour and colors the chip when over.",
+          "Alarm floods do not add safety; they train operators to ignore alarms — a root cause in many industrial accidents.",
+          "Certification proves simple components correct before deployment (ISO 3691-4 fields, e-stops); monitoring catches unenumerable failures after; learned policies are monitorable but not yet certifiable.",
+          "Deployed reality as of 2026 is human-ON-the-loop supervision with in-the-loop approval for consequential actions — not full autonomy."
+        ],
+        "quiz": [
+          {
+            "q": "What makes this platform's human oversight 'architectural' rather than a policy promise?",
+            "options": [
+              "A signed PDF stating humans are in control",
+              "Commands are structurally pending rows that only execute after a named human approves them, with a permanent audit trail",
+              "The robots are painted a calming color",
+              "Operators must pass a yearly quiz"
+            ],
+            "answer_idx": 1,
+            "explain": "Oversight is enforced by the data model and code path: pending → approved/rejected → executed, with requester and decider recorded. No approval, no actuation — which is the design-level oversight EU AI Act Article 14 describes."
+          },
+          {
+            "q": "Why does ISA-18.2 treat a high alarm rate as a safety problem rather than a sign of vigilance?",
+            "options": [
+              "Alarms consume too much network bandwidth",
+              "Beyond what an operator can handle (this console budgets ≤ 12/hr), alarms get ignored — normalizing missed genuine emergencies",
+              "Loud alarms damage hearing",
+              "It only matters for chemical plants"
+            ],
+            "answer_idx": 1,
+            "explain": "Alarm floods desensitize. If dozens of alarms per hour demand response, operators triage by ignoring, and the one alarm that mattered drowns. Rate budgeting keeps every alarm meaningful."
+          },
+          {
+            "q": "Which describes 'human-on-the-loop' operation?",
+            "options": [
+              "A human approves every single robot motion in advance",
+              "The system acts autonomously while a human supervises and can intervene — the deployed reality of AMR fleets and robotaxi remote-assist as of 2026",
+              "Humans are removed entirely from operations",
+              "The human physically rides on the robot"
+            ],
+            "answer_idx": 1,
+            "explain": "On-the-loop = autonomous execution under human supervision with intervention power. In-the-loop = pre-approval of each action. Deployed 2026 systems blend both, with certified hardware below and full autonomy still aspirational."
+          }
+        ],
+        "practical": {
+          "instructions_html": "<p>Operate the oversight architecture yourself — end to end.</p><ul><li>In the console, request a <strong>pause</strong> for any robot. Find the resulting <code>pending</code> row in the commands panel — note it has <em>not</em> executed.</li><li>Approve the command (in the loopback demo you wear both hats: requester and approver).</li><li>Watch the robot pause and the command move to <code>executed</code> — then check the audit fields: who requested, who decided, and when.</li></ul><p>Verification passes once a pause command has been approved (or executed) through the gate.</p>",
+          "verify": {
+            "kind": "backend_check",
+            "table": "commands",
+            "filter": "cmd=eq.pause&status=in.(approved,executed)&select=id&limit=1",
+            "expect": "rows>0"
+          }
+        },
+        "tutor_context": "Human oversight as architecture: command gate — robot action requested as 'pending' row in commands table (requested_by recorded) -> human approves/rejects -> only approved commands published to robot (VDA instantAction) -> executed/failed closure; full audit retained. No code path from AI suggestion to actuator without a human decision = EU AI Act Article 14 (human oversight by design, ability to intervene/interrupt) alignment. Command types: pause, resume, charge, estop. ISA-18.2 alarm management: every alarm needs an operator response; rate must be humanly manageable (~1-2 per operator per 10 min); this console's derived budget <= 12 alarms/hour, live rate on header chip, red when over. Alarm floods train operators to ignore alarms — accident root cause; over-budget is less safe, not more. Certification vs monitoring: certification = prove correct BEFORE deploy — ISO 3691-4 safety functions (protective scanner fields, e-stop) simple enough to verify exhaustively, locked in certified hardware. Monitoring = watch AFTER deploy (telemetry, alarms, incident review) for unenumerable failures. Learned policies: monitorable, NOT yet certifiable — so 2026 architecture = certified hardware floor, monitored software, humans on top. Human-in-the-loop = approve each consequential action (our gate). Human-on-the-loop = autonomous execution under supervision with intervention power = deployed reality (AMR fleets, robotaxi remote-assist desks). Full autonomy = aspirational as of 2026."
       }
     ],
     "checkride": {

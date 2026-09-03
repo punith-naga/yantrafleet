@@ -1,4 +1,4 @@
-# YantraFleet — Test Report (v0.11.0)
+# YantraFleet — Test Report (v0.12.0)
 
 | Suite | Tests |
 |---|---|
@@ -8,11 +8,11 @@
 | detector | 60 |
 | notifier | 64 |
 | copilot | 65 |
-| ops | 65 (incl. 17 audit-security) |
+| ops | 68 |
 | e2e | 35 (incl. 17 RBAC enforcement) |
-| academy | 26 (browser; incl. accounts + WebLLM-fake tiers) |
-| console | 41 (browser; incl. 8 login/RBAC) |
-| **Total** | **498** — 0 failed |
+| academy | 30 (browser) |
+| console | 47 (browser; incl. login/signup/RBAC) |
+| **Total** | **511** — 0 failed |
 
 Also green: check_console.mjs · check_academy.mjs · deploy/aws/validate.sh.
 0007_rbac.sql additionally executed against real Postgres 16 (Supabase-

@@ -26,9 +26,12 @@ a checkride) — everything except backend-verified practicals works offline.
 | `?token=`| bearer token for the sarathi tutor tier (`localhost:8001`)      |
 | `?auth=` | auth base URL (`{auth}/auth/v1/token`); defaults to `?supa=`'s URL — tests point it at a stub |
 
-The **Open console** header button links to `../console/index.html` and
-carries `supa`/`key`/`site`/`token` through, so both apps talk to the same
-backend.
+The **⬡ Open console** header button links back to the console and carries
+`supa`/`key`/`site`/`token` through, so both apps talk to the same backend.
+The href is computed from `location`: served under the production docroot
+(yantraops static server / nginx template — console at `/index.html`,
+academy at `/academy/index.html`) it is `../index.html`; opened from a
+`file://` repo checkout it is the sibling `../console/index.html`.
 
 ## Content pack schema (v1)
 
@@ -140,8 +143,9 @@ raw progress object) plus **Reset**.
 
 ## Accounts (`window.YFAuth`) — optional; guest mode is the default
 
-The header's **Sign in** button opens a modal (email/password, or **Continue
-as guest**). Sign-in is a Supabase password grant —
+The header's **Sign in** button opens a modal with **Sign in | Create
+account** tabs (or **Continue as guest**). Sign-in is a Supabase password
+grant —
 `POST {AUTH_URL}/auth/v1/token?grant_type=password` with the anon key as
 `apikey` — and the session `{jwt, refresh, email, role}` is stored under the
 localStorage key **`yf_auth_v1`**, *shared with the console*, so one login
@@ -150,6 +154,17 @@ serves both apps on the same origin. `role` comes from the JWT claims
 On any 401 the access token is refreshed **once**
 (`grant_type=refresh_token`) and the request retried; a failed refresh signs
 out back to guest mode.
+
+**Create account** (email + password + confirm) POSTs
+`{AUTH_URL}/auth/v1/signup` — the same contract as the console — and handles
+both real Supabase outcomes: a **session** in the response (email
+confirmation disabled) signs in immediately; a **user without a session**
+(confirmation on — the Supabase default) shows *“Account created — check
+your email to confirm, then sign in. (Project owners: disable Confirm email
+in Supabase → Authentication → Sign In / Up for instant signup.)”* Server
+errors (weak password, *User already registered*) surface verbatim; on the
+loopback demo backend (no `/auth/v1`) both tabs explain guest/demo mode
+instead of dumping a raw error.
 
 **Guest mode is exactly the pre-accounts behaviour** — progress in
 localStorage only, all requests on the anon key, nothing degraded.
@@ -276,7 +291,11 @@ in-process fake PostgREST from `e2e/fakerest.py` (fixture code copied into
 embedded-pack fallback, external pack loading, lesson nav + quiz feedback,
 practical Verify pass/fail against the seeded backend, progress persistence
 and export, checkride → certificate → badge happy path, canned tutor answers
-and grading, the param-preserving console link, and the backend status chip.
+and grading, the param-preserving console link (`../index.html?…` when
+served), the round-trip from a stand-in production docroot (console at `/`,
+`academy/` subdir): clicking **⬡ Open console** lands on `/index.html` with
+`supa/key/site/token` intact and the console boots LIVE — and the backend
+status chip.
 
 `academy/tests/test_accounts.py` covers the accounts layer, hermetically:
 guest mode unchanged (local progress, zero RPC traffic), sign-in via a tiny
@@ -287,7 +306,11 @@ shared `yf_auth_v1` session, `save_progress` pushes on login and debounced
 on change (asserted against the fake's progress store), checkride pass
 recording via `issue_certificate` (row + code asserted), duplicate-code 409
 regeneration, and RBAC-mode practical verifies passing with the JWT but
-failing as guest.
+failing as guest. The stub also implements `POST /auth/v1/signup` (both
+GoTrue outcomes switchable via `signup_mode`), covering: instant-session
+signup signs in with email + role in the header; confirmation-required
+signup shows the “check your email” message with no session and a follow-up
+sign-in works; and a duplicate email surfaces *User already registered*.
 
 `academy/tests/test_webllm.py` covers the on-device tier without any
 network: an `add_init_script` stubs WebGPU + storage quota and installs a

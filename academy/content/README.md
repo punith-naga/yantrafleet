@@ -6,7 +6,12 @@ lessons (reading + quiz + hands-on practical), and one checkride (a scored,
 scenario-based certification).
 
 - `pack-physical-ai.json` — the flagship **Physical AI Operations** pack
-  (Operator / Fleet Admin / Integrator tracks, 12 lessons, one checkride).
+  (Operator / Fleet Admin / Integrator / Physical AI Foundations tracks,
+  19 lessons, one checkride). The Foundations track (lessons 13–19) is
+  role-agnostic theory — how Physical AI actually works: the sense→plan→act
+  loop, sensing/SLAM, planning/control, robot learning and VLA foundation
+  models, simulation methodology, the 2026 industry landscape, and
+  safety/standards — grounded in the same platform facts as the rest.
 - `validate.py` — stdlib-only schema validator. Run it before committing any
   pack change.
 

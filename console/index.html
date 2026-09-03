@@ -28,10 +28,22 @@
      - SUPA_URL / SUPA_KEY constants near the bottom of the script.
      - If unreachable, the console runs its local simulation.
 
-  3. Sign-in (Supabase Auth — optional, RBAC backends per 0007_rbac.sql)
+  3. Sign-in / Create account (Supabase Auth — optional, RBAC per 0007_rbac.sql)
      - The header "Sign in" button (or an automatic prompt after the first
        401 from the data backend) opens an email/password modal that POSTs
        {SUPA_URL}/auth/v1/token?grant_type=password (apikey = anon key).
+     - The modal's "Create account" tab POSTs {SUPA_URL}/auth/v1/signup and
+       handles the three real Supabase outcomes: session returned → signed in
+       immediately; user without a session → "check your email" (confirmation
+       is ON by default); error → the server's message (weak password, already
+       registered, signups disabled). When SUPA_URL has no /auth/v1 at all
+       (the loopback demo backend), both tabs explain demo mode instead of
+       surfacing a raw error. New accounts may need a user_roles row before
+       data shows — see docs/SECURITY.md.
+     - The header "🎓 Academy" link opens the training app, carrying the
+       ?supa/key/site/token params along. Served, the docroot puts academy/
+       next to this file (relative academy/index.html); from a file:// repo
+       checkout the sibling ../academy/index.html is used instead.
      - After sign-in every PostgREST request carries
        Authorization: Bearer <access_token> (apikey stays the anon key);
        on a 401 one refresh (grant_type=refresh_token) is attempted, then
@@ -84,6 +96,7 @@ header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 16px;b
 .kbd{background:var(--surface3);border:1px solid var(--border2);border-radius:4px;padding:0 5px;font-size:10.5px;color:var(--muted);font-family:inherit}
 .copilot-btn{display:flex;align-items:center;gap:8px;background:#12253f;border:1px solid #2a4a75;color:#9ec5f4;border-radius:var(--r-sm);padding:6px 13px;font-size:12.5px;font-weight:600}
 .copilot-btn:hover{background:#173050}
+a.copilot-btn{text-decoration:none}
 .avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#d95926,#c98500);display:grid;place-items:center;font-size:11px;font-weight:700}
 
 /* ============ Sidebar ============ */
@@ -247,6 +260,11 @@ svg text{font-family:var(--font)}
 .si-box input{width:100%;background:var(--surface3);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:9px 11px;font-size:13px;font-family:inherit;outline:none}
 .si-box input:focus{border-color:#2a4a75}
 #si-err{color:#e66767;font-size:12px;min-height:16px;margin-top:10px}
+#si-msg{color:#7dc98a;font-size:12px;margin-top:2px;line-height:1.5}
+#si-msg:empty{display:none}
+.si-tabs{display:flex;gap:0;margin:12px 0 2px;border:1px solid var(--border2);border-radius:var(--r-sm);overflow:hidden}
+.si-tab{flex:1;background:var(--surface3);border:none;color:var(--muted);padding:7px 0;font-size:12px;font-weight:600}
+.si-tab.on{background:#12253f;color:#9ec5f4}
 #si-submit{width:100%;margin-top:4px;padding:9px}
 .si-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;font-size:11.5px}
 .si-foot a{color:var(--muted);cursor:pointer;text-decoration:underline}
@@ -277,6 +295,7 @@ svg text{font-family:var(--font)}
   <div class="chip" id="h-clock">14:32</div>
   <div class="chip" id="chip-cloud" title="Supabase sync status"><span class="dot" id="cloud-dot" style="background:var(--muted)"></span><span id="cloud-lbl">connecting…</span></div>
   <button class="copilot-btn" id="btn-copilot" onclick="Copilot.toggle()">✦ Copilot <span class="kbd">⌘J</span></button>
+  <a class="copilot-btn" id="btn-academy" href="academy/index.html" target="_blank" rel="noopener" title="YantraFleet Academy — operator training on this backend">🎓 Academy</a>
   <button class="btn ghost sm" id="btn-tour" title="Replay the first-run tour" onclick="Tour.start()">?</button>
   <span id="auth-box" style="display:flex;align-items:center;gap:8px"></span>
   <div class="avatar">PN</div>
@@ -1532,6 +1551,7 @@ const Palette={
      ['maint','Maintenance'],['analytics','Analytics'],['fleet','Fleet & Connectors'],['audit','Audit']]
       .forEach(([v,l])=>it.push({ic:'◫',label:'Go to '+l,hint:'view',run:()=>go(v)}));
     it.push({ic:'⎙',label:'Shift report',hint:'report',run:()=>ShiftReport.open()});
+    it.push({ic:'🎓',label:'Open Academy',hint:'app',run:()=>{const a=$('#btn-academy');window.open(a?a.href:'academy/index.html','_blank','noopener');}});
     it.push({ic:'✓',label:'Ack all info alerts',hint:'action',run:()=>ackAllInfo()});
     it.push({ic:'?',label:'Replay first-run tour',hint:'action',run:()=>Tour.start()});
     robots.forEach(r=>it.push({ic:'⬡',label:r.id+' — '+r.vendor,hint:'robot',run:()=>openRobot(r.id)}));
@@ -1641,6 +1661,22 @@ const SUPA_URL=_cfg.get('supa')||'https://flwyvhsmgrrqpmhcqlzd.supabase.co';
 const SUPA_KEY=_cfg.get('key')||'sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf'; // publishable anon key — safe client-side
 window.SITE=_cfg.get('site')||null;
 
+/* v0.12: '🎓 Academy' header link → the training app, same backend params.
+   Served (nginx template / ops static server) the docroot exposes the console
+   at /index.html and the academy at /academy/index.html, so the RELATIVE
+   'academy/index.html' resolves correctly there. Opened straight from the
+   repo checkout (file://…/console/index.html) the academy lives at the
+   SIBLING ../academy/index.html instead — computed via location so the link
+   degrades gracefully. Serving console/ alone still 404s it — acceptable. */
+function wireAcademyLink(){
+  const a=$('#btn-academy');if(!a)return;
+  const qs=new URLSearchParams();
+  for(const k of ['supa','key','site','token']){const v=_cfg.get(k);if(v)qs.set(k,v);}
+  const base=location.protocol==='file:'?'../academy/index.html':'academy/index.html';
+  a.href=base+(qs.toString()?('?'+qs.toString()):'');
+}
+wireAcademyLink();
+
 /* ================= YFAuth — real sign-in via Supabase Auth (v0.11) =================
    Demo-compatible: with no auth-gated backend nothing changes (anon key,
    legacy command paths). Against an RBAC backend (supabase/0007_rbac.sql):
@@ -1672,19 +1708,50 @@ const YFAuth={
     const b=seg[1].replace(/-/g,'+').replace(/_/g,'/');
     const j=JSON.parse(atob(b+'='.repeat((4-b.length%4)%4)));
     return j&&typeof j==='object'?j:null;}catch(e){return null;}},
-  async login(email,password){
-    const r=await fetch(SUPA_URL+'/auth/v1/token?grant_type=password',{method:'POST',
-      headers:{'apikey':SUPA_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({email,password})});
-    const d=await r.json().catch(()=>null);
-    if(!r.ok||!d||!d.access_token)
-      throw new Error((d&&(d.error_description||d.msg||d.message))||('Sign-in failed (HTTP '+r.status+')'));
+  /** No /auth/v1 behind SUPA_URL (loopback fakerest 404s it, or the fetch
+      itself fails) → a flagged error so the modal can explain demo mode
+      instead of dumping a raw HTTP/network error. */
+  NOAUTH_MSG:'Accounts need a real Supabase backend — you are on the local demo (loopback). Continue in demo mode.',
+  async _authPost(path,body){
+    let r;
+    try{
+      r=await fetch(SUPA_URL+path,{method:'POST',
+        headers:{'apikey':SUPA_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify(body)});
+    }catch(e){const err=new Error(this.NOAUTH_MSG);err.noAuth=true;throw err;}
+    if(r.status===404){const err=new Error(this.NOAUTH_MSG);err.noAuth=true;throw err;}
+    return r;
+  },
+  /** Adopt a GoTrue token response as the live session (login or instant signup). */
+  async _adoptSession(d,email,greeting){
     this.state={jwt:d.access_token,refresh:d.refresh_token||null,
       email:(d.user&&d.user.email)||email,role:null,site:null};
     await this.fetchRole();
     this.save();this.renderHeader();
     if(typeof Sync!=='undefined')Sync.onAuthChange();
-    toast('Signed in as '+this.state.email+' · role: '+(this.state.role||'none'));
+    toast(greeting+this.state.email+' · role: '+(this.state.role||'none'));
+  },
+  async login(email,password){
+    const r=await this._authPost('/auth/v1/token?grant_type=password',{email,password});
+    const d=await r.json().catch(()=>null);
+    if(!r.ok||!d||!d.access_token)
+      throw new Error((d&&(d.error_description||d.msg||d.message))||('Sign-in failed (HTTP '+r.status+')'));
+    await this._adoptSession(d,email,'Signed in as ');
+  },
+  /* v0.12: create account → POST {SUPA_URL}/auth/v1/signup. Three real
+     Supabase outcomes: session returned (email confirmation OFF) → logged in
+     now, resolves 'session'; user but no session (confirmation ON — the
+     Supabase default) → resolves 'confirm'; error (weak password / already
+     registered / signups disabled) → throws with the server's message. */
+  async signup(email,password){
+    const r=await this._authPost('/auth/v1/signup',{email,password});
+    const d=await r.json().catch(()=>null);
+    if(!r.ok)
+      throw new Error((d&&(d.error_description||d.msg||d.message))||('Sign-up failed (HTTP '+r.status+')'));
+    if(d&&d.access_token){await this._adoptSession(d,email,'Account created — signed in as ');return 'session';}
+    const u=(d&&d.user)||d;                     // GoTrue returns the bare user when confirmation is on
+    if(u&&(u.id||u.email||u.confirmation_sent_at))return 'confirm';
+    throw new Error('Unexpected reply from the auth server');
   },
   /** Role/site for the header badge and UI gating (see module comment). */
   async fetchRole(){
@@ -1696,7 +1763,7 @@ const YFAuth={
     const c=this.parseJwt(this.state.jwt);
     if(c&&c.yf_role){this.state.role=c.yf_role;this.state.site=c.site_id||this.state.site;return;}
     this.state.role='operator';
-    toast('⚠ WARN: could not determine your role — assuming operator (the backend still enforces real permissions)');
+    toast('⚠ WARN: no role found for your account — assuming operator in the UI only (the backend still enforces real permissions, so a role-less account effectively views). Ask your admin to assign a role (docs/SECURITY.md)');
   },
   /** grant_type=refresh_token — single-flight so parallel 401s refresh once. */
   refreshToken(){
@@ -1737,42 +1804,77 @@ const YFAuth={
         <button class="btn ghost sm" id="btn-signout" onclick="YFAuth.logout()">Sign out</button>`
       :`<button class="btn sm" id="btn-signin" onclick="YFAuth.show()">Sign in</button>`;
   },
+  mode:'in',                                    // 'in' = sign in · 'up' = create account
   ensure(){
     if($('#signin'))return;
     const d=document.createElement('div');d.id='signin';
     d.innerHTML=`<div class="si-box">
-      <h2>Sign in <button class="btn ghost sm" style="margin-left:auto" onclick="YFAuth.close()">✕</button></h2>
+      <h2>Account <button class="btn ghost sm" style="margin-left:auto" onclick="YFAuth.close()">✕</button></h2>
       <div class="si-sub">FleetMind console · Supabase Auth</div>
+      <div class="si-tabs" role="tablist">
+        <button class="si-tab on" id="si-tab-in" role="tab" onclick="YFAuth.setMode('in')">Sign in</button>
+        <button class="si-tab" id="si-tab-up" role="tab" onclick="YFAuth.setMode('up')">Create account</button>
+      </div>
       <label for="si-email">Email</label><input id="si-email" type="email" autocomplete="username" spellcheck="false">
       <label for="si-pass">Password</label><input id="si-pass" type="password" autocomplete="current-password">
+      <label for="si-pass2" id="si-pass2-lbl" hidden>Confirm password</label>
+      <input id="si-pass2" type="password" autocomplete="new-password" hidden>
       <div id="si-err"></div>
+      <div id="si-msg"></div>
       <button class="btn primary" id="si-submit">Sign in</button>
-      <div class="si-foot"><span style="color:var(--muted)">Roles are enforced server-side (RLS)</span>
+      <div class="si-foot"><span style="color:var(--muted)" id="si-note">Roles are enforced server-side (RLS)</span>
         <a id="si-demo" onclick="YFAuth.close();toast('Continuing in demo mode — anonymous access')">Continue in demo mode</a></div>
     </div>`;
     document.body.appendChild(d);
     d.addEventListener('mousedown',e=>{if(e.target===d)this.close();});
     $('#si-submit').addEventListener('click',()=>this.submit());
-    ['si-email','si-pass'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')this.submit();}));
+    ['si-email','si-pass','si-pass2'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')this.submit();}));
+  },
+  setMode(m){
+    this.mode=m;this.ensure();
+    $('#si-tab-in').classList.toggle('on',m==='in');
+    $('#si-tab-up').classList.toggle('on',m==='up');
+    $('#si-submit').textContent=m==='up'?'Create account':'Sign in';
+    $('#si-pass').setAttribute('autocomplete',m==='up'?'new-password':'current-password');
+    $('#si-pass2-lbl').hidden=$('#si-pass2').hidden=m!=='up';
+    if(m!=='up')$('#si-pass2').value='';
+    $('#si-note').textContent=m==='up'
+      ?'New accounts may need a role assigned before data shows — see docs/SECURITY.md'
+      :'Roles are enforced server-side (RLS)';
+    $('#si-err').textContent='';$('#si-msg').textContent='';
   },
   show(){
     this.ensure();
     // 'continue in demo mode' only while the backend still allows anon —
     // once a 401 marked it auth-required the link would just mislead.
     const demo=$('#si-demo');if(demo)demo.style.display=(typeof Sync!=='undefined'&&Sync.authRequired)?'none':'';
-    $('#si-err').textContent='';
+    this.setMode(this.mode);
     $('#signin').classList.add('open');
     const em=$('#si-email');if(em)em.focus();
   },
   close(){const d=$('#signin');if(d)d.classList.remove('open');},
   async submit(){
     const email=($('#si-email').value||'').trim(),pass=$('#si-pass').value||'';
-    const err=$('#si-err'),btn=$('#si-submit');
+    const err=$('#si-err'),msg=$('#si-msg'),btn=$('#si-submit');
+    const up=this.mode==='up',lbl=up?'Create account':'Sign in';
     if(!email||!pass){err.textContent='Email and password are required';return;}
-    btn.disabled=true;btn.textContent='Signing in…';err.textContent='';
-    try{await this.login(email,pass);this.close();}
-    catch(e){err.textContent=String((e&&e.message)||e);}
-    finally{btn.disabled=false;btn.textContent='Sign in';}
+    if(up&&pass!==($('#si-pass2').value||'')){err.textContent='Passwords do not match';return;}
+    btn.disabled=true;btn.textContent=up?'Creating account…':'Signing in…';
+    err.textContent='';msg.textContent='';
+    try{
+      if(up){
+        const out=await this.signup(email,pass);
+        if(out==='session')this.close();          // (a) session returned → signed in
+        else msg.textContent='Account created — check your email to confirm, then sign in. '
+          +'(Project owners: disable Confirm email in Supabase → Authentication → Sign In / Up '
+          +'for instant signup.)';                 // (b) user, no session
+      }else{await this.login(email,pass);this.close();}
+    }catch(e){
+      if(e&&e.noAuth){msg.textContent=e.message;  // no /auth/v1 → demo-mode note, not an error dump
+        const demo=$('#si-demo');if(demo)demo.style.display='';}
+      else err.textContent=String((e&&e.message)||e);  // (c) friendly server message
+    }
+    finally{btn.disabled=false;btn.textContent=lbl;}
   }
 };
 YFAuth.load();

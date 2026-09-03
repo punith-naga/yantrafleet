@@ -323,15 +323,44 @@ def test_tutor_grades_free_text_practical(page: Page, academy_url: str) -> None:
 
 def test_open_console_link_carries_backend_params(
         page: Page, academy_url: str, fake) -> None:
-    """The header link targets ../console/index.html with supa/key/site."""
+    """Served over http the header link targets ../index.html (the docroot
+    layout: console at /, academy at /academy/) with supa/key/site."""
     base, _ = fake
     open_academy(page, academy_url)
     href = page.locator("#btn-open-console").get_attribute("href")
-    assert href is not None and href.startswith("../console/index.html?"), href
+    assert href is not None and href.startswith("../index.html?"), href
     q = parse_qs(urlsplit(href).query)
     assert q["supa"] == [base]
     assert q["key"] == ["test"]
     assert q["site"] == ["BLR-DC1"]
+
+
+def test_console_link_returns_to_console_from_docroot(
+        page: Page, docroot_server: str, fake) -> None:
+    """From the production docroot layout (/academy/index.html) the '⬡ Open
+    console' link navigates back to the console at /index.html with the
+    supa/key/site/token params intact and the console app boots LIVE."""
+    base, _ = fake
+    page.goto(f"{docroot_server}/academy/index.html"
+              f"?supa={base}&key=test&site=BLR-DC1&token=tok-e2e")
+    expect(page.locator("#lesson-title")).to_be_visible(timeout=15_000)
+    href = page.locator("#btn-open-console").get_attribute("href")
+    assert href is not None and href.startswith("../index.html?"), href
+    # keep the console's first-run tour out of the popup
+    page.context.add_init_script(
+        "try{localStorage.setItem('yf_tour_done','1')}catch(e){}")
+    with page.expect_popup() as pop:
+        page.locator("#btn-open-console").click()
+    console = pop.value
+    expect(console.locator("#cloud-lbl")).to_contain_text("LIVE",
+                                                          timeout=15_000)
+    parts = urlsplit(console.url)
+    assert parts.path == "/index.html", console.url
+    q = parse_qs(parts.query)
+    assert q["supa"] == [base]
+    assert q["key"] == ["test"]
+    assert q["site"] == ["BLR-DC1"]
+    assert q["token"] == ["tok-e2e"]
 
 
 def test_backend_chip_offline_with_dead_backend(

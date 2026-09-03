@@ -18,7 +18,14 @@ Covered flows:
                        decide_command RPC (never the legacy PATCH);
   * expired access token -> one grant_type=refresh_token round-trip, then
                        the original request is retried and succeeds;
-  * session persistence across reload; sign-out back to the anon state.
+  * session persistence across reload; sign-out back to the anon state;
+  * signup (v0.12)  -> 'Create account' tab against /auth/v1/signup: instant
+                       session auto-login, confirmation-required message,
+                       duplicate-user / weak-password errors, client-side
+                       confirm-password check;
+  * discovery link  -> the header Academy link, exercised from a stand-in
+                       for the production docroot (console at /, academy/
+                       subdir), params carried along.
 
 The default (rbac=False) fakerest mode — and every pre-existing test in
 test_console.py — is untouched.
@@ -27,9 +34,10 @@ from __future__ import annotations
 
 import json
 import threading
-from http.server import ThreadingHTTPServer
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlsplit
 
 import pytest
 
@@ -60,6 +68,10 @@ class AuthFake(tc.ConsoleFake):
         self.auth_calls: list[tuple[str, dict]] = []  # (grant_type, body)
         self.refresh_tokens: dict[str, str] = {}      # refresh token -> email
         self._rt_serial = 0
+        #: /auth/v1/signup behaviour — 'session' = email confirmation OFF
+        #: (GoTrue returns tokens, instant login), 'confirm' = confirmation
+        #: ON (the Supabase default: bare user, no session).
+        self.signup_mode = "session"
 
     def issue_tokens(self, email: str) -> dict[str, Any]:
         """A GoTrue-shaped token response for a known user."""
@@ -98,7 +110,45 @@ class _AuthCORSHandler(tc._CORSHandler):
         parts = urlsplit(self.path)
         if parts.path == "/auth/v1/token":
             return self._auth_token(parts.query)
+        if parts.path == "/auth/v1/signup":
+            return self._auth_signup()
         super().do_POST()
+
+    def _read_json_body(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except json.JSONDecodeError:
+            body = {}
+        return body if isinstance(body, dict) else {}
+
+    def _auth_signup(self) -> None:
+        """GoTrue-style POST /auth/v1/signup, outcome per fake.signup_mode."""
+        body = self._read_json_body()
+        email = str(body.get("email") or "")
+        password = str(body.get("password") or "")
+        with self.fake.lock:
+            self.fake.auth_calls.append(("signup", dict(body)))
+            if not email or not password:
+                return self._reply(400, {
+                    "code": 400,
+                    "msg": "Signup requires a valid email and password"})
+            if email in self.fake.users:                # GoTrue's 422 shape
+                return self._reply(422, {
+                    "code": 422, "msg": "User already registered"})
+            if len(password) < 6:
+                return self._reply(422, {
+                    "code": 422,
+                    "msg": "Password should be at least 6 characters"})
+            # new accounts get the operator role at the test site
+            self.fake.users[email] = (
+                password, "operator", fakerest.DEFAULT_SITE_ID)
+            if self.fake.signup_mode == "session":       # confirmation OFF
+                return self._reply(200, self.fake.issue_tokens(email))
+            # confirmation ON (Supabase default): bare user, NO session
+            return self._reply(200, {
+                "id": f"user-{email}", "aud": "authenticated", "email": email,
+                "confirmation_sent_at": tc._now_iso()})
 
     def _auth_token(self, query: str) -> None:
         grant = dict(parse_qsl(query)).get("grant_type")
@@ -353,3 +403,160 @@ def test_sign_out_returns_to_anon_state(
     # a fresh load of the same URL is anonymous again -> auto-prompt
     page.reload()
     expect(page.locator("#signin")).to_be_visible(timeout=15_000)
+
+
+# ================================================== v0.12: signup + discovery
+#
+# The signup tests drive the modal's 'Create account' tab against the
+# /auth/v1/signup stub above (both real GoTrue outcomes switchable via
+# ``fake.signup_mode``); the discovery test serves a stand-in for the
+# production docroot — console files at /, academy/ as a subdir — exactly
+# how the yantraops static server and the nginx template lay it out.
+
+NEW_EMAIL = "newbie@yf.test"
+NEW_PASS = "fleet-pw-9"
+
+
+def open_signup(page: Page, url: str, email: str, password: str,
+                confirm: str | None = None) -> None:
+    """Open the console, switch the auto-prompted modal to 'Create account',
+    fill the three fields and submit (confirm defaults to password)."""
+    page.goto(url)
+    expect(page.locator("#signin")).to_be_visible(timeout=15_000)
+    page.locator("#si-tab-up").click()
+    expect(page.locator("#si-pass2")).to_be_visible()   # confirm field appears
+    page.locator("#si-email").fill(email)
+    page.locator("#si-pass").fill(password)
+    page.locator("#si-pass2").fill(password if confirm is None else confirm)
+    page.locator("#si-submit").click()
+
+
+def test_signup_instant_session_auto_logs_in(
+        page: Page, rbac_url: str, rbac_fake) -> None:
+    """Signup outcome (a): the response carries a session -> stored exactly
+    like a login. Header shows the new email, data goes LIVE, and the
+    session landed in localStorage (yf_auth_v1)."""
+    _, store = rbac_fake
+    store.signup_mode = "session"
+    open_signup(page, rbac_url, NEW_EMAIL, NEW_PASS)
+    expect(page.locator("#signin")).to_be_hidden(timeout=15_000)
+    expect(page.locator("#auth-user")).to_contain_text(NEW_EMAIL)
+    expect(page.locator("#auth-role")).to_have_text("operator")
+    expect(page.locator("#cloud-lbl")).to_contain_text("LIVE", timeout=15_000)
+    sess = page.evaluate("JSON.parse(localStorage.getItem('yf_auth_v1'))")
+    assert sess["email"] == NEW_EMAIL
+    assert sess["jwt"].startswith("yf-test.")
+    with store.lock:
+        grants = [g for g, _ in store.auth_calls]
+    assert "signup" in grants
+
+
+def test_signup_confirmation_required_shows_message_then_signin_works(
+        page: Page, rbac_url: str, rbac_fake) -> None:
+    """Signup outcome (b): user created but NO session (email confirmation
+    ON — the Supabase default). The modal stays open with the clear
+    'check your email' message including the project-owner hint, nothing is
+    stored — and the 'then sign in' path works on the Sign in tab."""
+    _, store = rbac_fake
+    store.signup_mode = "confirm"
+    open_signup(page, rbac_url, NEW_EMAIL, NEW_PASS)
+    msg = page.locator("#si-msg")
+    expect(msg).to_contain_text(
+        "Account created — check your email to confirm, then sign in",
+        timeout=15_000)
+    expect(msg).to_contain_text("disable Confirm email in Supabase")
+    expect(page.locator("#signin")).to_be_visible()      # still on the modal
+    assert page.evaluate("YFAuth.state.jwt") is None     # no session adopted
+    assert page.evaluate("localStorage.getItem('yf_auth_v1')") is None
+    # ... then sign in (account exists server-side after 'confirming')
+    page.locator("#si-tab-in").click()
+    page.locator("#si-submit").click()                   # fields still filled
+    expect(page.locator("#signin")).to_be_hidden(timeout=15_000)
+    expect(page.locator("#auth-user")).to_contain_text(NEW_EMAIL)
+
+
+def test_signup_duplicate_user_error_surfaces(
+        page: Page, rbac_url: str, rbac_fake) -> None:
+    """Signup outcome (c): GoTrue's 422 'User already registered' message is
+    surfaced in the modal; the console stays anonymous."""
+    open_signup(page, rbac_url, "operator@yf.test", NEW_PASS)
+    expect(page.locator("#si-err")).to_contain_text("User already registered",
+                                                    timeout=15_000)
+    expect(page.locator("#signin")).to_be_visible()
+    assert page.evaluate("YFAuth.state.jwt") is None
+
+
+def test_signup_password_mismatch_is_caught_client_side(
+        page: Page, rbac_url: str, rbac_fake) -> None:
+    """Mismatched confirm password never reaches the network."""
+    _, store = rbac_fake
+    open_signup(page, rbac_url, NEW_EMAIL, NEW_PASS, confirm="different-pw")
+    expect(page.locator("#si-err")).to_contain_text("Passwords do not match")
+    with store.lock:
+        grants = [g for g, _ in store.auth_calls]
+    assert "signup" not in grants
+
+
+def test_weak_password_error_surfaces(
+        page: Page, rbac_url: str, rbac_fake) -> None:
+    """GoTrue's weak-password 422 is shown verbatim in the modal."""
+    open_signup(page, rbac_url, NEW_EMAIL, "abc", confirm="abc")
+    expect(page.locator("#si-err")).to_contain_text(
+        "Password should be at least 6 characters", timeout=15_000)
+    expect(page.locator("#signin")).to_be_visible()
+
+
+# ----------------------------------------------------------- discovery links
+
+@pytest.fixture(scope="session")
+def docroot_server(tmp_path_factory):
+    """Serve a stand-in for the PRODUCTION docroot layout (yantraops static
+    server / nginx template): console files at /, the academy at /academy/."""
+    root = tmp_path_factory.mktemp("docroot")
+    (root / "index.html").symlink_to(tc.CONSOLE_DIR / "index.html")
+    (root / "academy").symlink_to(tc.REPO_ROOT / "academy",
+                                  target_is_directory=True)
+
+    class Quiet(SimpleHTTPRequestHandler):
+        def log_message(self, fmt: str, *a: Any) -> None:
+            pass
+
+    httpd = ThreadingHTTPServer(
+        ("127.0.0.1", 0), partial(Quiet, directory=str(root)))
+    t = threading.Thread(target=httpd.serve_forever, name="docroot-http",
+                         daemon=True)
+    t.start()
+    host, port = httpd.server_address[:2]
+    yield f"http://{host}:{port}"
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_academy_link_navigates_with_params_from_docroot(
+        page: Page, docroot_server: str, rbac_fake) -> None:
+    """Under the production layout (console at /index.html) the RELATIVE
+    academy href resolves to /academy/index.html; clicking it opens the
+    academy app with supa/key/site/token intact — and, same origin, the
+    academy picks up the console's yf_auth_v1 session."""
+    base, _ = rbac_fake
+    url = (f"{docroot_server}/index.html"
+           f"?supa={base}&key=test&site=BLR-DC1&token=tok-e2e")
+    sign_in(page, url, "operator@yf.test", "op-pass")
+    link = page.locator("#btn-academy")
+    expect(link).to_be_visible()
+    href = link.get_attribute("href")
+    assert href is not None and href.startswith("academy/index.html?"), href
+    with page.expect_popup() as pop:
+        link.click()
+    academy = pop.value
+    expect(academy.locator("#lesson-title")).to_be_visible(timeout=15_000)
+    parts = urlsplit(academy.url)
+    assert parts.path == "/academy/index.html", academy.url
+    q = parse_qs(parts.query)
+    assert q["supa"] == [base]
+    assert q["key"] == ["test"]
+    assert q["site"] == ["BLR-DC1"]
+    assert q["token"] == ["tok-e2e"]
+    # shared localStorage key => the academy opens already signed in
+    expect(academy.locator("#auth-email")).to_contain_text(
+        "operator@yf.test", timeout=15_000)

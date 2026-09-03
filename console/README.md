@@ -192,7 +192,7 @@ param no Authorization header is sent at all (requests unchanged). The health
 probe only updates the panel subtitle; it never gates `ask()` — the local
 fallback engine still answers on any failure.
 
-## Real sign-in (Supabase Auth, v0.11)
+## Real sign-in (Supabase Auth, v0.11) + signup (v0.12)
 
 The console now carries a real login flow (`YFAuth` module) while staying
 100% demo-compatible — with no auth-gated backend nothing changes.
@@ -205,6 +205,22 @@ The console now carries a real login flow (`YFAuth` module) while staying
   While the backend still allows anonymous access the modal offers a
   *continue in demo mode* link; once a 401 marked the backend auth-required
   the link is hidden.
+- **Create account (v0.12)** — the modal has **Sign in | Create account**
+  tabs. Create account (email + password + confirm) POSTs
+  `{SUPA_URL}/auth/v1/signup` and handles both real Supabase outcomes:
+  - the response contains a **session** (`access_token`) — email
+    confirmation is disabled — the account is stored and signed in
+    immediately, exactly like a login;
+  - the response contains a **user but no session** — email confirmation is
+    enabled (the Supabase default) — the modal shows: *“Account created —
+    check your email to confirm, then sign in. (Project owners: disable
+    Confirm email in Supabase → Authentication → Sign In / Up for instant
+    signup.)”*
+  Server errors (weak password, *User already registered*, signups
+  disabled) surface verbatim; a confirm-password mismatch is caught before
+  any request. Role discovery is unchanged: a brand-new account has no
+  `user_roles` row yet, so it effectively views nothing until an admin
+  assigns a role (`docs/SECURITY.md`) — the WARN toast says so.
 - **Session** — `{jwt, refresh, email, role, site}` persists in
   `localStorage` under `yf_auth_v1` (try/catch-wrapped, private-mode safe),
   so a reload stays signed in. **Sign out** clears state + storage.
@@ -236,6 +252,22 @@ The console now carries a real login flow (`YFAuth` module) while staying
   - on an RBAC backend with nobody signed in, the robot-drawer command
     buttons are replaced by a *Sign in to send commands* prompt and
     `cmdRobot()` refuses with a hint toast.
+
+## 🎓 Academy link (v0.12)
+
+The header **🎓 Academy** button (also in the command palette as *Open
+Academy*) opens the training app carrying the current
+`?supa`/`key`/`site`/`token` params, so it lands on the same backend. The
+href is computed from `location`:
+
+- **served** (the yantraops static server / the nginx template docroot:
+  console at `/index.html`, academy at `/academy/index.html`) — the relative
+  `academy/index.html` resolves correctly;
+- **file://** (opened straight from the repo checkout) — the sibling
+  `../academy/index.html` is used instead.
+
+Serving `console/` alone (e.g. `python3 -m http.server` inside `console/`)
+has no academy next to it, so the link 404s there — known limitation.
 
 ## Configuration
 
@@ -304,6 +336,16 @@ Three pytest suites live in `tests/` (shared browser fixtures in
   triggers exactly one refresh-token round-trip with a successful retry;
   the session persists across reload; sign-out returns to the anon state.
   The default (rbac=False) fake and all pre-existing tests are untouched.
+  v0.12 extends the stub with `POST /auth/v1/signup` (both GoTrue outcomes
+  switchable via `fake.signup_mode`) and adds: instant-session signup
+  auto-logs-in (email in the header, data LIVE); confirmation-required
+  signup shows the “check your email” message with **no** session and a
+  follow-up sign-in works; duplicate-user and weak-password 422s surface
+  in the modal; a confirm-password mismatch never reaches the network; and
+  the 🎓 Academy link is exercised from a stand-in production docroot
+  (console files at `/`, `academy/` subdir — the yantraops/nginx layout):
+  clicking it opens `/academy/index.html` with `supa/key/site/token`
+  intact, and the academy picks up the shared `yf_auth_v1` session.
 
 ```bash
 pip install playwright pytest-playwright   # browser suite deps

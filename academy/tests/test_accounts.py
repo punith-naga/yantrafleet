@@ -115,6 +115,78 @@ def test_signin_shows_email_and_signout_restores_guest(
     assert page.evaluate("localStorage.getItem('yf_auth_v1')") is None
 
 
+# ------------------------------------------------------------------ signup
+
+NEW_EMAIL = "rookie@example.com"
+NEW_PASS = "fleet-pass-9"
+
+
+def open_signup(page: Page, email: str = NEW_EMAIL,
+                password: str = NEW_PASS) -> None:
+    """Open the modal, switch to 'Create account', fill and submit."""
+    page.locator("#btn-signin").click()
+    expect(page.locator("#auth-modal")).to_be_visible()
+    page.locator("#auth-tab-up").click()
+    expect(page.locator("#auth-pw2")).to_be_visible()   # confirm field appears
+    page.locator("#auth-em").fill(email)
+    page.locator("#auth-pw").fill(password)
+    page.locator("#auth-pw2").fill(password)
+    page.locator("#auth-submit").click()
+
+
+def test_signup_instant_session_signs_in(
+        page: Page, academy_url: str, auth_stub_obj, fake) -> None:
+    """Signup outcome (a): the stub returns a session (email confirmation
+    OFF) -> signed in immediately, email + role in the header, session under
+    the shared yf_auth_v1 key."""
+    base, stub = auth_stub_obj
+    stub.signup_mode = "session"
+    open_academy(page, f"{academy_url}&auth={base}")
+    open_signup(page)
+    expect(page.locator("#auth-modal")).to_be_hidden(timeout=10_000)
+    expect(page.locator("#auth-email")).to_have_text(f"{NEW_EMAIL} · operator")
+    sess = page.evaluate("JSON.parse(localStorage.getItem('yf_auth_v1'))")
+    assert sess["email"] == NEW_EMAIL
+    assert sess["jwt"].startswith("yf-test.")
+    assert "signup" in stub.requests
+
+
+def test_signup_confirmation_required_shows_message_then_signin(
+        page: Page, academy_url: str, auth_stub_obj, fake) -> None:
+    """Signup outcome (b): user created but NO session (confirmation ON, the
+    Supabase default) -> the clear 'check your email' message, no session —
+    and signing in afterwards on the other tab works."""
+    base, stub = auth_stub_obj
+    stub.signup_mode = "confirm"
+    open_academy(page, f"{academy_url}&auth={base}")
+    open_signup(page)
+    msg = page.locator("#auth-msg")
+    expect(msg).to_be_visible(timeout=10_000)
+    expect(msg).to_contain_text(
+        "Account created — check your email to confirm, then sign in")
+    expect(msg).to_contain_text("disable Confirm email in Supabase")
+    expect(page.locator("#auth-modal")).to_be_visible()   # still open
+    assert page.evaluate("localStorage.getItem('yf_auth_v1')") is None
+    # ... then sign in (account exists server-side after 'confirming')
+    page.locator("#auth-tab-in").click()
+    page.locator("#auth-submit").click()                  # fields still filled
+    expect(page.locator("#auth-modal")).to_be_hidden(timeout=10_000)
+    expect(page.locator("#auth-email")).to_have_text(f"{NEW_EMAIL} · operator")
+
+
+def test_signup_duplicate_user_error_surfaces(
+        page: Page, academy_url: str, auth_stub: str, fake) -> None:
+    """Signup with an existing email surfaces GoTrue's 422 message and the
+    page stays in guest mode."""
+    open_academy(page, f"{academy_url}&auth={auth_stub}")
+    open_signup(page, email=EMAIL)                        # already registered
+    err = page.locator("#auth-err")
+    expect(err).to_be_visible(timeout=10_000)
+    expect(err).to_contain_text("User already registered")
+    expect(page.locator("#auth-modal")).to_be_visible()
+    assert page.evaluate("localStorage.getItem('yf_auth_v1')") is None
+
+
 # ------------------------------------------------------------- progress sync
 
 def test_progress_pushes_on_login_then_debounced_on_change(
