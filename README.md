@@ -1,6 +1,6 @@
 # YantraFleet
 
-**v0.9.0** · 9 test suites, 400+ offline tests, all green · MIT license
+**v0.12.1** · 10 test suites, 525 tests, all green · MIT license
 
 An end-to-end fleet-operations platform for multi-vendor AMR (autonomous
 mobile robot) fleets — the operations layer for Physical AI. Robots (or the
@@ -22,10 +22,13 @@ That is the FULL platform — simulated fleet, auto-incidents, predictive
 maintenance, notifier, Sarathi copilot — against an embedded in-memory
 backend. No cloud, no keys, no robots.
 
-**Docs:** [docs/index.html](docs/index.html) (overview, architecture, FAQ) ·
+**Docs:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (what we built and how
+— the comprehensive reference) · [docs/index.html](docs/index.html)
+(overview, architecture, FAQ) ·
 [docs/RUNBOOK-WINDOWS.md](docs/RUNBOOK-WINDOWS.md) (PowerShell runbook) ·
 [deploy/aws/](deploy/aws/README.md) (run it on EC2) ·
-[docs/SECURITY.md](docs/SECURITY.md) (security posture & hardening)
+[docs/SECURITY.md](docs/SECURITY.md) (security posture & hardening) ·
+[docs/COMPLIANCE.md](docs/COMPLIANCE.md) (SOC2/ISO/EU AI Act/VDA5050 mapping)
 
 All components share one Supabase (PostgREST) backend and one `robots`
 row shape:
