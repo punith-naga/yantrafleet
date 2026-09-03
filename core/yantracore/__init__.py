@@ -1,6 +1,7 @@
 """yantracore — shared contracts for YantraFleet components."""
 from .site import DEFAULT_SITE_ID, SITE_ID, site_id
 from .status import CANONICAL, LEGACY_MAP, NOT_OPERATING, normalize
+from .version import __version__
 
 __all__ = [
     "CANONICAL",
@@ -8,6 +9,7 @@ __all__ = [
     "LEGACY_MAP",
     "NOT_OPERATING",
     "SITE_ID",
+    "__version__",
     "normalize",
     "site_id",
 ]

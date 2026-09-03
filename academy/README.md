@@ -234,7 +234,11 @@ header chip and on the tutor panel pill (`on-device` / `server` /
 Strictly **opt-in**: the page loads no model code up front. The tutor
 panel shows an *"🧠 Enable on-device tutor"* card when `navigator.gpu`
 (WebGPU) exists; clicking Enable dynamic-imports `@mlc-ai/web-llm` from
-`esm.run` (falling back to the jsDelivr `+esm` mirror), preflights free
+`esm.run` (falling back to the jsDelivr `+esm` mirror) — **pinned to the
+exact published version `0.2.79`** so builds are reproducible: an
+unpinned import would silently pick up whatever the CDN tags `latest`.
+Bump the version in `WebLLM.CDN_URLS` deliberately (both URLs) and
+retest. It then preflights free
 space with `navigator.storage.estimate()`, then `CreateMLCEngine`
 downloads the chosen model **once** — the browser caches the weights, so
 later visits run fully offline and free. Progress streams into the card's

@@ -312,7 +312,7 @@ svg text{font-family:var(--font)}
   <div class="sec">Configure</div>
   <button data-v="fleet"><i class="ic">⬡</i>Fleet &amp; Connectors</button>
   <button data-v="audit"><i class="ic">☰</i>Audit</button>
-  <div class="nav-foot">v0.1 demo · VDA 5050 · 3 vendors<br><span style="color:#0ca30c">●</span> Sim feed connected</div>
+  <div class="nav-foot"><span class="pill" id="yf-version" title="YantraFleet release — matches core/yantracore/version.py"></span><br>VDA 5050 · 3 vendors<br><span style="color:#0ca30c">●</span> Sim feed connected</div>
 </nav>
 <main id="main">
   <div class="view on" id="v-overview"></div>
@@ -335,6 +335,9 @@ svg text{font-family:var(--font)}
    FleetMind demo — all mock. Architecture mirrors the real product:
    Sim (→ later: MQTT/VDA5050 ingest) → Store → Views + Copilot
    ================================================================ */
+/* Release version shown in the sidebar footer chip. Release commits bump
+   this — keep it matching core/yantracore/version.py (the single source). */
+const YF_VERSION='0.12.1';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const fmt=n=>n.toLocaleString('en-IN');
 const pad=n=>String(n).padStart(2,'0');
@@ -586,6 +589,17 @@ function sampleAvail(){
   store.availTot+=robots.length;
 }
 
+/* v0.12: quick-demo seed hint — see Sync.emptyFleet() for the trigger. */
+function emptyFleetCard(){
+  if(typeof Sync==='undefined'||!Sync.emptyFleet())return '';
+  return `<div class="card" id="ov-empty" style="margin-bottom:14px;border-color:#2a4a75;background:#12253f22">
+    <h3>🛰 No fleet data yet</h3>
+    <div style="font-size:12.5px;color:var(--ink2);line-height:1.6">The backend is reachable but the <b>robots</b> table is empty — nothing is publishing telemetry.
+    Start the simulator against this backend:</div>
+    <pre style="background:var(--surface3);border:1px solid var(--border);border-radius:6px;padding:9px 12px;margin-top:8px;font-size:12px;overflow-x:auto">python -m yantrasim --supabase      # or bring up the whole stack: python -m yantraops up</pre>
+    <div style="font-size:10.5px;color:var(--muted);margin-top:8px">This card disappears as soon as robot rows arrive — the console never writes fleet data on its own.</div>
+  </div>`;
+}
 function rOverview(){
   const s=fleetStats(), unack=store.alerts.filter(a=>!a.ack);
   const topIssues=[
@@ -597,6 +611,7 @@ function rOverview(){
   <div class="vhead"><h1>Overview</h1><span class="sub">Shift 2 · 06:00–15:00 · ${clock()}</span>
     <div class="right"><button class="btn sm" id="btn-shift-report" onclick="ShiftReport.open()">⎙ Shift report</button>
       <button class="btn sm ghost" onclick="Copilot.ask('Draft the shift handover report')">✦ Draft shift report</button></div></div>
+  ${emptyFleetCard()}
   <div class="grid g4">
     <div class="card stat"><div class="val" id="ov-health">${s.health}<small>/100</small></div><div class="lbl">Fleet health</div><div class="delta ${s.health>85?'up':'down'}">${s.health>85?'▲ Normal band':'▼ Degraded — 1 fault open'}</div></div>
     <div class="card stat"><div class="val">${s.on}<small>/10 online</small></div><div class="lbl">Robots</div><div class="delta flat">${robots.filter(r=>r.status==='active').length} active · ${robots.filter(r=>r.status==='charging').length} charging · ${s.faults} fault</div></div>
@@ -1884,6 +1899,21 @@ const Sync={
   me:'w-'+Math.random().toString(36).slice(2,10),
   lastPush:0,
   authRequired:false,           // v0.11: set on the first 401 — backend enforces RBAC
+  /* v0.12 empty-fleet detection: backend reachable (follower mode — a live
+     writer holds fleet_meta) but the robots table has stayed empty for a
+     while (fresh real Supabase, no sim/bridge publishing). The Overview
+     shows a friendly "start the simulator" card instead of stale charts.
+     READ-ONLY — the console never auto-writes anything to fix it. */
+  robotsEmptySince:null, EMPTY_AFTER_MS:10000,
+  noteRobots(rows){
+    if(Array.isArray(rows)&&rows.length===0){
+      if(this.robotsEmptySince==null)this.robotsEmptySince=Date.now();
+    }else this.robotsEmptySince=null;
+  },
+  emptyFleet(){
+    return this.mode==='follower'&&this.robotsEmptySince!=null
+      &&Date.now()-this.robotsEmptySince>=this.EMPTY_AFTER_MS;
+  },
   /** apikey is ALWAYS the anon key (PostgREST convention); Authorization
       carries the user JWT once signed in, else the anon key as before. */
   hdr(extra){
@@ -2041,6 +2071,7 @@ const Sync={
       .catch(()=>toast('⚠ Decision failed'));
   },
   async push(){
+    this.robotsEmptySince=null;   // leader mode publishes robots itself
     const rows=robots.map(r=>({id:r.id,vendor:r.vendor,status:r.status,battery:+r.battery.toFixed(1),
       pos:[+r.pos[0].toFixed(1),+r.pos[1].toFixed(1)],speed:+r.speed.toFixed(2),task_kind:r.task?r.task.kind:null,
       health:+r.health.toFixed(1),motor_temp:+r.motorTemp.toFixed(1),tasks_done:r.tasksDone,fault_msg:r.faultMsg||null,
@@ -2053,6 +2084,7 @@ const Sync={
   },
   async pull(){
     const rows=await this.q('robots?select=*');
+    this.noteRobots(rows);
     if(rows&&rows.length){
       rows.forEach(d=>{const r=robots.find(x=>x.id===d.id);if(!r)return;
         r.vendor=d.vendor||r.vendor;r.status=normStatus(d.status);
@@ -2118,6 +2150,7 @@ function render(force){
 }
 VIEWS.overview();rLiveOps();$('#v-liveops').classList.remove('on');$('#v-overview').classList.add('on');
 YFAuth.renderHeader();   // v0.11: Sign in button / signed-in identity chip
+{const vc=$('#yf-version');if(vc)vc.textContent='YantraFleet v'+YF_VERSION;}
 sampleAvail();   // seed one availability sample so the SLA card never starts empty
 setInterval(()=>{ if(Sync.mode!=='follower')step(0.4); sampleAvail(); render(false); },400);
 Sync.init();

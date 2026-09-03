@@ -44,6 +44,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+try:  # single source of the release version: core/yantracore/version.py
+    from yantracore import __version__ as YF_VERSION
+except Exception:  # yantracore not installed — standalone ops checkout
+    YF_VERSION = "dev"
+
 DEFAULT_STATE_FILE = Path(os.environ.get(
     "YANTRAOPS_STATE", "~/.yantraops-state.json")).expanduser()
 
@@ -529,7 +534,7 @@ class FleetStack:
         width = max([len("backend")] + [len(s.name) for s in self.services]) + 2
         lines = [
             "=" * 72,
-            f"YantraFleet up — mode: {i.mode}",
+            f"YantraFleet {YF_VERSION} up — mode: {i.mode}",
             "=" * 72,
             f"  {'backend':<{width}}{i.base_url}  (data API \u2014 not the UI; key: {key_label})",
         ]

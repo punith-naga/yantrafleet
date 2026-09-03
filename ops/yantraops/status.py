@@ -8,6 +8,11 @@ from typing import Any
 
 import httpx
 
+try:  # single source of the release version: core/yantracore/version.py
+    from yantracore import __version__ as YF_VERSION
+except Exception:  # yantracore not installed — standalone ops checkout
+    YF_VERSION = "dev"
+
 
 def _pid_alive(pid: int) -> bool:
     try:
@@ -26,6 +31,7 @@ def _http_ok(client: httpx.Client, url: str) -> tuple[bool, str]:
 
 
 def run_status(state_file: Path) -> int:
+    print(f"YantraFleet {YF_VERSION}")
     if not state_file.is_file():
         print(f"yantraops: no state file at {state_file} — is the stack running?")
         return 1

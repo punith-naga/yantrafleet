@@ -21,11 +21,18 @@ from .orchestrator import (DEFAULT_STATE_FILE, FleetStack,
                            preflight_supabase_schema, resolve_supabase)
 from .status import run_status
 
+try:  # single source of the release version: core/yantracore/version.py
+    from yantracore import __version__ as YF_VERSION
+except Exception:  # yantracore not installed — standalone ops checkout
+    YF_VERSION = "dev"
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="yantraops",
         description="One-command orchestrator for the YantraFleet demo stack")
+    p.add_argument("--version", action="version",
+                   version=f"YantraFleet {YF_VERSION}")
     sub = p.add_subparsers(dest="command", required=True)
 
     up = sub.add_parser("up", help="start the whole stack")

@@ -131,6 +131,11 @@ header{grid-column:1/4;display:flex;align-items:center;gap:12px;padding:0 16px;b
 
 /* ============ Left rail (tracks / lessons) ============ */
 #rail{background:var(--surface);border-right:1px solid var(--border);padding:12px 8px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+#rail-search{padding:2px 4px 6px}
+#rail-search input{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--ink);padding:6px 10px;font-size:12px;font-family:inherit;outline:none}
+#rail-search input:focus{border-color:#2a4a75}
+#rail-search input::placeholder{color:var(--muted)}
+#rail-list{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0}
 #rail .sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:12px 12px 5px;display:flex;gap:8px;align-items:baseline}
 #rail .sec .role{margin-left:auto;text-transform:none;letter-spacing:0}
 #rail button.lsn{display:flex;align-items:center;gap:9px;width:100%;background:none;border:none;color:var(--ink2);padding:8px 12px;border-radius:var(--r-sm);font-size:13px;text-align:left}
@@ -300,7 +305,11 @@ input.name:focus{border-color:#2a4a75}
   <button class="btn ghost sm" id="btn-tutor-toggle" title="Show / hide the tutor panel">✦ Tutor</button>
 </header>
 
-<nav id="rail" aria-label="Tracks and lessons"><!-- rendered by Rail.render() --></nav>
+<nav id="rail" aria-label="Tracks and lessons">
+  <div id="rail-search"><input id="lsn-search" type="search" placeholder="🔍 Search lessons… (Esc clears)"
+    aria-label="Search lessons by title or key points" autocomplete="off" spellcheck="false"></div>
+  <div id="rail-list"><!-- rendered by Rail.render() --></div>
+</nav>
 
 <main id="main">
   <div class="view on" id="v-lesson"></div>
@@ -362,6 +371,9 @@ input.name:focus{border-color:#2a4a75}
    checkride/certificate + pluggable tutor (window.YFTutor).
    Single file, no build step. Content schema: see academy/README.md.
    ================================================================ */
+/* Release version shown in the rail footer chip. Release commits bump
+   this — keep it matching core/yantracore/version.py (the single source). */
+const YF_VERSION='0.12.1';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const pad=n=>String(n).padStart(2,'0');
@@ -887,30 +899,48 @@ function show(view){
 
 /* ---------------- Left rail ---------------- */
 const Rail={
+  /* v0.12 lesson search: live filter over title + key_points text.
+     The input lives OUTSIDE the re-rendered #rail-list so typing focus
+     survives every Rail.render(); Esc clears it. */
+  filter:'',
+  matches(l){
+    const f=this.filter;
+    if(!f)return true;
+    return (String(l.title||'')+' '+(l.key_points||[]).join(' '))
+      .toLowerCase().includes(f);
+  },
+  initSearch(){
+    const inp=$('#lsn-search');if(!inp)return;
+    inp.addEventListener('input',()=>{
+      this.filter=inp.value.trim().toLowerCase();this.render();});
+    inp.addEventListener('keydown',e=>{
+      if(e.key==='Escape'){inp.value='';this.filter='';this.render();}});
+  },
+  _btn(l){
+    const dn=Progress.lessonDone(l);
+    return `<button class="lsn ${state.view==='lesson'&&state.lessonId===l.id?'on':''}" data-lesson="${esc(l.id)}">
+      <i class="tick ${dn?'done':'todo'}">${dn?'✓':'○'}</i>${esc(l.title)}<span class="min">${l.minutes||'–'} min</span></button>`;
+  },
   render(){
     const p=Content.pack;if(!p)return;
     const done=Progress.doneCount(), total=p.lessons.length;
-    let h='';
+    let h='', shown=0;
     for(const t of p.tracks){
+      const ls=(t.lesson_ids||[]).map(id=>Content.lesson(id))
+        .filter(l=>l&&this.matches(l));
+      if(!ls.length)continue;                    // hide empty tracks while filtering
       h+=`<div class="sec">${esc(t.title)}<span class="role pill">${esc(t.role||'')}</span></div>`;
-      for(const id of (t.lesson_ids||[])){
-        const l=Content.lesson(id);if(!l)continue;
-        const dn=Progress.lessonDone(l);
-        h+=`<button class="lsn ${state.view==='lesson'&&state.lessonId===l.id?'on':''}" data-lesson="${esc(l.id)}">
-          <i class="tick ${dn?'done':'todo'}">${dn?'✓':'○'}</i>${esc(l.title)}<span class="min">${l.minutes||'–'} min</span></button>`;
-      }
+      for(const l of ls){h+=this._btn(l);shown++;}
     }
     /* lessons not referenced by any track still get listed */
     const inTracks=new Set(p.tracks.flatMap(t=>t.lesson_ids||[]));
-    const orphans=p.lessons.filter(l=>!inTracks.has(l.id));
+    const orphans=p.lessons.filter(l=>!inTracks.has(l.id)&&this.matches(l));
     if(orphans.length){
       h+=`<div class="sec">More lessons</div>`;
-      for(const l of orphans){
-        const dn=Progress.lessonDone(l);
-        h+=`<button class="lsn ${state.view==='lesson'&&state.lessonId===l.id?'on':''}" data-lesson="${esc(l.id)}">
-          <i class="tick ${dn?'done':'todo'}">${dn?'✓':'○'}</i>${esc(l.title)}<span class="min">${l.minutes||'–'} min</span></button>`;
-      }
+      for(const l of orphans){h+=this._btn(l);shown++;}
     }
+    if(this.filter&&!shown)
+      h+=`<div class="empty" id="rail-nomatch">No lessons match “${esc(this.filter)}” — Esc clears</div>`;
     if(p.checkride){
       h+=`<div class="sec">Certification</div>
       <button class="lsn ${state.view==='checkride'?'on':''}" id="btn-checkride">
@@ -929,8 +959,9 @@ const Rail={
       <div class="note">${Auth.signedIn()
         ?'progress syncs to '+esc(Auth.email())+' (local copy kept)'
         :'progress lives in this browser (localStorage)'}</div>
+      <div class="note"><span class="pill" id="yf-version" title="YantraFleet release — matches core/yantracore/version.py">YantraFleet v${YF_VERSION}</span></div>
     </div>`;
-    $('#rail').innerHTML=h;
+    $('#rail-list').innerHTML=h;
     $$('#rail button.lsn[data-lesson]').forEach(b=>b.addEventListener('click',()=>Lesson.open(b.dataset.lesson)));
     const cr=$('#btn-checkride');if(cr)cr.addEventListener('click',()=>Checkride.open());
     const vc=$('#btn-view-cert');if(vc)vc.addEventListener('click',()=>Cert.render());
@@ -957,7 +988,8 @@ const Lesson={
     const done=Progress.lessonDone(l);
     let h=`<div class="vhead"><h1 id="lesson-title">${esc(l.title)}</h1>
       <span class="sub">${track?esc(track.title)+' · ':''}${l.minutes||'–'} min read</span>
-      <div class="right">${done?'<span class="pill" style="color:#7fd6b3;border-color:#1e4a38">✓ lesson complete</span>':''}</div></div>`;
+      <div class="right">${done?'<span class="pill" style="color:#7fd6b3;border-color:#1e4a38">✓ lesson complete</span>':''}
+        <button class="btn sm" id="btn-print-lesson" title="Open a printable copy of this lesson">⎙ Print lesson</button></div></div>`;
     h+=`<div class="card"><div class="body-html" id="lesson-body">${sanitize(l.body_html)}</div></div>`;
     if(l.key_points&&l.key_points.length){
       h+=`<div class="card"><h3>Key points</h3><div id="key-points">${
@@ -1000,6 +1032,9 @@ const Lesson={
       h+=`</div>`;
     }
     $('#v-lesson').innerHTML=h;
+    // wire print
+    const bp=$('#btn-print-lesson');
+    if(bp)bp.addEventListener('click',()=>LessonPrint.open(l));
     // wire quiz
     $$('#quiz .q-opt:not([disabled])').forEach(b=>b.addEventListener('click',()=>this.answer(l,+b.dataset.q,+b.dataset.i)));
     // wire practical
@@ -1052,6 +1087,53 @@ const Lesson={
     const answered=Object.keys(st.answers).length;
     if(answered<l.quiz.length)return `Progress: ${answered}/${l.quiz.length} answered · <b>${st.score}</b> correct so far.`;
     return `Quiz complete — score <b>${st.score}/${st.total}</b>.`;
+  }
+};
+
+/* ---------------- Print lesson (light, print-first popup) ----------------
+   Mirrors the console's ShiftReport pattern: a new window holding ONLY the
+   lesson body (title, meta, body_html, key points) with a no-print toolbar;
+   the print CSS keeps just the lesson content on paper. */
+const LessonPrint={
+  html(l){
+    const track=Content.pack.tracks.find(t=>(t.lesson_ids||[]).includes(l.id));
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(l.title)} — YantraFleet Academy</title><style>
+      body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#1d1d1b;background:#fff;margin:0;font-size:13.5px;line-height:1.6}
+      .page{max-width:760px;margin:0 auto;padding:34px 42px}
+      h1{font-size:22px;margin:0 0 2px}
+      .meta{color:#666;font-size:12px;margin-bottom:18px}
+      h2{font-size:14px;margin:26px 0 8px;padding-bottom:4px;border-bottom:2px solid #1d1d1b;text-transform:uppercase;letter-spacing:.05em}
+      .body p{margin:0 0 10px}
+      .body ul,.body ol{margin:6px 0 10px 20px}
+      .body code{background:#f2f1ec;border:1px solid #ddd;border-radius:4px;padding:0 4px;font-size:12px}
+      .body pre{background:#f2f1ec;border:1px solid #ddd;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px}
+      .kps li{margin:5px 0}
+      footer{margin-top:34px;padding-top:10px;border-top:1px solid #ccc;color:#888;font-size:11px;display:flex;justify-content:space-between}
+      .toolbar{position:sticky;top:0;background:#f4f4f2;border-bottom:1px solid #ddd;padding:10px 42px;display:flex;gap:10px;align-items:center}
+      .toolbar button{font-family:inherit;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:6px;border:1px solid #2266bb;background:#2266bb;color:#fff;cursor:pointer}
+      .toolbar .hint{color:#888;font-size:11.5px;margin-left:auto}
+      @media print{.toolbar,.no-print{display:none!important}.page{padding:0;max-width:none}body{font-size:12px}h2{break-after:avoid}li{break-inside:avoid}}
+    </style></head><body>
+    <div class="toolbar no-print">
+      <button id="pl-print">⎙ Print / Save as PDF</button>
+      <span class="hint">YantraFleet Academy · lesson handout</span>
+    </div>
+    <div class="page">
+      <h1 id="pl-title">${esc(l.title)}</h1>
+      <div class="meta">${track?esc(track.title)+' · ':''}${l.minutes||'–'} min read · YantraFleet Academy</div>
+      <div class="body" id="pl-body">${sanitize(l.body_html)}</div>
+      ${l.key_points&&l.key_points.length?`<h2>Key points</h2><ul class="kps">${
+        l.key_points.map(k=>`<li>${esc(k)}</li>`).join('')}</ul>`:''}
+      <footer><span>Generated by YantraFleet Academy v${YF_VERSION}</span><span>${esc(new Date().toISOString().slice(0,10))}</span></footer>
+    </div></body></html>`;
+  },
+  open(l){
+    const w=window.open('','_blank');
+    if(!w){toast('⚠ Pop-up blocked — allow pop-ups for this page to print the lesson');return;}
+    w.document.write(this.html(l));
+    w.document.close();
+    const pb=w.document.getElementById('pl-print');
+    if(pb)pb.onclick=()=>w.print();
   }
 };
 
@@ -1454,8 +1536,11 @@ $('#imp-file').addEventListener('change',e=>{
    ================================================================ */
 const WebLLM={
   KEY:'yfa_webllm_v1',                       // localStorage opt-in flag
-  CDN_URLS:['https://esm.run/@mlc-ai/web-llm',
-            'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm'],
+  /* Pinned to an exact published version for reproducible builds — an
+     unpinned import would silently pick up whatever the CDN tags latest.
+     Bump deliberately (and retest) rather than floating. */
+  CDN_URLS:['https://esm.run/@mlc-ai/web-llm@0.2.79',
+            'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/+esm'],
   /* Model ladder by device: floor 1B, default 1.5B, 3B offered on
      beefy machines (navigator.deviceMemory>=16). gb = approx download. */
   MODELS:[
@@ -1650,6 +1735,7 @@ window.YFA={ // small hook surface for tests / integrations
   Tutor.init();
   AuthUI.init();
   authChanged();
+  Rail.initSearch();
   Rail.render();
   const first=Progress.data.lastLesson&&Content.lesson(Progress.data.lastLesson)
     ?Progress.data.lastLesson:Content.pack.lessons[0].id;

@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.12.1 — 2026-09-03
+- **Single-sourced release version**: `core/yantracore/version.py` is now
+  the one place the version lives. `yantraops --version`, the `up` banner
+  header, and `yantraops status` all read it; console and academy each
+  carry a matching hardcoded `YF_VERSION` const (footer chip in both
+  apps), verified by a new cross-check test
+  (`ops/tests/test_version.py`) that fails the build if any of the four
+  ever drift out of lockstep.
+- **WebLLM pinned**: the on-device tutor's CDN import is pinned to
+  `@mlc-ai/web-llm@0.2.79` on both the esm.run and jsDelivr fallback
+  paths (was an unpinned `@latest`-style reference) — reproducible
+  academy installs, no surprise breaking changes from upstream.
+- **Academy**: lesson search/filter in the rail (matches title, track,
+  and body text) and a print-friendly single-lesson view (⎙ Print on
+  each lesson, opens a clean popup formatted for paper/PDF).
+- **Console**: empty-state card for a fresh or not-yet-migrated Supabase
+  project — if no robot rows show up within 10s of connecting, the
+  console explains why (no sim running yet / schema not migrated) instead
+  of sitting on a blank dashboard.
+- 525 tests green across 10 suites (core 8, sim 68, connector 66,
+  detector 60, notifier 64, copilot 65, ops 73, e2e 35, academy 36,
+  console 50) + check_console.mjs / check_academy.mjs / content
+  validator / deploy/aws/validate.sh all clean.
+
 ## v0.12.0 — 2026-09-03
 - **Account signup** in console + academy: Sign in / Create account tabs,
   POST /auth/v1/signup with both Supabase outcomes handled (instant

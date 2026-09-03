@@ -127,7 +127,10 @@ def test_up_duration_subprocess(tmp_path, monkeypatch):
     )
     assert proc.returncode == 0, proc.stderr[-2000:]
     out = proc.stdout
-    assert "YantraFleet up — mode: loopback" in out
+    # v0.12: the banner header carries the release version between the
+    # product name and 'up' — assert version-agnostically here (the exact
+    # version is covered by ops/tests/test_version.py).
+    assert "YantraFleet" in out and "up — mode: loopback" in out
     assert "console" in out and "?supa=" in out and "&key=" in out
     assert "--duration reached" in out
     # ephemeral ports only — the classic fixed demo ports must not appear
