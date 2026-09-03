@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# YantraFleet — EC2 user-data for Ubuntu 24.04 LTS.
+# YantraFleet - EC2 user-data for Ubuntu 24.04 LTS.
 #
 # Paste this whole file into the AWS console:
 #   EC2 -> Launch instance -> Advanced details -> User data
@@ -23,7 +23,7 @@
 REPO_URL="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet.git"
 
 # 2) Your Supabase project (dashboard -> Settings -> API). Use the
-#    *publishable/anon* key here — it is embedded in the console URL and
+#    *publishable/anon* key here - it is embedded in the console URL and
 #    therefore visible to anyone who can open the page.
 SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
 SUPABASE_KEY="YOUR_SUPABASE_PUBLISHABLE_ANON_KEY"
@@ -33,12 +33,12 @@ YANTRA_SITE_ID="BLR-DC1"
 
 # 4) Optional. GEMINI_API_KEY enables the sarathi copilot's LLM tiers
 #    (leave empty for the offline tier). SARATHI_TOKEN, when set, makes
-#    /ask require "Authorization: Bearer <token>" — recommended once the
+#    /ask require "Authorization: Bearer <token>" - recommended once the
 #    box is on the public internet.
 GEMINI_API_KEY=""
 SARATHI_TOKEN=""
 
-# 5) Optional. Notifier fan-out channels (yantranotify) — leave any of
+# 5) Optional. Notifier fan-out channels (yantranotify) - leave any of
 #    these empty to skip that channel; the notifier always still prints
 #    to the console/journal. WEBHOOK_URL: a Slack "Incoming Webhook" or
 #    Discord channel webhook URL. YANTRA_WEBHOOK_SECRET: if set, webhook

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# YantraFleet — Azure cloud-init custom-data for Ubuntu 24.04 LTS.
+# YantraFleet - Azure cloud-init custom-data for Ubuntu 24.04 LTS.
 #
 # Used by ../deploy.sh via `az vm create --custom-data`. Azure's cloud-init
 # runs this once as root on first boot, exactly like AWS EC2 user-data (a
 # script starting with `#!` is the same "x-shellscript" cloud-init part on
 # both clouds), so this file is a straight adaptation of
-# ../aws/user-data.sh — same EDIT ME block, same steps. It deliberately
+# ../aws/user-data.sh - same EDIT ME block, same steps. It deliberately
 # reuses the systemd units and nginx template under ../aws/ rather than
 # duplicating them: those files are cloud-agnostic (plain systemd +
 # nginx), only the VM-provisioning step differs between clouds.
@@ -26,25 +26,25 @@
 #    repo scope "Contents: read-only") and embed it in the URL:
 #      REPO_URL="https://<YOUR_TOKEN>@github.com/<you>/yantrafleet.git"
 #    For a public repo the plain https URL is enough.
-REPO_URL="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet.git"
+REPO_URL="https://github.com/punith-naga/yantrafleet.git"
 
 # 2) Your Supabase project (dashboard -> Settings -> API). Use the
-#    *publishable/anon* key here — it is embedded in the console URL and
+#    *publishable/anon* key here - it is embedded in the console URL and
 #    therefore visible to anyone who can open the page.
-SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
-SUPABASE_KEY="YOUR_SUPABASE_PUBLISHABLE_ANON_KEY"
+SUPABASE_URL="https://mqrffzpaeqtngxcpttyx.supabase.co"
+SUPABASE_KEY="sb_publishable_mOjh5X1pbJUi7d6Iy0LgBA_o8kPDZI8"
 
 # 3) Which site this deployment serves (stamped on rows, filters alerts).
 YANTRA_SITE_ID="BLR-DC1"
 
 # 4) Optional. GEMINI_API_KEY enables the sarathi copilot's LLM tiers
 #    (leave empty for the offline tier). SARATHI_TOKEN, when set, makes
-#    /ask require "Authorization: Bearer <token>" — recommended once the
+#    /ask require "Authorization: Bearer <token>" - recommended once the
 #    box is on the public internet.
 GEMINI_API_KEY=""
 SARATHI_TOKEN=""
 
-# 5) Optional. Notifier fan-out channels (yantranotify) — leave any of
+# 5) Optional. Notifier fan-out channels (yantranotify) - leave any of
 #    these empty to skip that channel; the notifier always still prints
 #    to the console/journal. WEBHOOK_URL: a Slack "Incoming Webhook" or
 #    Discord channel webhook URL. YANTRA_WEBHOOK_SECRET: if set, webhook
@@ -146,7 +146,7 @@ chown root:yantra "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
 # ---------------------------------------------------------------------------
-# 6) systemd services (shared units — same files the AWS kit installs)
+# 6) systemd services (shared units - same files the AWS kit installs)
 # ---------------------------------------------------------------------------
 echo "== installing systemd units"
 install -m 644 "$APP_DIR"/deploy/aws/systemd/*.service /etc/systemd/system/

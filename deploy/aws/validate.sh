@@ -129,6 +129,19 @@ grep -q -- '--host 127.0.0.1 --port 8001' "$HERE/systemd/yantra-sarathi.service"
     || fail "yantra-sarathi does not bind 127.0.0.1:8001"
 
 # ---------------------------------------------------------------------------
+# 5) regression check: user-data.sh must be pure ASCII. Same reasoning as
+#    the azure kit's check — cloud-init/user-data scripts get base64'd
+#    into cloud-provider API request bodies, and some Windows Python HTTP
+#    stacks default to a latin-1 encoding that chokes on a stray em dash.
+#    Pinned so it can't quietly regress here too.
+# ---------------------------------------------------------------------------
+if LC_ALL=C grep -qP '[^\x00-\x7F]' "$HERE/user-data.sh"; then
+    fail "user-data.sh contains non-ASCII byte(s) (risks the same latin-1 crash the azure kit hit)"
+else
+    pass "user-data.sh is pure ASCII"
+fi
+
+# ---------------------------------------------------------------------------
 echo
 if [ "$FAILS" -eq 0 ]; then
     echo "validate.sh: all checks passed"

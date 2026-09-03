@@ -102,18 +102,61 @@ relying on them), and `audit-security` from the box itself. See
 `deploy/aws/README.md`'s "Step 5 — turn on every functionality" — it's
 provider-agnostic, nothing there is AWS-specific.
 
-## New-subscription quota note
+## "SkuNotAvailable" / region capacity, and quota
 
-A brand-new Azure subscription (free trial or fresh pay-as-you-go) can
-start with a **regional vCPU quota of 0** for some VM families, which
-makes `az vm create` fail with a quota error rather than a vague hold —
-Azure is more transparent about this than AWS's opaque "account
-verification" message. If you hit it: Azure Portal → search "Quotas" →
-Compute → find the family (e.g. "Standard BSv2 Family vCPUs" for
-`Standard_B2s`) in your target region → Request increase (a small bump,
-e.g. to 4, is typically auto-approved in minutes, not days). Switching
-`LOCATION` to a different region sometimes has quota available
-immediately with no request needed.
+Two different things can stop `az vm create`, and `deploy.sh` now handles
+the first one for you automatically:
+
+**Regional capacity ("SkuNotAvailable")** and **subscription region
+restrictions ("DisallowedLocation")** — both hit during this kit's own
+live testing. `Standard_B2s` had *"failed for Capacity Restrictions"* in
+`centralindia` at one point (the datacenter was simply out of that size,
+nothing to do with your account or quota), and separately the
+fallback list's `jioindiawest` turned out not to be a region this
+subscription is permitted to deploy to at all (a subscription-type
+restriction — Azure returned the exact list of ~90 permitted regions for
+this account in the error, which is how the default list below was
+corrected). Neither is a mistake on your part. As of this commit,
+`deploy.sh` retries past both automatically — it tries a short list of
+regions in order (`centralindia indiasouthcentral westindia southeastasia
+eastus2 uksouth centralus` by default) and stops at the first one that's
+both permitted and has capacity, so you shouldn't need to do anything —
+it just takes a little longer if the first region or two don't work out.
+Override the list with `LOCATIONS="..."` or pin one region with
+`LOCATION=...` (disables fallback). Note: Azure CLI's own error output
+for either case can crash with a `UnicodeEncodeError` /
+`RuntimeError: content already consumed` traceback instead of showing
+the real message cleanly — that's a [known Azure CLI bug](https://github.com/azure/azure-cli/issues/32417),
+not something wrong on your end; `deploy.sh` greps the raw output for
+`SkuNotAvailable`/`DisallowedLocation` so it isn't fooled by that crash
+either way.
+
+**Subscription quota (0 vCPU for a family)** — different from the above:
+a brand-new subscription can start with a **regional vCPU quota of 0**
+for some VM families, which fails with a quota error rather than
+capacity restriction. If every region in the fallback list fails with a
+*quota* message (not `SkuNotAvailable`) instead: Azure Portal → search
+"Quotas" → Compute → find the family (e.g. "Standard BSv2 Family
+vCPUs") → Request increase (a small bump, e.g. to 4, is typically
+auto-approved in minutes, not days).
+
+## "UnicodeEncodeError: 'latin-1' codec can't encode characters..."
+
+Hit this right after "creating VM ..." on Windows (Git Bash/MINGW64)? It's
+an Azure CLI quirk, not your setup: `az vm create --custom-data
+custom-data.sh` reads that file whole and base64-encodes it into the ARM
+request body, and on some Windows Python installs the HTTP layer defaults
+to a `latin-1` body encoding instead of UTF-8. Any non-ASCII character in
+`custom-data.sh` (an em dash, a curly quote) then crashes the call with
+this exact error, part-way through — after the resource group and VM
+resource are already being created, so it can look scarier than it is.
+Already fixed as of this commit (the file is now plain ASCII, and
+`validate.sh` pins it so it can't quietly regress if it's edited again).
+If you still hit it after pulling latest — e.g. you added your own
+non-ASCII text to the EDIT ME block's comments — run `bash
+deploy/azure/validate.sh` to find the offending line, or just re-run
+`./deploy.sh`; `az vm create` fails loudly without creating a duplicate
+VM, so retrying is safe.
 
 ## What it costs
 
