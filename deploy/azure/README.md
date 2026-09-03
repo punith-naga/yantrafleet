@@ -93,6 +93,117 @@ tail -f /var/log/yantrafleet-install.log      # watch the install
 systemctl status 'yantra-*'                    # confirm services are up
 ```
 
+## Secrets in Key Vault, not in custom_data, by default
+
+Every value in the "EDIT ME" block of `custom-data.sh` used to go
+straight into the VM's `custom_data` property, because `deploy.sh` passed
+the whole file to `az vm create --custom-data` unmodified. `custom_data`
+is not a boot-time-only scratch area -- it's stored on the VM resource
+itself, in Azure's control plane, forever. Anyone with Reader on the VM
+(Portal, `az vm show`, an ARM export, a misconfigured RBAC grant down the
+road) could read `SUPABASE_KEY`, `GEMINI_API_KEY`, `TWILIO_TOKEN`, and the
+rest back out in plaintext at any point after deploy, not just during the
+few seconds cloud-init needs them at first boot. That's a much bigger
+blast radius than "leaked once during provisioning" -- it's "leaked for
+as long as the VM resource exists."
+
+As of this commit, `deploy.sh` fixes that for the credential-shaped
+values by default: `SUPABASE_URL`, `SUPABASE_KEY`, `GEMINI_API_KEY`,
+`SARATHI_TOKEN`, `WEBHOOK_URL`, `YANTRA_WEBHOOK_SECRET`, `TWILIO_SID`,
+`TWILIO_TOKEN`, `TWILIO_FROM`, and `TWILIO_TO` go into an Azure Key Vault
+instead, and the VM fetches them at boot using its own managed identity
+(no credential of any kind embedded anywhere for this). `REPO_URL` and
+`YANTRA_SITE_ID` are unaffected -- `REPO_URL` optionally carries its own
+short-lived PAT, which is a separate concern already covered in Step 2
+above, and `YANTRA_SITE_ID` isn't a secret to begin with.
+
+You still fill in the same "EDIT ME" block the same way in Step 2 --
+nothing changes about how you author `custom-data.sh`. What changed is
+what `deploy.sh` does with those values afterward: it creates (or reuses)
+a Key Vault named after your VM, uploads the 10 credential values there,
+blanks those same 10 lines out of the copy of `custom-data.sh` it actually
+hands to Azure, and leaves cloud-init to pull the real values back from
+the vault during boot instead of finding them sitting in `custom_data`.
+By the time `az vm create` returns, the VM resource's `custom_data`
+never had the credential values in it at all.
+
+This is automatic. You do not need to create a Key Vault, assign a role,
+or do anything differently -- `deploy.sh` handles vault creation, granting
+itself "Key Vault Secrets Officer" so it's allowed to upload secrets into
+an RBAC-mode vault, granting the VM's managed identity "Key Vault Secrets
+User" so it can read them back at boot, and uploading the 10 values, all
+as part of the normal `./deploy.sh` run from Step 3. It costs nothing
+extra to notice -- the script just takes a little longer than before
+(mostly RBAC propagation, which can lag a minute or two even for the
+identity that just created the role assignment) and prints its own
+"== doing thing" progress lines for each stage like the rest of the
+script does.
+
+### Opting out: `USE_KEYVAULT=false`
+
+```bash
+USE_KEYVAULT=false ./deploy.sh
+```
+
+With this set, behavior is exactly what it was before this change:
+`custom-data.sh` is passed to `az vm create --custom-data` unmodified, no
+Key Vault is created, no role assignments happen, and the 10 credential
+values sit in `custom_data` in plaintext same as always. Reach for this
+when:
+
+* your subscription doesn't have permission to create Key Vaults or role
+  assignments (a locked-down corporate or trial subscription, for
+  example) and you'd rather deploy with the old behavior than have
+  `deploy.sh` fail partway through trying to set up RBAC it can't have;
+* you're doing a quick throwaway test deploy and don't want the extra
+  minute or two of Key Vault setup / RBAC propagation time;
+* you're debugging the deploy flow itself and want one fewer moving part.
+
+Everything else about the deploy is identical either way -- same VM, same
+services, same console URL. `USE_KEYVAULT=false` only changes where the
+10 credential values are stored.
+
+### Rotating a secret later
+
+Because the values live in Key Vault, rotating one doesn't mean tearing
+down and recreating the VM. From your own machine (wherever you run
+`az`, logged into the same subscription):
+
+```bash
+az keyvault secret set --vault-name <your-vault-name> \
+  --name <secret-name> --value "<new-value>"
+```
+
+(`<your-vault-name>` is whatever `deploy.sh` printed when it created the
+vault -- derived from `VM_NAME`, e.g. `yantrafleet-kv` for the default
+`VM_NAME`; `<secret-name>`
+is the hyphenated form, e.g. `twilio-token` for `TWILIO_TOKEN` --
+Key Vault doesn't allow underscores in secret names.)
+
+That updates the secret in Key Vault, but **it does not, by itself,
+change anything on the running VM.** cloud-init (and therefore
+`custom-data.sh`'s Key Vault fetch) only runs once, at first boot. A
+plain `sudo reboot` will not re-run it and will not pick up the new
+value -- the service will happily keep using whatever it already loaded
+into `/etc/yantrafleet.env` at first boot. To actually apply a rotated
+secret, SSH into the VM and run the refresh script installed for exactly
+this:
+
+```bash
+ssh yantra@<PUBLIC_IP>
+sudo /opt/yantrafleet/refresh-secrets.sh
+```
+
+That re-fetches all 10 values from Key Vault via the same IMDS + managed
+identity path cloud-init used at first boot, rewrites
+`/etc/yantrafleet.env` (leaving `YANTRA_SITE_ID` untouched -- it isn't
+part of the Key Vault flow), and restarts `yantra-detect`, `yantra-notify`,
+and `yantra-sarathi` so the new values take effect immediately. If you
+deployed with `USE_KEYVAULT=false`, this script has nothing to refresh
+from and will refuse to run with a clear error -- rotate by editing
+`custom-data.sh` and recreating the VM in that case, same as before this
+change existed.
+
 ## Turning on every functionality
 
 Same as the AWS kit's Step 5 — demo simulator (`sudo systemctl enable
