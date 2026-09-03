@@ -68,6 +68,11 @@ Open [`user-data.sh`](user-data.sh) in a text editor and fill in the
 * `YANTRA_SITE_ID` — e.g. `BLR-DC1`.
 * Optionally `GEMINI_API_KEY` (copilot LLM answers) and `SARATHI_TOKEN`
   (bearer auth on `/ask`).
+* Optionally the notifier fan-out block — `WEBHOOK_URL` (Slack/Discord
+  incoming webhook), `YANTRA_WEBHOOK_SECRET` (HMAC-signs those posts),
+  `TWILIO_SID`/`TWILIO_TOKEN`/`TWILIO_FROM`/`TWILIO_TO` (WhatsApp
+  alerts). Leave any of these blank to skip that channel — the notifier
+  always still logs to the journal either way.
 
 Keep the edited file handy — you paste the whole thing in step 2.
 
@@ -139,6 +144,67 @@ curl -s http://127.0.0.1/health
 `systemctl status` should show `yantra-detect`, `yantra-notify` and
 `yantra-sarathi` as `active (running)` (and `yantra-sim` as inactive
 unless you enabled it).
+
+## Step 5 — turn on every functionality
+
+The box is running with the core services (detector, notifier, sarathi)
+live from boot. A few features are opt-in — either because they need
+data flowing (a fleet), or because they need a decision only you can
+make (who's an admin, which channels to notify).
+
+**See something on the map.** Either point `yantrabridge` at your real
+robots' MQTT broker (not covered by this kit — see `connector/README.md`
+for the connector's own deployment), or, for a demo/eval box, turn on the
+bundled simulator:
+
+```bash
+sudo systemctl enable --now yantra-sim
+```
+
+**Confirm the notifier's extra channels are live** (if you filled in
+`WEBHOOK_URL` / `TWILIO_*` in step 1 — they don't need a restart, they
+were already in `/etc/yantrafleet.env` at first boot, but it's worth
+checking):
+
+```bash
+sudo systemctl status yantra-notify
+journalctl -u yantra-notify -n 30 --no-pager
+```
+
+A channel with no credentials set prints its payload to the journal
+instead of sending — that's expected, not a failure.
+
+**Turn on RBAC** (role-based access instead of "anyone with the link can
+approve commands"). This needs migrations `0006_harden.sql` and
+`0007_rbac.sql` applied to your Supabase project (both are OPT-IN —
+`python -m yantraops migrate --db-url "..." --include-opt-in`, or paste
+them into the SQL editor in order, *after* 0001–0005). Then, in the
+Supabase SQL editor, seed your first admin — do this **before** relying
+on 0006/0007, otherwise nobody can grant roles through the API:
+
+```sql
+insert into public.user_roles (user_id, role, site_id)
+select id, 'admin', 'BLR-DC1'      -- match your YANTRA_SITE_ID
+  from auth.users
+ where email = 'you@example.com'   -- an email that has already signed up
+                                    -- via the console's Create Account tab
+on conflict (user_id, site_id) do update set role = excluded.role;
+```
+
+From here you (as admin) can grant `operator`/`engineer`/`manager` roles
+to other accounts the same way; the console's Pending Approvals card
+starts enforcing `decide_command` (manager+) at that point.
+
+**Verify the whole posture from the box itself** (it has real internet
+access, unlike a locked-down laptop network):
+
+```bash
+sudo -u yantra /opt/yantrafleet/.venv/bin/python -m yantraops audit-security \
+  --url "$(grep ^SUPABASE_URL /etc/yantrafleet.env | cut -d= -f2)" \
+  --key "$(grep ^SUPABASE_KEY /etc/yantrafleet.env | cut -d= -f2)"
+```
+
+Expect `mode: demo` before step 5's RBAC migrations, `mode: rbac` after.
 
 ## Updating to a new version
 

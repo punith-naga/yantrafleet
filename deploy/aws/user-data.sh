@@ -37,6 +37,21 @@ YANTRA_SITE_ID="BLR-DC1"
 #    box is on the public internet.
 GEMINI_API_KEY=""
 SARATHI_TOKEN=""
+
+# 5) Optional. Notifier fan-out channels (yantranotify) — leave any of
+#    these empty to skip that channel; the notifier always still prints
+#    to the console/journal. WEBHOOK_URL: a Slack "Incoming Webhook" or
+#    Discord channel webhook URL. YANTRA_WEBHOOK_SECRET: if set, webhook
+#    posts are HMAC-SHA256 signed (X-Yantra-Signature) so the receiver
+#    can verify authenticity. TWILIO_*: WhatsApp alerts via Twilio (SID,
+#    auth token, and the Twilio-provided "from"/your verified "to"
+#    numbers, e.g. "whatsapp:+14155238886").
+WEBHOOK_URL=""
+YANTRA_WEBHOOK_SECRET=""
+TWILIO_SID=""
+TWILIO_TOKEN=""
+TWILIO_FROM=""
+TWILIO_TO=""
 # =========================== === END EDIT ME === ===========================
 
 set -euo pipefail
@@ -113,6 +128,12 @@ SUPABASE_KEY=$SUPABASE_KEY
 YANTRA_SITE_ID=$YANTRA_SITE_ID
 GEMINI_API_KEY=$GEMINI_API_KEY
 SARATHI_TOKEN=$SARATHI_TOKEN
+WEBHOOK_URL=$WEBHOOK_URL
+YANTRA_WEBHOOK_SECRET=$YANTRA_WEBHOOK_SECRET
+TWILIO_SID=$TWILIO_SID
+TWILIO_TOKEN=$TWILIO_TOKEN
+TWILIO_FROM=$TWILIO_FROM
+TWILIO_TO=$TWILIO_TO
 EOF
 umask 022
 chown root:yantra "$ENV_FILE"
