@@ -208,10 +208,10 @@ change existed.
 
 Same as the AWS kit's Step 5 — demo simulator (`sudo systemctl enable
 --now yantra-sim`), confirming notifier channels, RBAC bootstrap (apply
-`0006_harden.sql` + `0007_rbac.sql`, seed the first admin via SQL before
-relying on them), and `audit-security` from the box itself. See
-`deploy/aws/README.md`'s "Step 5 — turn on every functionality" — it's
-provider-agnostic, nothing there is AWS-specific.
+`0006_harden.sql` + `0007_rbac.sql`, seed the first admin with
+`yantraops grant-role` before relying on them), and `audit-security` from
+the box itself. See `deploy/aws/README.md`'s "Step 5 — turn on every
+functionality" — it's provider-agnostic, nothing there is AWS-specific.
 
 ## "SkuNotAvailable" / region capacity, and quota
 

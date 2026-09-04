@@ -80,7 +80,11 @@ python -m yantraops up --loopback
 
 Add `--supabase` (after applying the migrations in `supabase/`) to run
 against your real project; `python -m yantraops status` health-checks a
-running stack.
+running stack. **Deploying for real, not just evaluating?** The baseline
+migrations leave the project demo-open (anyone with the anon key can
+read/write everything) — see `supabase/README.md`'s "Going to
+production" section for the one-command path to RBAC
+(`migrate --include-opt-in` + `grant-role`).
 
 The one-shot installers create a `.venv` in the repo root, install the six
 Python packages editable plus the copilot requirements, and print the exact

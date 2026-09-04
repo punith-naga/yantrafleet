@@ -18,9 +18,12 @@ Modes are applied by running the corresponding migration; each file
 carries a commented **ROLLBACK** block that restores the previous
 posture. 0007 can be applied directly after 0005 (it drops the 0006
 policies itself if they exist). See
-[`supabase/README.md`](../supabase/README.md) for ordering and for a
-`yantraops migrate` caveat: the runner applies **every** `*.sql` file
-it finds, including the opt-in ones.
+[`supabase/README.md`](../supabase/README.md) for ordering — `yantraops
+migrate` applies `0001`-`0005` by default and skips 0006/0007 unless you
+pass `--include-opt-in`, specifically so a plain `migrate` run can never
+lock a demo project down by accident. That same README's "Going to
+production" section has the exact commands (`migrate --include-opt-in`
+then `grant-role`) for moving a real deployment to RBAC.
 
 ## Key classes — know the difference
 
@@ -128,7 +131,24 @@ Both are `SECURITY DEFINER`, `STABLE`, with a pinned empty
 ### Seeding roles
 
 Only admins can write `user_roles` through the API — so the **first**
-admin must be seeded with the service key or the SQL editor (see the
+admin has a chicken-and-egg problem: nobody has an admin role yet to
+grant one. Bootstrap it with the direct Postgres connection (same
+`--db-url` as `migrate`):
+
+```bash
+python -m yantraops grant-role --db-url "<postgres-url>" \
+    --email ops-lead@example.com --role admin
+```
+
+`grant-role` requires an existing `auth.users` row for that email (sign
+up or sign in once first), gives a clear error naming the exact fix if
+0007 hasn't been applied yet or the email hasn't signed up, and is
+idempotent — running it again just updates the role. It works for any
+role, not only admin (`--role operator|engineer|manager|admin`,
+`--site <site_id>`), so it's also a fine way to grant roles from a
+script/CI job rather than the dashboard.
+
+Equivalent by hand, if you'd rather use the SQL editor (see the
 commented helper at the bottom of `0007_rbac.sql`):
 
 ```sql
@@ -138,8 +158,9 @@ select id, 'admin', 'BLR-DC1' from auth.users
 on conflict (user_id, site_id) do update set role = excluded.role;
 ```
 
-After that, admins manage roles from any signed-in client
-(`POST /rest/v1/user_roles`, etc.).
+After the first admin exists, admins manage everyone else's roles from
+any signed-in client (`POST /rest/v1/user_roles`) or by running
+`grant-role` again.
 
 ### JWT flow (how clients sign in)
 

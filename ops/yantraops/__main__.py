@@ -10,6 +10,7 @@
     python -m yantraops doctor                   # environment preflight
     python -m yantraops migrate --db-url URL     # apply supabase/*.sql
     python -m yantraops audit-security           # backend/RLS security audit
+    python -m yantraops grant-role --db-url URL --email you@x.com --role admin
 """
 from __future__ import annotations
 
@@ -99,6 +100,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     from .audit import add_audit_parser
     add_audit_parser(sub)
+
+    from .grant_role import DEFAULT_SITE, ROLES
+    gr = sub.add_parser(
+        "grant-role",
+        help="grant/update a user's RBAC role (0007) — closes the "
+             "first-admin bootstrap gap without hand-edited SQL")
+    gr.add_argument("--db-url", default=None, metavar="URL",
+                    help="Postgres connection string, same one you used for "
+                         "`migrate` (see supabase/README.md)")
+    gr.add_argument("--email", default=None,
+                    help="the auth.users email to grant the role to — they "
+                         "must have already signed up (or signed in once) "
+                         "for a matching auth.users row to exist")
+    gr.add_argument("--role", default="admin", choices=ROLES,
+                    help="role to grant (default: admin — the usual reason "
+                         "to reach for this command is bootstrapping the "
+                         "first admin right after applying 0007_rbac.sql)")
+    gr.add_argument("--site", default=DEFAULT_SITE,
+                    help=f"site_id to grant the role at (default: {DEFAULT_SITE}"
+                         "; an admin role at any site is global — see "
+                         "docs/SECURITY.md)")
     return p
 
 
@@ -184,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "audit-security":
         from .audit import run_audit
         return run_audit(args.url, args.key, json_output=args.json)
+    if args.command == "grant-role":
+        from .grant_role import run_grant_role
+        return run_grant_role(args.db_url, args.email, args.role, args.site)
     return run_status(args.state_file)
 
 

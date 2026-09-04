@@ -3,11 +3,18 @@ on:
   push: { branches: [main] }
   pull_request:
 jobs:
+  # Every Python component with its own tests/ dir and pyproject.toml. Was
+  # [core, sim, connector, copilot] only -- detector/notifier/ops never ran
+  # here, so their 193 tests (60+64+73 in TEST-REPORT.md) were never CI
+  # -enforced despite "525 tests, all green" in the README. e2e and the
+  # browser suites (console/academy) need extra setup beyond this generic
+  # pattern, so they're their own jobs below rather than squeezed into this
+  # matrix's one-size-fits-all install step.
   python:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        component: [core, sim, connector, copilot]
+        component: [core, sim, connector, copilot, detector, notifier, ops]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,12 +27,51 @@ jobs:
           pip install pytest httpx
       - name: Test
         run: cd ${{ matrix.component }} && python -m pytest tests -q
-  console:
+
+  # Offline end-to-end harness (fakerest.py in-process fake PostgREST): needs
+  # core + sim installed editable, copilot's own requirements.txt (sarathi is
+  # imported via sys.path in the test files, not pip-installed, but its
+  # runtime deps -- fastapi/httpx/pydantic/litellm/mcp -- still need to be
+  # importable), and e2e's own requirements.txt on top. Never ran in CI
+  # before this; 35 tests including 17 RBAC-enforcement (test_rbac_e2e.py).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install
+        run: |
+          pip install -e core -e sim
+          pip install -r copilot/requirements.txt
+          pip install -r e2e/requirements.txt
+      - name: Test
+        run: cd e2e && python -m pytest -q
+
+  # console/ and academy/ are single-file, no-build HTML apps tested with
+  # pytest-playwright (Python), not npm/jest -- the old "console" job's
+  # `npm test --if-present` was always a no-op (no package.json anywhere in
+  # this repo) and never actually ran either suite's 86 combined browser
+  # tests. check_console.mjs / check_academy.mjs (a plain Node syntax check
+  # on each HTML file's inline <script> blocks) still need Node; the actual
+  # test suites need a headless Chromium via Playwright.
+  browser:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
-      - run: node scripts/check_console.mjs
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Inline-script syntax checks
+        run: |
+          node scripts/check_console.mjs
+          node academy/tests/check_academy.mjs
+      - name: Install Python + Playwright
+        run: |
+          pip install pytest playwright pytest-playwright
+          python -m playwright install --with-deps chromium
       - name: Console tests
-        run: if [ -d console/tests ]; then cd console && npm test --if-present; fi
+        run: cd console && python -m pytest tests -q
+      - name: Academy tests
+        run: cd academy && python -m pytest tests -q

@@ -178,22 +178,25 @@ instead of sending — that's expected, not a failure.
 approve commands"). This needs migrations `0006_harden.sql` and
 `0007_rbac.sql` applied to your Supabase project (both are OPT-IN —
 `python -m yantraops migrate --db-url "..." --include-opt-in`, or paste
-them into the SQL editor in order, *after* 0001–0005). Then, in the
-Supabase SQL editor, seed your first admin — do this **before** relying
-on 0006/0007, otherwise nobody can grant roles through the API:
+them into the SQL editor in order, *after* 0001–0005). Then seed your
+first admin — do this **before** relying on 0006/0007, otherwise nobody
+can grant roles through the API. Sign up that email via the console's
+Create Account tab first (grant-role needs a matching `auth.users` row),
+then from anywhere with the same `--db-url`:
 
-```sql
-insert into public.user_roles (user_id, role, site_id)
-select id, 'admin', 'BLR-DC1'      -- match your YANTRA_SITE_ID
-  from auth.users
- where email = 'you@example.com'   -- an email that has already signed up
-                                    -- via the console's Create Account tab
-on conflict (user_id, site_id) do update set role = excluded.role;
+```bash
+python -m yantraops grant-role --db-url "..." \
+    --email you@example.com --role admin        # match your YANTRA_SITE_ID
+                                                  # with --site if not BLR-DC1
 ```
 
+(Prefer the SQL editor? The equivalent statement is at the bottom of
+`0007_rbac.sql`, commented out.)
+
 From here you (as admin) can grant `operator`/`engineer`/`manager` roles
-to other accounts the same way; the console's Pending Approvals card
-starts enforcing `decide_command` (manager+) at that point.
+to other accounts the same way (`grant-role --role operator ...`); the
+console's Pending Approvals card starts enforcing `decide_command`
+(manager+) at that point.
 
 **Verify the whole posture from the box itself** (it has real internet
 access, unlike a locked-down laptop network):

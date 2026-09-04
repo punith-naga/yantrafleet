@@ -24,12 +24,14 @@ restores the previous posture.
 
 Two caveats for the opt-in files:
 
-* **`yantraops migrate` applies every `*.sql` file it finds**, 0006/0007
-  included — running it against a project you want to keep demo-open will
-  lock that project down. To stay demo-open, apply `0001`–`0005` by hand in
-  the SQL editor (or point `--dir` at a copy of this directory without the
-  opt-in files). If it happens by accident, run the ROLLBACK block at the
-  bottom of the applied file(s).
+* **`yantraops migrate` applies `0001`-`0005` (baseline) by default and
+  skips 0006/0007** — they're marked OPT-IN (an `OPT-IN` marker in the
+  file header) specifically so a plain `migrate` run can never lock a
+  demo-open project down by accident. Pass `--include-opt-in` to also
+  apply them (see "Going to production" below); `--dry-run` shows exactly
+  what would run either way. (Older versions of this doc said `migrate`
+  applies every file it finds, including opt-in ones — that stopped being
+  true once the OPT-IN gate was added; this is the corrected behavior.)
 * **`0007_rbac.sql` requires a Supabase project** — it references
   `auth.users`, `auth.uid()` and `auth.email()`, so it will not apply to a
   vanilla Postgres database (0001–0006 will).
@@ -79,6 +81,40 @@ characters in the password must be URL-encoded (`@` → `%40`, etc.).
 Note the runtime components use different credentials: `SUPABASE_URL`
 (`https://<project-ref>.supabase.co`) + the **anon key** from Project
 Settings → API. Only `migrate` needs the Postgres URL.
+
+## Going to production: apply 0006/0007 too
+
+Demo-open (`0001`-`0005` only) is the right default for evaluation, but
+it means **anyone with the anon key can read and write every table** —
+fine for a throwaway demo project, not for real fleet data. If this is a
+real deployment, not a demo, go straight to RBAC (0007 supersedes 0006 and
+can be applied directly after 0005):
+
+```bash
+# 1) apply 0001-0007 (baseline + hardened + RBAC)
+python -m yantraops migrate --db-url "<same URL as above>" --include-opt-in
+
+# 2) sign up (or sign in once) as yourself in the console/academy first —
+#    grant-role needs a matching auth.users row to attach the role to
+
+# 3) seed yourself as the first admin (only an admin can grant roles
+#    through the normal API, so this bootstrap step needs the direct DB
+#    connection once)
+python -m yantraops grant-role --db-url "<same URL as above>" \
+    --email you@example.com --role admin
+```
+
+After that: switch every **writer's** `SUPABASE_KEY` (sim, detector,
+connector, ops) to the service_role key, and set `SARATHI_TOKEN` /
+`YANTRA_WEBHOOK_SECRET` — see [`docs/SECURITY.md`](../docs/SECURITY.md)
+for the full checklist and the role capability matrix. A signed-in user
+with no role sees an empty fleet — that's the fail-safe, not a bug; use
+`grant-role` again (now as the admin you just created, or straight from
+the CLI) to bring the rest of your team on.
+
+`yantraops audit-security` tells you which mode a project is actually in
+right now (`demo` / `hardened-read` / `rbac`) by probing it, rather than
+assuming — run it any time to check.
 
 ## Manual fallback: the SQL editor
 

@@ -6,15 +6,29 @@ the CORS-wrapped fake PostgREST).
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
 
 ACADEMY_DIR = Path(__file__).resolve().parent.parent  # academy/
+REPO_ROOT = ACADEMY_DIR.parent
+VERSION_PY = REPO_ROOT / "core" / "yantracore" / "version.py"
 
 #: The full content pack's perception lesson — its key_points mention SLAM.
 SLAM_LESSON_ID = "lesson-14-sensing-and-perception"
+
+# --- import core/yantracore/version.py by path (mirrors console's test_polish
+# fix): this is the single source of truth the #yf-version chip is supposed
+# to match, so read it live instead of a hardcoded literal that silently
+# drifts on the next release bump — exactly what happened here, this test
+# still expected v0.12.0 after the v0.12.1 single-sourcing release.
+_vspec = importlib.util.spec_from_file_location("yf_version_academy_polish", VERSION_PY)
+assert _vspec and _vspec.loader, f"cannot load {VERSION_PY}"
+_version_mod = importlib.util.module_from_spec(_vspec)
+_vspec.loader.exec_module(_version_mod)
+YF_VERSION = _version_mod.__version__
 
 
 # ------------------------------------------------------------ version chip
@@ -24,7 +38,7 @@ def test_version_chip_in_rail_foot(page: Page, academy_url: str) -> None:
     page.goto(academy_url)
     chip = page.locator("#yf-version")
     expect(chip).to_be_visible()
-    expect(chip).to_have_text("YantraFleet v0.12.0")
+    expect(chip).to_have_text(f"YantraFleet v{YF_VERSION}")
 
 
 # ------------------------------------------------------------ lesson search

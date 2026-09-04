@@ -22,6 +22,7 @@ from playwright.sync_api import Page, expect
 CONSOLE_DIR = Path(__file__).resolve().parent.parent  # console/
 REPO_ROOT = CONSOLE_DIR.parent
 FAKEREST_PY = REPO_ROOT / "e2e" / "fakerest.py"
+VERSION_PY = REPO_ROOT / "core" / "yantracore" / "version.py"
 
 pytest.importorskip("playwright.sync_api")
 pytest.importorskip("pytest_playwright")
@@ -31,6 +32,19 @@ _spec = importlib.util.spec_from_file_location("yf_fakerest_polish", FAKEREST_PY
 assert _spec and _spec.loader, f"cannot load {FAKEREST_PY}"
 fakerest = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(fakerest)
+
+# --- import core/yantracore/version.py by path, same reason as above:
+# this is the single source of truth the console's #yf-version chip is
+# supposed to match, so read it live instead of a hardcoded literal that
+# silently drifts on the next release bump (exactly what happened here:
+# this test still expected v0.12.0 after the v0.12.1 single-sourcing
+# release bumped core/yantracore/version.py and console/index.html's own
+# YF_VERSION constant, but not this test).
+_vspec = importlib.util.spec_from_file_location("yf_version_polish", VERSION_PY)
+assert _vspec and _vspec.loader, f"cannot load {VERSION_PY}"
+_version_mod = importlib.util.module_from_spec(_vspec)
+_vspec.loader.exec_module(_version_mod)
+YF_VERSION = _version_mod.__version__
 
 
 def _now_iso(offset_s: float = 0.0) -> str:
@@ -129,7 +143,7 @@ def test_version_footer_chip_renders(page: Page, console_server: str) -> None:
               f"?supa=http://127.0.0.1:{_dead_port()}&key=test")
     chip = page.locator("#yf-version")
     expect(chip).to_be_visible()
-    expect(chip).to_have_text("YantraFleet v0.12.0")
+    expect(chip).to_have_text(f"YantraFleet v{YF_VERSION}")
 
 
 def test_empty_fleet_card_appears_then_clears(
