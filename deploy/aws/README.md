@@ -270,9 +270,32 @@ sudo systemctl restart yantra-detect yantra-notify yantra-sarathi
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-(If `deploy/aws/systemd/*.service` or the nginx template changed in the
-pull, re-run the relevant install steps:
-`sudo install -m 644 /opt/yantrafleet/deploy/aws/systemd/*.service /etc/systemd/system/ && sudo systemctl daemon-reload`.)
+**If the pull changed `deploy/aws/systemd/*.service`**, reinstall the units:
+
+```bash
+sudo install -m 644 /opt/yantrafleet/deploy/aws/systemd/*.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart yantra-detect yantra-notify yantra-sarathi
+```
+
+**If the pull changed `deploy/aws/nginx/yantrafleet.conf.template`** (it
+did in v0.13: the marketing site moved to `/` and the console to
+`/console/`), `git pull` alone does *not* pick that up — the live site
+file at `/etc/nginx/sites-available/yantrafleet` is only rendered from
+the template by the boot script. Re-render it by hand with the same
+values you used at boot (they're in `/etc/yantrafleet.env`):
+
+```bash
+set -a; . /etc/yantrafleet.env; set +a
+export NGINX_SERVER_NAME="${DOMAIN_NAME:-_}"     # or your real domain if you have one
+envsubst '${SUPABASE_URL} ${SUPABASE_KEY} ${YANTRA_SITE_ID} ${NGINX_SERVER_NAME}' \
+    < /opt/yantrafleet/deploy/aws/nginx/yantrafleet.conf.template \
+    | sudo tee /etc/nginx/sites-available/yantrafleet >/dev/null
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+(If certbot already installed a certificate on this box, it edited the
+site file in place — re-run `sudo certbot --nginx -d <domain> --redirect`
+after the step above so its `listen 443` block is added back.)
 
 ## What it costs
 

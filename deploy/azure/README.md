@@ -238,6 +238,43 @@ ssh yantra@<PUBLIC_IP>
 sudo -u yantra git -C /opt/yantrafleet pull "https://<new-token>@github.com/<you>/yantrafleet.git" main
 ```
 
+## Updating an already-running VM to a new version
+
+Same as the AWS kit's "Updating to a new version" (`git pull` →
+`install.sh` → restart services), with one thing that trips people up:
+**`git pull` does not re-render nginx.** The live site file at
+`/etc/nginx/sites-available/yantrafleet` is only produced from
+`deploy/aws/nginx/yantrafleet.conf.template` by `custom-data.sh` at first
+boot. If a pull changes that template (v0.13 did — the marketing site
+moved to `/` and the console to `/console/`), you'll `git pull` and see
+*no change in the browser* until you re-render it:
+
+```bash
+ssh yantra@<PUBLIC_IP>
+sudo -u yantra git -C /opt/yantrafleet pull                # or the one-shot-token form
+sudo -u yantra INSTALL_VENV_DIR=/opt/yantrafleet/.venv bash /opt/yantrafleet/install.sh
+sudo systemctl restart yantra-detect yantra-notify yantra-sarathi
+
+# re-render nginx from the (possibly changed) template with the boot-time values
+set -a; . /etc/yantrafleet.env; set +a
+export NGINX_SERVER_NAME="${DOMAIN_NAME:-_}"     # or your real domain, if you have one
+envsubst '${SUPABASE_URL} ${SUPABASE_KEY} ${YANTRA_SITE_ID} ${NGINX_SERVER_NAME}' \
+    < /opt/yantrafleet/deploy/aws/nginx/yantrafleet.conf.template \
+    | sudo tee /etc/nginx/sites-available/yantrafleet >/dev/null
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Then `http://<PUBLIC_IP>/` is the landing page and
+`http://<PUBLIC_IP>/console/` the console. If certbot had already added a
+443 block to the old site file, re-run
+`sudo certbot --nginx -d <domain> --redirect` once after this so it's
+re-added to the fresh one. (The all-in-one alternative — re-running the
+whole boot script with `sudo bash /var/lib/cloud/instance/user-data.txt`
+— also works: it pulls, reinstalls, rewrites the env file, re-renders
+nginx and re-runs certbot, and with Key Vault on it re-fetches the
+secrets through the VM's managed identity rather than needing them in
+the file. It takes a few minutes longer than the targeted steps above.)
+
 ## Turning on every functionality
 
 Same as the AWS kit's Step 5 — demo simulator (`sudo systemctl enable
