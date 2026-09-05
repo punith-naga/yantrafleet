@@ -14,7 +14,6 @@ Run:  uvicorn sarathi.app:app --port 8001
 from __future__ import annotations
 
 import hmac
-import os
 import time
 
 from fastapi import FastAPI, Request
@@ -25,6 +24,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .config import Settings, load_settings
 from .service import CopilotService
+from .settings_sync import SettingsSync
 from .transport import SupabaseTransport, Transport
 
 
@@ -50,22 +50,33 @@ def create_app(
     transport: Transport | None = None,
     settings: Settings | None = None,
     completion_fn=None,
+    settings_sync: SettingsSync | None = None,
 ) -> FastAPI:
     """App factory. Tests pass a StaticTransport (and optionally a fake
     ``completion_fn`` for the LLM seam); production uses Supabase +
-    litellm."""
+    litellm.
+
+    ``settings_sync`` is constructed but never ``.start()``-ed here — see
+    the module-level entrypoint at the bottom of this file, which is the
+    only place that starts the background poller. Tests that don't pass
+    one get a real-but-never-started ``SettingsSync`` whose overrides stay
+    empty forever, so ``.get(key)`` is exactly ``os.environ.get(key)`` —
+    identical to today's behaviour, no test changes required.
+    """
     settings = settings or load_settings()
     transport = transport or SupabaseTransport(
         settings.supabase_url, settings.supabase_key
     )
-    service = CopilotService(settings, transport, completion_fn=completion_fn)
+    settings_sync = settings_sync or SettingsSync(
+        settings.supabase_url, settings.supabase_key
+    )
+    service = CopilotService(
+        settings, transport, completion_fn=completion_fn, settings_sync=settings_sync
+    )
 
     app = FastAPI(title="sarathi", version=__version__)
     app.state.service = service
-    # Optional bearer auth (see module docstring). Resolved once at app
-    # creation; empty string counts as unset.
-    auth_token = os.environ.get("SARATHI_TOKEN") or None
-    app.state.auth_token = auth_token
+    app.state.settings_sync = settings_sync
 
     # file:// pages send Origin: null — allow_origins=["*"] covers it as long
     # as credentials stay disabled (they do; the anon key is baked in).
@@ -78,8 +89,14 @@ def create_app(
     )
 
     def _authorized(request: Request) -> bool:
-        """True when no token is configured, or the caller presented it."""
-        token = request.app.state.auth_token
+        """True when no token is configured, or the caller presented it.
+
+        Reads the live SARATHI_TOKEN (table override else env var) on
+        every request instead of a snapshot taken at app-creation time, so
+        an admin rotating the token from the console takes effect on the
+        very next request.
+        """
+        token = request.app.state.settings_sync.get("SARATHI_TOKEN") or None
         if token is None:
             return True
         supplied = request.headers.get("authorization") or ""
@@ -115,11 +132,17 @@ def create_app(
     @app.get("/health")
     def health(request: Request) -> dict:
         payload = request.app.state.service.health()
-        payload["auth_required"] = request.app.state.auth_token is not None
+        payload["auth_required"] = (
+            request.app.state.settings_sync.get("SARATHI_TOKEN") is not None
+        )
         return payload
 
     return app
 
 
-# Default ASGI entrypoint for `uvicorn sarathi.app:app --port 8001`.
+# Default ASGI entrypoint for `uvicorn sarathi.app:app --port 8001`. Only
+# this module-level production entrypoint starts the poller — create_app()
+# itself never does, so every test that calls create_app() directly keeps
+# getting an inert, never-started SettingsSync (see create_app's docstring).
 app = create_app()
+app.state.settings_sync.start()

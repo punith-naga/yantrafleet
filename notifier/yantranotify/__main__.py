@@ -33,7 +33,8 @@ from .channels import ConsoleChannel, WebhookChannel, WhatsAppChannel
 from .formats import FORMATS, payload_for, sample_alert, sample_incident
 from .notifier import Notifier
 from .reliability import ReliableChannel
-from .source import AlertSource
+from .settings_sync import SettingsSync
+from .source import AlertSource, resolve_config
 
 log = logging.getLogger("yantranotify")
 
@@ -66,15 +67,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def build_channels(args: argparse.Namespace,
                    client: httpx.Client | None = None,
-                   clock=None) -> list:
+                   clock=None,
+                   settings: SettingsSync | None = None) -> list:
     fmt = getattr(args, "format", None)
     return [
         ConsoleChannel(),
         ReliableChannel(
-            WebhookChannel(client=client, dry_run=args.dry_run, fmt=fmt),
+            WebhookChannel(client=client, dry_run=args.dry_run, fmt=fmt,
+                          settings=settings),
             clock=clock),
         ReliableChannel(
-            WhatsAppChannel(client=client, dry_run=args.dry_run),
+            WhatsAppChannel(client=client, dry_run=args.dry_run,
+                            settings=settings),
             clock=clock),
     ]
 
@@ -85,10 +89,14 @@ def run(args: argparse.Namespace,
         clock=None) -> int:
     """Poll loop; ``client``/``max_polls``/``clock`` are test injection
     points."""
+    url, key = resolve_config(args.url, args.key)
+    settings = SettingsSync(url, key, client=client)
+    settings.poll_once()  # populate before the first send, mirrors sarathi's start()
     source = AlertSource(args.url, args.key, client=client,
                          all_sites=getattr(args, "all_sites", False))
-    notifier = Notifier(build_channels(args, client=client, clock=clock),
-                        state_path=args.state_file)
+    notifier = Notifier(
+        build_channels(args, client=client, clock=clock, settings=settings),
+        state_path=args.state_file)
 
     polls = 0
     try:
@@ -104,12 +112,14 @@ def run(args: argparse.Namespace,
             polls += 1
             if args.once or (max_polls is not None and polls >= max_polls):
                 return 0
+            settings.maybe_poll()
             time.sleep(args.interval)
     except KeyboardInterrupt:
         return 0
     finally:
         if client is None:
             source.close()
+            settings.close()
 
 
 # -- `test` subcommand: verify a webhook in ten seconds ---------------------

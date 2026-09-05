@@ -72,6 +72,14 @@ class WebhookChannel:
     ``X-Yantra-Signature: sha256=<hex>`` header — an HMAC-SHA256 of the
     exact request body, keyed by the secret — so receivers can verify
     authenticity. Unset: no header, unchanged behaviour.
+
+    ``settings`` (optional) is a live :class:`~yantranotify.settings_sync.SettingsSync`
+    sitting between "explicit constructor arg" and "raw env" in the
+    precedence for ``url``/``secret`` — a table override picked up by the
+    next poll takes effect on the very next ``send()``, no channel
+    recreation needed. ``url``/``secret`` are properties for exactly this
+    reason: they read live state on every access instead of being
+    computed once in ``__init__``.
     """
 
     name = "webhook"
@@ -86,13 +94,31 @@ class WebhookChannel:
         timeout_s: float = WEBHOOK_TIMEOUT_S,
         fmt: str | None = None,
         secret: str | None = None,
+        settings=None,
     ) -> None:
-        self.url = url or os.environ.get("WEBHOOK_URL") or None
+        self._url_arg = url
+        self._secret_arg = secret
+        self.settings = settings
         self.dry_run = dry_run
         self.fmt = (fmt or os.environ.get("WEBHOOK_FORMAT")
                     or DEFAULT_FORMAT).lower()
-        self.secret = secret or os.environ.get("YANTRA_WEBHOOK_SECRET") or None
         self._client = client or httpx.Client(timeout=timeout_s)
+
+    @property
+    def url(self) -> str | None:
+        if self._url_arg:
+            return self._url_arg
+        if self.settings is not None:
+            return self.settings.get("WEBHOOK_URL") or None
+        return os.environ.get("WEBHOOK_URL") or None
+
+    @property
+    def secret(self) -> str | None:
+        if self._secret_arg:
+            return self._secret_arg
+        if self.settings is not None:
+            return self.settings.get("YANTRA_WEBHOOK_SECRET") or None
+        return os.environ.get("YANTRA_WEBHOOK_SECRET") or None
 
     def _post(self, payload: dict) -> bool:
         if self.dry_run or not self.url:
@@ -133,6 +159,12 @@ class WhatsAppChannel:
     ``From``/``To`` get a ``whatsapp:`` prefix if not already present.
     Without ``TWILIO_SID``/``TWILIO_TOKEN``/``TWILIO_FROM``/``TWILIO_TO``
     the channel degrades to printing the payload (dry-run).
+
+    ``settings`` (optional) is a live :class:`~yantranotify.settings_sync.SettingsSync`
+    sitting between "explicit constructor arg" and "raw env" for each of
+    the 4 credentials — a table override takes effect on the very next
+    ``send()``, no channel recreation needed. All four are properties for
+    exactly this reason.
     """
 
     name = "whatsapp"
@@ -147,14 +179,39 @@ class WhatsAppChannel:
         dry_run: bool = False,
         api_base: str = TWILIO_API,
         timeout_s: float = 10.0,
+        settings=None,
     ) -> None:
-        self.sid = sid or os.environ.get("TWILIO_SID") or None
-        self.token = token or os.environ.get("TWILIO_TOKEN") or None
-        self.from_ = self._wa(from_ or os.environ.get("TWILIO_FROM"))
-        self.to = self._wa(to or os.environ.get("TWILIO_TO"))
+        self._sid_arg = sid
+        self._token_arg = token
+        self._from_arg = from_
+        self._to_arg = to
+        self.settings = settings
         self.dry_run = dry_run
         self.api_base = api_base.rstrip("/")
         self._client = client or httpx.Client(timeout=timeout_s)
+
+    def _get(self, arg: str | None, env_key: str) -> str | None:
+        if arg:
+            return arg
+        if self.settings is not None:
+            return self.settings.get(env_key) or None
+        return os.environ.get(env_key) or None
+
+    @property
+    def sid(self) -> str | None:
+        return self._get(self._sid_arg, "TWILIO_SID")
+
+    @property
+    def token(self) -> str | None:
+        return self._get(self._token_arg, "TWILIO_TOKEN")
+
+    @property
+    def from_(self) -> str | None:
+        return self._wa(self._get(self._from_arg, "TWILIO_FROM"))
+
+    @property
+    def to(self) -> str | None:
+        return self._wa(self._get(self._to_arg, "TWILIO_TO"))
 
     @staticmethod
     def _wa(number: str | None) -> str | None:

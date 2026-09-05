@@ -312,6 +312,7 @@ svg text{font-family:var(--font)}
   <div class="sec">Configure</div>
   <button data-v="fleet"><i class="ic">⬡</i>Fleet &amp; Connectors</button>
   <button data-v="audit"><i class="ic">☰</i>Audit</button>
+  <button data-v="settings" id="nav-settings" style="display:none"><i class="ic">⚙</i>Settings</button>
   <div class="nav-foot"><span class="pill" id="yf-version" title="YantraFleet release — matches core/yantracore/version.py"></span><br>VDA 5050 · 3 vendors<br><span style="color:#0ca30c">●</span> Sim feed connected</div>
 </nav>
 <main id="main">
@@ -323,6 +324,7 @@ svg text{font-family:var(--font)}
   <div class="view" id="v-analytics"></div>
   <div class="view" id="v-fleet"></div>
   <div class="view" id="v-audit"></div>
+  <div class="view" id="v-settings"></div>
   <div class="drawer" id="drawer"></div>
   <div id="copilot"></div>
 </main>
@@ -411,6 +413,7 @@ const store={
   thrHist:[], alHist:[], alerts:[], incidents:[], missions:[], tickets:[], commands:[],
   findings:null, findingsReq:false,   // v0.4: maintenance_findings rows (null = not fetched / unavailable → mock tickets)
   audit:null, auditReq:false,         // v0.9: full commands history for the Audit view (null = not fetched)
+  appSettings:null,                   // v0.13: admin_list_settings() rows for the Settings view (null = not fetched)
   availOk:0, availTot:0,              // v0.9: availability sampling for the Analytics SLA card
   throughput:132, sla:98.2, alarmHr:6, ackedIds:new Set()
 };
@@ -1222,6 +1225,57 @@ function rAudit(){
   </div>`;
 }
 
+/* ---------------- Settings (v0.13: admin-only, supabase/0008_app_settings.sql) ----------------
+   The raw value is only ever held in the <input> the admin just typed
+   into; on a successful save the whole view re-renders (rebuilding that
+   input empty), so a typed secret never lingers in the DOM or in
+   store.appSettings — only the RPC's masked_value ever gets rendered back. */
+function rSettings(){
+  if(!(typeof YFAuth!=='undefined'&&YFAuth.state.role==='admin')){
+    $('#v-settings').innerHTML='<div class="empty">Admin role required.</div>';return;
+  }
+  if(!store.appSettings){
+    $('#v-settings').innerHTML='<div class="empty">Loading…</div>';
+    Sync.loadAppSettings().then(()=>{if(curView==='settings')rSettings();});return;
+  }
+  const e=s=>Copilot.esc(s);
+  const bySection=k=>APP_SETTING_KEYS.filter(([,,sec])=>sec===k);
+  const section=(title,keys)=>`<div class="card" style="margin-top:14px"><h3>${e(title)}</h3>
+    ${keys.map(([key,label,,hint])=>settingRow(key,label,hint)).join('')}</div>`;
+  $('#v-settings').innerHTML=`
+    <div class="vhead"><h1>Settings</h1><span class="sub">operational credentials · admin only · live within ~30s, no restart</span></div>
+    ${section('Copilot (sarathi)',bySection('Copilot'))}
+    ${section('Notifier (yantranotify)',bySection('Notifier'))}`;
+}
+function settingRow(key,label,hint){
+  const e=s=>Copilot.esc(s);
+  const row=(store.appSettings||[]).find(s=>s.key===key)||{configured:false,masked_value:null};
+  const status=row.configured?('configured · '+e(row.masked_value||'')):'not set — using deploy-time env var, if any';
+  const meta=row.configured?('updated '+e(row.updated_at||'')+' by '+e(row.updated_by||'')):'';
+  return `<div class="kv" id="setting-row-${key}" style="align-items:center;gap:10px">
+    <span>${e(label)}${hint?`<br><span style="font-size:10.5px;color:var(--muted)">${e(hint)}</span>`:''}</span>
+    <span style="display:flex;gap:6px;align-items:center">
+      <span class="pill" id="setting-status-${key}" title="${meta}">${status}</span>
+      <input type="password" id="set-${key}" placeholder="${row.configured?'•••• (leave blank to keep)':'value'}"
+             style="width:200px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--ink);padding:6px 10px;font-size:12.5px;outline:none">
+      <button class="btn sm primary" onclick="saveSetting('${key}')">Save</button>
+      ${row.configured?`<button class="btn sm ghost" onclick="clearSetting('${key}')">Clear</button>`:''}
+    </span>
+  </div>`;
+}
+function saveSetting(key){
+  const el=$('#set-'+key), v=el?el.value:'';
+  if(!v){toast('Enter a value first (or Clear to remove an existing one)');return;}
+  Sync.saveAppSetting(key,v)
+    .then(()=>{toast(key+' saved');store.appSettings=null;Sync.loadAppSettings().then(()=>{if(curView==='settings')rSettings();});})
+    .catch(e=>toast('⚠ Save failed'+(e&&e.status===403?' — requires the admin role':'')));
+}
+function clearSetting(key){
+  Sync.saveAppSetting(key,'')
+    .then(()=>{toast(key+' cleared — falling back to the deploy-time env var, if any');store.appSettings=null;Sync.loadAppSettings().then(()=>{if(curView==='settings')rSettings();});})
+    .catch(e=>toast('⚠ Clear failed'+(e&&e.status===403?' — requires the admin role':'')));
+}
+
 /* ================= Copilot ================= */
 const Copilot={
   open:false, msgs:[],
@@ -1676,6 +1730,24 @@ const SUPA_URL=_cfg.get('supa')||'https://flwyvhsmgrrqpmhcqlzd.supabase.co';
 const SUPA_KEY=_cfg.get('key')||'sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf'; // publishable anon key — safe client-side
 window.SITE=_cfg.get('site')||null;
 
+/* v0.13: admin settings panel — the 8 operational credentials an `admin`
+   may rotate live via admin_list_settings()/admin_set_setting(). Mirrors
+   the CHECK constraint + RPC allowlists in supabase/0008_app_settings.sql
+   and the SETTINGS_KEYS tuples in copilot/sarathi/settings_sync.py /
+   notifier/yantranotify/settings_sync.py. Keep in sync by hand — same
+   deliberate duplication as SUPA_URL/SUPA_KEY above.
+   [key, label, section, hint] */
+const APP_SETTING_KEYS=[
+  ['GEMINI_API_KEY','Gemini API key','Copilot','Enables the LLM-grounded answer tiers; blank = offline tier only'],
+  ['SARATHI_TOKEN','Sarathi bearer token','Copilot','When set, POST /ask requires this as Authorization: Bearer <token>'],
+  ['WEBHOOK_URL','Webhook URL','Notifier','Slack "Incoming Webhook" or Discord channel webhook'],
+  ['YANTRA_WEBHOOK_SECRET','Webhook signing secret','Notifier','HMAC-SHA256 signs every webhook POST when set (X-Yantra-Signature)'],
+  ['TWILIO_SID','Twilio Account SID','Notifier',''],
+  ['TWILIO_TOKEN','Twilio Auth Token','Notifier',''],
+  ['TWILIO_FROM','Twilio From number','Notifier','e.g. whatsapp:+14155238886'],
+  ['TWILIO_TO','Twilio To number','Notifier','your verified WhatsApp recipient'],
+];
+
 /* v0.12: '🎓 Academy' header link → the training app, same backend params.
    Served (nginx template / ops static server) the docroot exposes the console
    at /index.html and the academy at /academy/index.html, so the RELATIVE
@@ -1818,6 +1890,9 @@ const YFAuth={
           <span class="role-badge" id="auth-role">${this.esc(this.state.role||'…')}</span></span>
         <button class="btn ghost sm" id="btn-signout" onclick="YFAuth.logout()">Sign out</button>`
       :`<button class="btn sm" id="btn-signin" onclick="YFAuth.show()">Sign in</button>`;
+    // v0.13: the Settings nav entry is admin-only — every auth state
+    // transition (login/logout/expiry) already routes through here.
+    const nb=$('#nav-settings'); if(nb) nb.style.display=(this.state.role==='admin')?'':'none';
   },
   mode:'in',                                    // 'in' = sign in · 'up' = create account
   ensure(){
@@ -2070,6 +2145,15 @@ const Sync={
       .then(()=>{toast('Command '+decision);this.pullCommands();})
       .catch(()=>toast('⚠ Decision failed'));
   },
+  /* ---- v0.13 admin settings panel (supabase/0008_app_settings.sql) ---- */
+  async loadAppSettings(){
+    try{ store.appSettings=await this.q('rpc/admin_list_settings',{method:'POST',body:'{}'}); }
+    catch(e){ store.appSettings=[]; if(e&&e.status===403)toast('⚠ Settings requires the admin role'); }
+  },
+  saveAppSetting(key,value){
+    return this.q('rpc/admin_set_setting',{method:'POST',
+      body:JSON.stringify({p_key:key,p_value:value})});
+  },
   async push(){
     this.robotsEmptySince=null;   // leader mode publishes robots itself
     const rows=robots.map(r=>({id:r.id,vendor:r.vendor,status:r.status,battery:+r.battery.toFixed(1),
@@ -2114,9 +2198,15 @@ const Sync={
 };
 
 /* ================= Router + main loop ================= */
-const VIEWS={overview:rOverview,liveops:rLiveOps,incidents:rIncidents,missions:rMissions,maint:rMaint,analytics:rAnalytics,fleet:rFleet,audit:rAudit};
+const VIEWS={overview:rOverview,liveops:rLiveOps,incidents:rIncidents,missions:rMissions,maint:rMaint,analytics:rAnalytics,fleet:rFleet,audit:rAudit,settings:rSettings};
 let curView='overview';
 function go(v){
+  // v0.13: UI-level defense in depth — the RPC's own yf_has_role('admin')
+  // check is the real gate; this just avoids flashing the settings view
+  // at a non-admin before the RPC 403 comes back.
+  if(v==='settings'&&!(typeof YFAuth!=='undefined'&&YFAuth.state.role==='admin')){
+    toast('⚠ Settings requires the admin role');v='overview';
+  }
   curView=v;
   $$('#nav button[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   $$('.view').forEach(x=>x.classList.remove('on'));

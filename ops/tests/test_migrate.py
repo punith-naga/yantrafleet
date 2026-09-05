@@ -168,4 +168,5 @@ def test_repo_opt_in_files_detected():
     every = {p.name for p in discover_migrations(d, include_opt_in=True)}
     assert "0006_harden.sql" in every - base
     assert "0007_rbac.sql" in every - base
+    assert "0008_app_settings.sql" in every - base
     assert "0001_init.sql" in base

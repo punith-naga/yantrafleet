@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Callable
 
 # Client-safe defaults for the YantraFleet demo project.
 DEFAULT_SUPABASE_URL = "https://flwyvhsmgrrqpmhcqlzd.supabase.co"
@@ -32,19 +33,29 @@ class Settings:
     extra: dict = field(default_factory=dict)
 
 
-def _detect_model() -> str | None:
+def resolve_model(get: Callable[[str], str | None]) -> str | None:
     """Pick a litellm model id based on which API keys are present.
+
+    Same precedence as before, but reads through ``get`` instead of
+    ``os.environ`` directly, so a live ``SettingsSync.get`` can be
+    substituted to pick up a rotated ``GEMINI_API_KEY`` without a restart.
 
     SARATHI_MODEL always wins when set. Otherwise prefer Gemini (free tier),
     then OpenAI. Returns None when no key is available — the service will run
     tier-3 (offline) only, which is fully supported.
+
+    ``SARATHI_MODEL`` and ``OPENAI_API_KEY`` are NOT movable to the admin
+    settings panel — env-only, unchanged — but calling ``get()`` on them is
+    still correct: ``SettingsSync.get()`` only ever has overrides for its
+    tracked keys, so it degrades to a plain ``os.environ.get()`` for
+    anything else.
     """
-    explicit = os.environ.get("SARATHI_MODEL")
+    explicit = get("SARATHI_MODEL")
     if explicit:
         return explicit
-    if os.environ.get("GEMINI_API_KEY"):
+    if get("GEMINI_API_KEY"):
         return DEFAULT_GEMINI_MODEL
-    if os.environ.get("OPENAI_API_KEY"):
+    if get("OPENAI_API_KEY"):
         return DEFAULT_OPENAI_MODEL
     return None
 
@@ -54,5 +65,5 @@ def load_settings() -> Settings:
     return Settings(
         supabase_url=os.environ.get("SUPABASE_URL", DEFAULT_SUPABASE_URL).rstrip("/"),
         supabase_key=os.environ.get("SUPABASE_KEY", DEFAULT_SUPABASE_KEY),
-        model=_detect_model(),
+        model=resolve_model(os.environ.get),
     )

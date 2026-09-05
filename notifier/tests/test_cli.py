@@ -1,7 +1,8 @@
 """End-to-end CLI runs, fully offline via the injected client."""
 from __future__ import annotations
 
-from yantranotify.__main__ import build_parser, run
+from yantranotify.__main__ import build_channels, build_parser, run
+from yantranotify.reliability import ReliableChannel
 
 from conftest import FakeRest, URL, alert_row
 
@@ -43,15 +44,34 @@ def test_cli_site_filter_default_and_all_sites(rest: FakeRest, monkeypatch):
         ["--once", "--dry-run", "--url", URL, "--key", "k"])
     assert args.all_sites is False
     assert run(args, client=rest.client()) == 0
+    # Only alerts/incidents carry the site filter — the settings-panel poll
+    # (app_settings) is a fleet-wide read with no site dimension.
+    fleet_requests = [r for r in rest.requests
+                      if r.url.path.endswith(("/alerts", "/incidents"))]
+    assert fleet_requests
     assert all(r.url.params.get("site_id") == "eq.BLR-DC1"
-               for r in rest.requests)
+               for r in fleet_requests)
 
     rest2 = FakeRest()
     args = build_parser().parse_args(
         ["--once", "--dry-run", "--all-sites", "--url", URL, "--key", "k"])
     assert args.all_sites is True
     assert run(args, client=rest2.client()) == 0
-    assert all("site_id" not in r.url.params for r in rest2.requests)
+    fleet_requests2 = [r for r in rest2.requests
+                       if r.url.path.endswith(("/alerts", "/incidents"))]
+    assert fleet_requests2
+    assert all("site_id" not in r.url.params for r in fleet_requests2)
+
+
+def test_build_channels_wires_the_same_settings_into_both_channels():
+    """The same SettingsSync object flows into both the webhook and
+    whatsapp channel — one poll, both channels see rotations."""
+    fake_settings = object()
+    args = build_parser().parse_args(["--once", "--url", URL, "--key", "k"])
+    webhook, whatsapp = build_channels(args, settings=fake_settings)[1:]
+    assert isinstance(webhook, ReliableChannel) and isinstance(whatsapp, ReliableChannel)
+    assert webhook.inner.settings is fake_settings
+    assert whatsapp.inner.settings is fake_settings
 
 
 def test_poll_error_does_not_crash(monkeypatch):

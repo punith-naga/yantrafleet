@@ -13,13 +13,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .config import Settings
+from .config import Settings, resolve_model
 from .grounding import (
     GROUNDING_COMPUTED,
     verify_grounding,
 )
 from .llm import CompletionFn, LLMError, tier1_answer, tier2_answer
 from .offline import OfflineEngine
+from .settings_sync import SettingsSync
 from .tools import Toolbox, ToolResult
 from .transport import Transport, TransportError
 
@@ -59,11 +60,16 @@ class CopilotService:
         settings: Settings,
         transport: Transport,
         completion_fn: CompletionFn | None = None,
+        settings_sync: SettingsSync | None = None,
     ) -> None:
         self.settings = settings
         self.transport = transport
         # LLM seam: None -> real litellm.completion; tests inject a fake.
         self.completion_fn = completion_fn
+        # Live settings seam: None means "no admin-settings-panel wiring" —
+        # _current_model() then falls back to the model resolved once at
+        # process start (self.settings.model), exactly today's behaviour.
+        self.settings_sync = settings_sync
         self._toolbox_factory: Callable[[], Toolbox] = lambda: Toolbox(
             transport=self.transport, row_limit=settings.tool_row_limit
         )
@@ -74,13 +80,33 @@ class CopilotService:
 
     # -- public API --------------------------------------------------------
 
+    def _current_model(self) -> str | None:
+        """Live model resolution: prefers a live signal read through
+        settings_sync (table override, else the current env var) so a
+        rotated GEMINI_API_KEY takes effect on the very next call with no
+        service/app recreation needed. Falls back to ``self.settings.model``
+        — the value resolved once at process start — when settings_sync
+        has neither an override nor a matching env var right now (e.g. no
+        settings_sync at all, or a fresh deployment that hasn't set
+        GEMINI_API_KEY/SARATHI_MODEL in the live environment). This keeps
+        callers that construct a Settings with an explicit ``model=`` (the
+        whole existing test suite) working unchanged, while still letting
+        a live override turn tier-1 on/off without a restart.
+        """
+        if self.settings_sync is not None:
+            live = resolve_model(self.settings_sync.get)
+            if live is not None:
+                return live
+        return self.settings.model
+
     @property
     def llm_available(self) -> bool:
-        return self.settings.model is not None
+        return self._current_model() is not None
 
     def ask(self, question: str) -> Answer:
         """Answer a question, degrading through the tiers as needed."""
-        if not self.llm_available:
+        model = self._current_model()
+        if model is None:
             return self._tier3(question)
 
         # Tier 1: tool-grounded agent loop.
@@ -89,7 +115,7 @@ class CopilotService:
             answer, tool_log = tier1_answer(
                 question,
                 toolbox,
-                model=self.settings.model or "",
+                model=model,
                 timeout_s=self.settings.llm_timeout_s,
                 max_turns=self.settings.max_agent_turns,
                 completion_fn=self.completion_fn,
@@ -104,7 +130,7 @@ class CopilotService:
             )
         except TransportError as exc:
             log.warning("tier1 -> tier2 (data backend down): %s", exc)
-            return self._tier2(question)
+            return self._tier2(question, model)
         except LLMError as exc:
             log.warning("tier1 -> tier3 (LLM failed): %s", exc)
             return self._tier3(question)
@@ -114,11 +140,11 @@ class CopilotService:
 
     # -- tiers -------------------------------------------------------------
 
-    def _tier2(self, question: str) -> Answer:
+    def _tier2(self, question: str, model: str) -> Answer:
         try:
             text = tier2_answer(
                 question,
-                model=self.settings.model or "",
+                model=model,
                 timeout_s=self.settings.llm_timeout_s,
                 completion_fn=self.completion_fn,
             )
@@ -174,7 +200,7 @@ class CopilotService:
         return {
             "ok": True,
             "llm_configured": self.llm_available,
-            "model": self.settings.model or "none",
+            "model": self._current_model() or "none",
             "tiers_available": tiers_available,
             "transport_ok": transport_ok,
             # Back-compat aliases (pre-v0.5 health shape).

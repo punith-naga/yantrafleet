@@ -15,7 +15,8 @@ exactly the subset of PostgREST that the YantraFleet components use:
 * ``PATCH /rest/v1/{table}`` — same filters select the rows; the JSON
   body is merged into each matching row. Returns 204.
 * ``POST /rest/v1/rpc/{fn}`` — the 0007 RPCs ``decide_command``,
-  ``save_progress`` and ``issue_certificate`` (see below).
+  ``save_progress`` and ``issue_certificate``, plus the 0008 admin-settings
+  RPCs ``admin_list_settings``/``admin_set_setting`` (see below).
 
 RBAC emulation (supabase/0007_rbac.sql) is **opt-in**:
 ``FakePostgREST(rbac=True, service_key="sk-test")``. In that mode the
@@ -59,6 +60,25 @@ Row = dict[str, Any]
 
 #: 0007 role hierarchy — each role includes everything below it.
 ROLE_RANK: dict[str, int] = {"operator": 1, "engineer": 2, "manager": 3, "admin": 4}
+
+#: 0008_app_settings.sql's CHECK constraint / RPC allowlist — the 8 keys the
+#: admin settings panel may rotate. Mirrors console/index.html's
+#: APP_SETTING_KEYS and the SETTINGS_KEYS tuples in
+#: copilot/sarathi/settings_sync.py / notifier/yantranotify/settings_sync.py.
+APP_SETTING_KEYS: tuple[str, ...] = (
+    "GEMINI_API_KEY", "SARATHI_TOKEN", "WEBHOOK_URL", "YANTRA_WEBHOOK_SECRET",
+    "TWILIO_SID", "TWILIO_TOKEN", "TWILIO_FROM", "TWILIO_TO",
+)
+
+
+def _mask_setting(value: str | None) -> str | None:
+    """Python mirror of ``public._yf_mask_setting`` (0008_app_settings.sql):
+    last 4 chars only, never enough to reconstruct the secret."""
+    if not value:
+        return None
+    if len(value) <= 4:
+        return "•" * 8
+    return "•" * 8 + value[-4:]
 
 _JWT_PREFIX = "yf-test."
 
@@ -219,6 +239,11 @@ class FakePostgREST:
         self.progress: dict[str, dict[str, Row]] = {}
         #: certificates stand-in, written only via issue_certificate.
         self.certificates: list[Row] = []
+        #: app_settings stand-in: {key: {"value","updated_at","updated_by"}} —
+        #: written only via admin_set_setting (mirrors 0008's revoke-all-grants
+        #: posture: this is deliberately NOT in self.tables, see module note
+        #: on rpc_admin_list_settings/rpc_admin_set_setting below).
+        self.settings: dict[str, Row] = {}
         self.tables: dict[str, list[Row]] = {t: [] for t in TABLES}
         if tables:
             for name, rows in tables.items():
@@ -409,10 +434,66 @@ class FakePostgREST:
         self.certificates.append(row)
         return 200, dict(row)
 
+    def rpc_admin_list_settings(self, ident: _Identity, args: Row) -> tuple[int, Any]:
+        """supabase/0008_app_settings.sql's admin_list_settings(): always
+        returns all 8 known keys (configured or not) — gated the same way
+        as the other admin-only RPCs (rbac mode only; see module docstring).
+        Deliberately reads self.settings, never self.tables — a bare
+        GET /rest/v1/app_settings must keep 404ing/not-routing, faithfully
+        mirroring the real table's `revoke all` / no-policy posture."""
+        if self.rbac:
+            if ident.kind == "anon":
+                return 401, {"message": "admin_list_settings: not authenticated "
+                                        "— sign in first", "code": "PGRST301"}
+            if ident.kind != "service" and not ident.is_admin:
+                return 403, {"message": "admin_list_settings: requires admin role",
+                             "code": "42501"}
+        result = []
+        for key in APP_SETTING_KEYS:
+            row = self.settings.get(key)
+            if row is None:
+                result.append({"key": key, "configured": False,
+                               "masked_value": None,
+                               "updated_at": None, "updated_by": None})
+            else:
+                result.append({"key": key, "configured": True,
+                               "masked_value": _mask_setting(row.get("value")),
+                               "updated_at": row.get("updated_at"),
+                               "updated_by": row.get("updated_by")})
+        return 200, result
+
+    def rpc_admin_set_setting(self, ident: _Identity, args: Row) -> tuple[int, Any]:
+        """supabase/0008_app_settings.sql's admin_set_setting(): p_value
+        null/empty deletes the row (explicit "revert to the env var"
+        action); otherwise upserts and returns the masked result."""
+        p_key, p_value = args.get("p_key"), args.get("p_value")
+        if self.rbac:
+            if ident.kind == "anon":
+                return 401, {"message": "admin_set_setting: not authenticated "
+                                        "— sign in first", "code": "PGRST301"}
+            if ident.kind != "service" and not ident.is_admin:
+                return 403, {"message": "admin_set_setting: requires admin role",
+                             "code": "42501"}
+        if p_key not in APP_SETTING_KEYS:
+            return 400, {"message": f"admin_set_setting: unknown setting key "
+                                    f"\"{p_key}\"", "code": "P0001"}
+        if p_value is None or len(str(p_value).strip()) == 0:
+            self.settings.pop(p_key, None)
+            return 200, {"key": p_key, "configured": False, "masked_value": None,
+                        "updated_at": None, "updated_by": None}
+        row = {"value": str(p_value), "updated_at": _now_iso(),
+              "updated_by": ident.email or "service"}
+        self.settings[p_key] = row
+        return 200, {"key": p_key, "configured": True,
+                    "masked_value": _mask_setting(row["value"]),
+                    "updated_at": row["updated_at"], "updated_by": row["updated_by"]}
+
     RPCS: dict[str, str] = {
         "decide_command": "rpc_decide_command",
         "save_progress": "rpc_save_progress",
         "issue_certificate": "rpc_issue_certificate",
+        "admin_list_settings": "rpc_admin_list_settings",
+        "admin_set_setting": "rpc_admin_set_setting",
     }
 
 
