@@ -1,0 +1,57 @@
+# The zero-signup live demo door: the server side of the marketing page's
+# "Try it with a live fleet" button.
+#
+#   POST /api/demo/session  -> mints one throwaway sandbox, answers its
+#                              console URL (201 JSON, or 303 for a plain
+#                              <form> post)
+#   GET  /api/demo/limits   -> whether the button is worth showing
+#   GET  /healthz           -> liveness
+#
+# Binds 127.0.0.1:8088 only — nginx proxies /api/demo/ to it (see
+# deploy/aws/nginx/yantrafleet.conf.template). --trusted-proxy-hops 1 tells
+# it that exactly one reverse proxy appends to X-Forwarded-For, so the
+# per-IP rate limit is charged to the visitor and not to nginx.
+#
+# Reads SUPABASE_URL / SUPABASE_KEY from /etc/yantrafleet.env. The ANON key
+# is the right key here: a sandbox is anonymous by design, and 0009's RLS
+# is what confines it. Never point this at a service key.
+#
+# NOT enabled by default — the sandbox needs supabase/0009_demo_sandbox.sql
+# applied (which grants anonymous visitors write access; read its THREAT
+# MODEL block first). Turn it on with:
+#   sudo systemctl enable --now yantra-sandbox yantra-sandbox-reap.timer
+
+[Unit]
+Description=YantraFleet zero-signup demo sandbox door (yantraops sandbox-serve)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yantra
+Group=yantra
+EnvironmentFile=/etc/yantrafleet.env
+WorkingDirectory=/opt/yantrafleet
+StateDirectory=yantrafleet
+ExecStart=/opt/yantrafleet/.venv/bin/python -m yantraops sandbox-serve \
+    --host 127.0.0.1 --port 8088 \
+    --state-file /var/lib/yantrafleet/sandboxes.json \
+    --robots 6 --origin marketing \
+    --max-live 8 --rate 3 --rate-window 900 --max-inflight 2 \
+    --trusted-proxy-hops 1 --sweep-interval 60
+Restart=always
+RestartSec=5
+# Each live sandbox has its own `sandbox-drive` child. With the default
+# KillMode a restart of this unit stops every visitor's fleet mid-demo;
+# with mixed, only the door is signalled and the drivers keep going. They
+# are not orphans: each one carries --until <the session's expiry> and
+# exits on its own, the door's --sweep-interval stops any that outlive it,
+# and yantra-sandbox-reap.timer stops them by pid from
+# /var/lib/yantrafleet/sandboxes.json, which survives the restart.
+KillMode=mixed
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

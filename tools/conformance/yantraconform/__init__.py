@@ -13,8 +13,16 @@ Library use::
 CLI use::
 
     yantra-conform run --broker mqtt://localhost:1883 --html report.html
+    yantra-conform run --broker localhost --passive     # publish nothing
+    yantra-conform run --broker localhost --capture capture.json
+    yantra-conform replay capture.json --html report.html   # offline re-grade
     yantra-conform checks --json          # the rule set, without a broker
-    yantra-conform render capture.json -o report.html
+    yantra-conform render report.json -o report.html
+
+Only ``run`` needs a broker (and therefore paho); ``replay``, ``render`` and
+``checks`` are pure standard library, which is what lets someone grade a
+captured session on a machine that can reach neither the fleet nor the
+internet.
 """
 from __future__ import annotations
 

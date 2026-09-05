@@ -28,3 +28,6 @@ include = ["yantraconform*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: needs a real MQTT broker (auto-skips when none is reachable)",
+]

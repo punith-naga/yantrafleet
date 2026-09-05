@@ -1,0 +1,19 @@
+# Runs yantra-sandbox-reap.service every minute. Persistent=true so a box
+# that was asleep (or rebooted) reaps once on the way back up rather than
+# leaving an hour of expired sandboxes lying around.
+#
+# Enable with:
+#   sudo systemctl enable --now yantra-sandbox-reap.timer
+
+[Unit]
+Description=Run the YantraFleet demo sandbox reaper every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=yantra-sandbox-reap.service
+
+[Install]
+WantedBy=timers.target

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -29,7 +29,16 @@ ERROR_REPEATS = 3
 
 @dataclass
 class Defects:
-    """Every non-compliant behaviour this fixture can be asked to exhibit."""
+    """Every non-compliant behaviour this fixture can be asked to exhibit.
+
+    Each flag is meant to be switched on ALONE, so a test can assert both
+    halves of the property that makes a conformance tester worth anything:
+    the corresponding check flips to ``fail`` (it detects the defect) and no
+    unrelated check does (it does not smear one defect across the report).
+    Where one defect genuinely breaks two clauses at once -- a header without
+    ``version`` violates both the header rule and the version rule -- the test
+    names both, rather than the fixture pretending the blast radius is one.
+    """
 
     # connection topic
     no_connection: bool = False
@@ -47,20 +56,45 @@ class Defects:
     string_order_update_id: bool = False
     bad_topic_scheme: bool = False          # publishes state 4 segments deep
     battery_as_fraction: bool = False       # 0..1 instead of 0..100
+    state_header_drop_version: bool = False  # header without 'version'
+    timestamps_go_backwards: bool = False
+    drop_recommended_fields: bool = False   # no agvPosition/velocity/paused/...
+    string_battery_charge: bool = False     # batteryCharge as "84.0"
+    battery_out_of_range: bool = False      # 150 %
+    bad_operating_mode: bool = False        # "AUTO"
+    bad_estop: bool = False                 # eStop "ESTOPPED"
+    malformed_error_entry: bool = False     # errorLevel outside the enum
+    wrong_sequence_parity: bool = False     # nodes odd, edges even
+    future_major_version: bool = False      # reports 3.0.0 on v2 topics
+    version_skew: bool = False              # connection/factsheet disagree
+    extra_subtopic: bool = False            # publishes .../telemetry as well
+    malformed_json: bool = False            # non-JSON body on the state topic
     # order handling
     accept_stale_order: bool = False
     adopt_invalid_order: bool = False
     no_order_update_error: bool = False     # rejects silently
+    ignore_orders: bool = False             # never subscribes / never adopts
+    ignore_order_updates: bool = False      # takes new orders, drops updates
     # actions
     silent_unknown_action: bool = False     # ignores unsupported actionType
     finish_unknown_action: bool = False     # claims FINISHED instead
     vanishing_actions: bool = False         # drops actions without a terminal
     custom_action_status: bool = False      # "DONE" instead of FINISHED
     duplicate_action_ids: bool = False      # same actionId twice in one message
+    action_without_type: bool = False       # actionStates entry has no type
+    action_regresses: bool = False          # FINISHED -> RUNNING -> FINISHED
+    #: actionTypes on instantActions to drop on the floor. Empty tuple means
+    #: "answer everything"; ("stateRequest",) isolates one check.
+    ignore_instant_types: tuple[str, ...] = ()
     # factsheet
     no_factsheet: bool = False
     factsheet_missing_blocks: bool = False
     factsheet_not_retained: bool = False
+    factsheet_bad_enums: bool = False       # agvKinematic "TRACKED"
+    factsheet_incomplete_physical: bool = False   # no speedMax
+    factsheet_no_header: bool = False
+    # visualization
+    broken_visualization: bool = False      # header only, no pose or velocity
 
 
 class FakeRobot:
@@ -96,6 +130,14 @@ class FakeRobot:
         self.pending_actions: list[list[Any]] = []
         self.pending_errors: list[list[Any]] = []
         self.seen_action_ids: set[str] = set()
+        self.ticks = 0
+        #: ticks remaining in the FINISHED -> RUNNING -> FINISHED regression
+        self._regression: list[Any] | None = None
+        if self.defects.malformed_error_entry:
+            self.pending_errors.append([
+                {"errorType": "sensorFault", "errorLevel": "CRITICAL",
+                 "errorDescription": "errorLevel is outside the spec's enum"},
+                10 ** 6])
 
         self.client = PahoShimClient(broker, name=f"robot-{serial}")
         self.client.on_message = self._on_message
@@ -123,6 +165,15 @@ class FakeRobot:
                 timezone(timedelta(hours=2))).replace(tzinfo=None).isoformat()
         return self.clock.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
+    def _version(self, subtopic: str) -> str:
+        if self.defects.future_major_version:
+            return "3.0.0"
+        if self.defects.version_skew and subtopic != "state":
+            # One publisher was updated and the others were not: the exact bug
+            # protocol.version_consistency exists to catch.
+            return "2.0.0"
+        return VERSION
+
     def _header(self, subtopic: str) -> dict[str, Any]:
         if self.defects.header_id_frozen:
             hid = 1
@@ -130,9 +181,12 @@ class FakeRobot:
             hid = self.header_ids.get(subtopic, 0) + 1
             self.header_ids[subtopic] = hid
         serial = "WRONG_SERIAL" if self.defects.identity_mismatch else self.serial
-        return {"headerId": hid, "timestamp": self._timestamp(),
-                "version": VERSION, "manufacturer": self.manufacturer,
-                "serialNumber": serial}
+        header = {"headerId": hid, "timestamp": self._timestamp(),
+                  "version": self._version(subtopic),
+                  "manufacturer": self.manufacturer, "serialNumber": serial}
+        if subtopic == "state" and self.defects.state_header_drop_version:
+            header.pop("version")
+        return header
 
     # -- publishing --------------------------------------------------------
 
@@ -150,7 +204,20 @@ class FakeRobot:
     def tick(self, n: int = 1) -> None:
         """Advance the vehicle and publish that many state messages."""
         for _ in range(n):
-            self.clock += timedelta(seconds=1)
+            self.ticks += 1
+            if self.defects.timestamps_go_backwards and self.ticks % 2 == 0:
+                self.clock -= timedelta(seconds=3)
+            else:
+                self.clock += timedelta(seconds=1)
+            self._advance_regression()
+            if self.ticks == 1:
+                # Re-announce ONLINE on the first tick, the way a real vehicle
+                # does after every (re)connect. Without this the ONLINE sent in
+                # __init__ is only visible to the tester via the RETAINED copy,
+                # so switching off retention would make the vehicle vanish
+                # entirely and 'connection.retained' could never be observed
+                # failing on its own.
+                self.announce("ONLINE")
             if self.path:
                 self.node = self.path.pop(0)
                 self.driving = bool(self.path)
@@ -175,22 +242,45 @@ class FakeRobot:
                               "state"))
         self.client.publish(topic, json.dumps(state), qos=0,
                             retain=self.defects.retained_state)
+        if self.defects.malformed_json:
+            # A truncated / non-JSON body on an otherwise correct topic: the
+            # single most common "the vehicle went quiet" support ticket.
+            self.client.publish(self._topic("state"), "{not json at all",
+                                qos=0, retain=False)
+        if self.defects.extra_subtopic:
+            # Five segments, so it routes to this vehicle, but a sub-topic
+            # name no compliant fleet manager subscribes to.
+            self.client.publish(self._topic("telemetry"),
+                                json.dumps(self._header("telemetry")), qos=0,
+                                retain=False)
         if self.publish_visualization:
-            self.client.publish(
-                self._topic("visualization"),
-                json.dumps(self._header("visualization") | {
-                    "agvPosition": state.get("agvPosition"),
-                    "velocity": state.get("velocity")}),
-                qos=0, retain=False)
+            payload = self._header("visualization")
+            if not self.defects.broken_visualization:
+                # Built from the pose directly, NOT from ``state`` -- a defect
+                # that strips optional blocks out of state must not silently
+                # break the visualization topic too, or the blast-radius
+                # assertions would be measuring the fixture, not the tester.
+                payload |= {
+                    "agvPosition": {"x": 1.5, "y": 2.5,
+                                    "theta": round(math.pi / 4, 4),
+                                    "mapId": "warehouse-1",
+                                    "positionInitialized": True},
+                    "velocity": {"vx": 0.4 if self.driving else 0.0,
+                                 "vy": 0.0, "omega": 0.0}}
+            self.client.publish(self._topic("visualization"),
+                                json.dumps(payload), qos=0, retain=False)
 
     def _build_state(self) -> dict[str, Any]:
         theta = 7.5 if self.defects.theta_out_of_range else round(math.pi / 4, 4)
         seq = 0
         node_states, edge_states = [], []
+        # Nodes take even sequenceIds and edges odd ones (6.6); the defect
+        # swaps the two parities without otherwise disturbing the ordering.
+        node_off, edge_off = (1, 2) if self.defects.wrong_sequence_parity else (2, 1)
         for i, nid in enumerate(self.path):
-            edge_states.append({"edgeId": f"E{i}", "sequenceId": seq + 1,
+            edge_states.append({"edgeId": f"E{i}", "sequenceId": seq + edge_off,
                                 "released": True})
-            node_states.append({"nodeId": nid, "sequenceId": seq + 2,
+            node_states.append({"nodeId": nid, "sequenceId": seq + node_off,
                                 "released": True})
             seq += 2
         ouid: Any = self.order_update_id
@@ -212,30 +302,50 @@ class FakeRobot:
             "velocity": {"vx": 0.4 if self.driving else 0.0, "vy": 0.0,
                          "omega": 0.0},
             "batteryState": {
-                "batteryCharge": (self.battery / 100.0
-                                  if self.defects.battery_as_fraction
-                                  else round(self.battery, 1)),
+                "batteryCharge": self._battery_charge(),
                 "charging": False, "reach": 4200},
-            "operatingMode": "AUTOMATIC",
+            "operatingMode": ("AUTO" if self.defects.bad_operating_mode
+                              else "AUTOMATIC"),
             "errors": self._drain_errors(),
-            "safetyState": {"eStop": "NONE", "fieldViolation": False},
+            "safetyState": {
+                "eStop": "ESTOPPED" if self.defects.bad_estop else "NONE",
+                "fieldViolation": False},
         }
         if self.defects.missing_state_fields:
             state.pop("errors", None)
             state.pop("safetyState", None)
+        if self.defects.drop_recommended_fields:
+            for name in ("agvPosition", "velocity", "paused", "newBaseRequest"):
+                state.pop(name, None)
         return state
 
+    def _battery_charge(self) -> Any:
+        if self.defects.string_battery_charge:
+            return str(round(self.battery, 1))
+        if self.defects.battery_out_of_range:
+            return 150.0
+        if self.defects.battery_as_fraction:
+            return self.battery / 100.0
+        return round(self.battery, 1)
+
     def _publish_factsheet(self) -> None:
-        fs = self._header("factsheet") | {
+        header: dict[str, Any] = ({} if self.defects.factsheet_no_header
+                                  else self._header("factsheet"))
+        physical = {
+            "speedMin": 0.0, "speedMax": 1.5, "accelerationMax": 0.5,
+            "decelerationMax": 0.5, "heightMax": 0.4, "width": 0.6,
+            "length": 0.9}
+        if self.defects.factsheet_incomplete_physical:
+            physical.pop("speedMax")
+        fs = header | {
             "typeSpecification": {
-                "seriesName": "fake-1", "agvKinematic": "DIFF",
+                "seriesName": "fake-1",
+                "agvKinematic": ("TRACKED" if self.defects.factsheet_bad_enums
+                                 else "DIFF"),
                 "agvClass": "CARRIER", "maxLoadMass": 500.0,
                 "localizationTypes": ["NATURAL"],
                 "navigationTypes": ["AUTONOMOUS"]},
-            "physicalParameters": {
-                "speedMin": 0.0, "speedMax": 1.5, "accelerationMax": 0.5,
-                "decelerationMax": 0.5, "heightMax": 0.4, "width": 0.6,
-                "length": 0.9},
+            "physicalParameters": physical,
             "protocolLimits": {"maxStringLens": {}, "maxArrayLens": {},
                                "timing": {"minOrderInterval": 0.5,
                                           "minStateInterval": 0.5}},
@@ -266,6 +376,8 @@ class FakeRobot:
         entry: dict[str, Any] = {"actionId": action_id,
                                  "actionType": action_type,
                                  "actionStatus": status}
+        if self.defects.action_without_type:
+            entry.pop("actionType")
         if detail:
             entry["resultDescription"] = detail
         if not self.defects.duplicate_action_ids:
@@ -292,8 +404,34 @@ class FakeRobot:
         self.pending_errors = [e for e in self.pending_errors if e[1] > 0]
         return out
 
+    def _advance_regression(self) -> None:
+        """Drive the FINISHED -> RUNNING -> FINISHED regression, one tick each.
+
+        The action ends the run terminal, so ``actions.terminal_reported`` is
+        satisfied and the only clause actually broken is the one that says a
+        terminal status is absorbing.
+        """
+        if self._regression is None:
+            return
+        action_id, action_type, step = self._regression
+        if step == 0:
+            self._stage_action(action_id, action_type, "RUNNING", repeats=1)
+            self._regression = [action_id, action_type, 1]
+        elif step == 1:
+            self._stage_action(action_id, action_type, "FINISHED",
+                               "finished (again)", repeats=10 ** 6)
+            self._regression = None
+
     def _finish_node_action(self) -> None:
         if self.node_action_id is None:
+            return
+        if self.defects.action_regresses:
+            self._stage_action(self.node_action_id,
+                               self.node_action_type or "move", "FINISHED",
+                               "node action complete", repeats=1)
+            self._regression = [self.node_action_id,
+                                self.node_action_type or "move", 0]
+            self.node_action_id = None
             return
         if self.defects.vanishing_actions:
             # No terminal status at all: the RUNNING entry staged when the
@@ -323,6 +461,8 @@ class FakeRobot:
             self._handle_instant_actions(msg)
 
     def _handle_order(self, msg: dict[str, Any]) -> None:
+        if self.defects.ignore_orders:
+            return
         order_id = str(msg.get("orderId") or "")
         if not order_id:
             return
@@ -330,6 +470,12 @@ class FakeRobot:
             update_id = int(msg.get("orderUpdateId") or 0)
         except (TypeError, ValueError):
             update_id = 0
+        if (self.defects.ignore_order_updates and order_id == self.order_id
+                and update_id > self.order_update_id):
+            # Takes a brand-new order happily, silently drops every update to
+            # the order it is already running -- so master control can never
+            # extend the vehicle's base while it drives.
+            return
         if (order_id == self.order_id and update_id <= self.order_update_id
                 and not self.defects.accept_stale_order):
             if not self.defects.no_order_update_error:
@@ -373,6 +519,8 @@ class FakeRobot:
             if not action_id or action_id in self.seen_action_ids:
                 continue
             self.seen_action_ids.add(action_id)
+            if action_type in self.defects.ignore_instant_types:
+                continue
             if action_type == "stateRequest":
                 self._stage_action(action_id, action_type, "FINISHED",
                                    "state published")

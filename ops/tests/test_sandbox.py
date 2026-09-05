@@ -23,6 +23,7 @@ import httpx
 import pytest
 
 from yantraops import sandbox as sb
+from yantraops import sandbox_http as sh
 from yantraops.__main__ import build_parser
 from yantraops.orchestrator import load_fakerest, repo_root
 
@@ -1165,3 +1166,651 @@ def test_mint_reports_seeding_warnings_and_still_succeeds(fakerest, api,
     payload = json.loads(capsys.readouterr().out)
     assert payload["warnings"] == ["commands: pretend this deployment lacks 0002"]
     assert payload["seeded"]["robots_parked"] == 2
+
+
+# ==========================================================================
+# SECURITY, part 3 — the two promises a mint-and-look test cannot see:
+# a sandbox cannot buy itself more time, and it cannot survive the reaper.
+# ==========================================================================
+
+def test_demo_token_cannot_extend_its_own_ttl(fakerest, api):
+    """There is no lengthening path in 0009 — only shortening ones.
+
+    `demo_mint_session` is the only writer of `expires_at`, and it writes
+    it once at insert. `demo_claim_session` touches `claimed`/`claimed_at`;
+    `demo_session_info` is `stable`; `demo_end_session` writes
+    `least(expires_at, now())`. So the four anon-callable RPCs, in any
+    order and any number of times, cannot move a sandbox's deadline out.
+    """
+    session = api.mint(seed_robots=2, ttl_minutes=15)
+    original = fakerest.demo_sessions[session.token]["expires_at"]
+
+    for _ in range(3):
+        api.claim(session.token)
+        api.info(session.token)
+        api.limits()
+    assert fakerest.demo_sessions[session.token]["expires_at"] == original
+
+    # Minting again gets a DIFFERENT sandbox; it does not renew this one.
+    other = api.mint(seed_robots=1)
+    assert other.site_id != session.site_id and other.token != session.token
+    assert fakerest.demo_sessions[session.token]["expires_at"] == original
+
+    # And the write surface it does hold cannot reach the session row: the
+    # sessions table is not a route, and no fleet table carries an expiry.
+    assert _get(fakerest.base_url, "demo_sessions",
+                token=session.token).status_code >= 400
+    assert _post(fakerest.base_url, "demo_sessions",
+                 [{"token": session.token, "site_id": session.site_id,
+                   "expires_at": "2099-01-01T00:00:00Z"}],
+                 token=session.token).status_code >= 400
+    assert fakerest.demo_sessions[session.token]["expires_at"] == original
+
+    # `demo_end_session` is the one write it *can* make, and it only ever
+    # brings the deadline forward.
+    api.end(session.token)
+    ended = sb._parse_ts(fakerest.demo_sessions[session.token]["expires_at"])
+    assert ended <= sb._parse_ts(original)
+
+
+def test_demo_token_cannot_outlive_the_reaper(fakerest, api, service_api,
+                                              state_file, capsys):
+    """Expiry, reap, and the driver that was mid-flight when it happened."""
+    session = api.mint(seed_robots=3)
+    driver = sb.SandboxDriver(api, session.site_id, session.token, robots=3,
+                              interval=0.0, check_every=1)
+    driver.tick_once()                       # it works while the TTL holds
+    assert [r for r in fakerest.tables["robots"]
+            if r["site_id"] == session.site_id]
+
+    _expire(fakerest, session.token)
+    assert sb.run_sandbox_reap(fakerest.base_url, SERVICE_KEY,
+                               state_file=state_file, json_output=True,
+                               api=service_api) == sb.EXIT_OK
+    assert json.loads(capsys.readouterr().out)["sites"] == [session.site_id]
+
+    # Every scoped row is gone...
+    for table in ("robots", "alerts", "missions", "incidents",
+                  "robot_telemetry", "commands", "maintenance_findings"):
+        assert not [r for r in fakerest.tables[table]
+                    if r.get("site_id") == session.site_id], table
+    # ...the token is inert for reads and writes...
+    assert _get(fakerest.base_url, "robots", token=session.token).json() == []
+    assert _post(fakerest.base_url, "robots",
+                 [{"id": f"{session.site_id}-R09", "vendor": "MiR",
+                   "site_id": session.site_id}],
+                 token=session.token).status_code in (401, 403)
+    # ...and a driver that was still ticking gives up instead of spinning.
+    errors: list[Exception] = []
+    assert driver.run(ticks=10, on_error=errors.append) < 10
+    assert errors and all(isinstance(e, sb.SandboxError) for e in errors)
+    assert api.info(session.token)["reason"] == "reaped"
+
+
+def test_commands_insert_is_not_constrained_to_the_sandboxs_own_robots(
+        fakerest, api):
+    """SCHEMA GAP, asserted so it cannot be forgotten. See the report.
+
+    0009's `demo_sandbox_insert` checks `site_id` and nothing else, and
+    `commands.robot_id` is a bare `text` column (0002 — no foreign key, no
+    same-site constraint). So an anonymous visitor can insert a command row
+    that *names a real fleet's robot* while still living in their own demo
+    site, and can set `status='approved'` at insert time (the column-level
+    grants only narrow UPDATE, never INSERT).
+
+    Nothing in the database is harmed by that row — it stays in the demo
+    site, and the real site's rows are untouched, which is what this test
+    pins down. The exposure is downstream: an executor that polls
+    `commands?status=eq.approved` WITHOUT a `site_id` filter would dispatch
+    it. `yantrasim.transports.supabase.poll_commands` has no site filter at
+    all, and `yantrabridge.CommandPublisher` only adds one when `--site` is
+    passed.
+
+    If a later migration adds the missing constraint, this test SHOULD
+    fail — invert it then, do not delete it.
+    """
+    session = api.mint(seed_robots=2)
+    forged = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    resp = _post(fakerest.base_url, "commands",
+                 [{"id": forged, "robot_id": "AMR-01",     # a REAL robot
+                   "cmd": "estop", "params": {},
+                   "status": "approved",                    # pre-approved
+                   "requested_by": "demo-visitor",
+                   "site_id": session.site_id}],
+                 token=session.token)
+    assert resp.status_code < 400, "0009 accepts this today — see the report"
+    row = next(r for r in fakerest.tables["commands"] if r["id"] == forged)
+    assert row["site_id"] == session.site_id, "…but it stays in the sandbox"
+    assert row["robot_id"] == "AMR-01", "…while naming another site's robot"
+
+    # The real site's own rows are untouched either way.
+    assert next(r for r in fakerest.tables["robots"]
+                if r["id"] == "AMR-01")["site_id"] == "BLR-DC1"
+    # And a site-filtered executor sees nothing: the one-line mitigation.
+    scoped = [c for c in fakerest.tables["commands"]
+              if c.get("site_id") == "BLR-DC1" and c.get("status") == "approved"]
+    assert scoped == []
+
+
+# ==========================================================================
+# THE HTTP DOOR — what the "Try it with a live fleet" button actually hits
+# ==========================================================================
+
+def _door(fakerest, state_file, **overrides):
+    """A running sandbox_http server against the fake backend."""
+    config = sh.ServeConfig(
+        base_url=fakerest.base_url, key=ANON_KEY, console="https://x.test/c/",
+        state_file=state_file, sim=False, history=False, robots=3,
+        quiet=True, **overrides)
+    return sh.SandboxHTTP(config, host="127.0.0.1", port=0)
+
+
+@pytest.fixture()
+def door(fakerest, state_file):
+    with _door(fakerest, state_file) as server:
+        yield server
+
+
+def _mint(door_url: str, **kw):
+    return httpx.post(f"{door_url}{sh.ROUTE_MINT}", timeout=20.0, **kw)
+
+
+def test_http_mint_hands_back_one_working_console_url(fakerest, door):
+    resp = _mint(door.base_url)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["ok"] is True
+    assert set(body) == {"ok", "url", "site_id", "expires_at", "ttl_minutes",
+                         "robots"}
+    site, url = body["site_id"], body["url"]
+    assert site.startswith(sb.DEMO_SITE_PREFIX)
+    assert url.startswith("https://x.test/c/?supa=")
+    assert f"site={site}" in url
+
+    # The URL is not a promise — the token in it really opens that sandbox,
+    # and only that sandbox.
+    token = url.split("&demo=")[1]
+    assert sb.valid_token(token)
+    rows = _get(fakerest.base_url, "robots", token=token).json()
+    assert len(rows) == body["robots"] == 3
+    assert {r["site_id"] for r in rows} == {site}
+    assert resp.headers["cache-control"] == "no-store"
+
+
+def test_http_never_takes_a_site_or_a_ttl_from_the_caller(fakerest, door):
+    """The one bug this door exists not to have."""
+    fakerest.demo_limits.update(ttl_minutes=30, max_seed_robots=12)
+    hostile = {"site_id": "BLR-DC1", "site": "BLR-DC1", "ttl_minutes": 100000,
+               "ttl": 100000, "robots": 500, "seed_robots": 500,
+               "origin": "../../etc/passwd", "console": "https://evil.test/"}
+    resp = _mint(door.base_url, json=hostile,
+                 params={"site_id": "BLR-DC1", "ttl": "100000",
+                         "robots": "500"})
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["site_id"].startswith(sb.DEMO_SITE_PREFIX)
+    assert body["site_id"] != "BLR-DC1"
+    assert body["ttl_minutes"] == 30          # the server's clamp, not theirs
+    assert body["robots"] == 3                # the operator's --robots
+    assert body["url"].startswith("https://x.test/c/")   # not evil.test
+    # Nothing was minted against, or written into, the real site.
+    assert {s["site_id"] for s in fakerest.demo_sessions.values()} == {
+        body["site_id"]}
+    assert [r["id"] for r in fakerest.tables["robots"]
+            if r["site_id"] == "BLR-DC1"] == ["AMR-01"]
+    assert fakerest.demo_sessions[
+        next(iter(fakerest.demo_sessions))]["origin"] == "web"
+
+
+def test_http_returns_only_this_sessions_own_url(fakerest, door):
+    first = _mint(door.base_url).json()
+    second = _mint(door.base_url).json()
+    assert first["site_id"] != second["site_id"]
+    assert first["site_id"] not in json.dumps(second)
+    assert second["site_id"] not in json.dumps(first)
+    # No route lists sandboxes, and none accepts a token.
+    for path in ("/api/demo/sessions", "/api/demo/session/list",
+                 f"/api/demo/session?token={first['url'].split('&demo=')[1]}"):
+        got = httpx.get(f"{door.base_url}{path}", timeout=5.0)
+        assert got.status_code in (404, 405)
+        assert first["site_id"] not in got.text
+
+
+def test_http_refuses_cleanly_when_every_sandbox_slot_is_full(
+        fakerest, state_file):
+    """A front page on Hacker News gets 429s, not a dead box."""
+    with _door(fakerest, state_file, max_live=2) as door:
+        assert _mint(door.base_url).status_code == 201
+        assert _mint(door.base_url).status_code == 201
+        resp = _mint(door.base_url)
+        assert resp.status_code == 429
+        body = resp.json()
+        assert body["ok"] is False and body["reason"] == "ceiling"
+        assert int(resp.headers["retry-after"]) > 0
+        # Refused before the RPC: the backend minted exactly two.
+        assert len(fakerest.demo_sessions) == 2
+        # ...and the door is still answering, not wedged.
+        assert httpx.get(f"{door.base_url}{sh.ROUTE_HEALTH}",
+                         timeout=5.0).json()["live"] == 2
+
+
+def test_http_surfaces_the_database_ceiling_as_429(fakerest, state_file):
+    fakerest.demo_limits["max_live_sessions"] = 1
+    with _door(fakerest, state_file, max_live=50) as door:
+        assert _mint(door.base_url).status_code == 201
+        resp = _mint(door.base_url)
+        assert resp.status_code == 429 and resp.json()["reason"] == "ceiling"
+        assert "too many live demo sandboxes" in resp.json()["detail"]
+
+
+def test_http_rate_limits_by_ip(fakerest, state_file):
+    with _door(fakerest, state_file, rate=2, rate_window_s=3600.0,
+               max_live=50) as door:
+        assert _mint(door.base_url).status_code == 201
+        assert _mint(door.base_url).status_code == 201
+        resp = _mint(door.base_url)
+        assert resp.status_code == 429
+        assert resp.json()["reason"] == "rate_limited"
+        assert int(resp.headers["retry-after"]) > 0
+        assert len(fakerest.demo_sessions) == 2, "no third session was minted"
+        # Health still works — a rate-limited visitor is not an outage.
+        assert httpx.get(f"{door.base_url}{sh.ROUTE_HEALTH}",
+                         timeout=5.0).json()["refused"] == 1
+
+
+def test_http_forwarded_for_cannot_buy_a_fresh_quota(fakerest, state_file):
+    """With no trusted proxy configured, the header is simply not read."""
+    with _door(fakerest, state_file, rate=1, rate_window_s=3600.0,
+               max_live=50) as door:
+        assert _mint(door.base_url).status_code == 201
+        for spoof in ("1.2.3.4", "8.8.8.8, 9.9.9.9", ""):
+            resp = _mint(door.base_url, headers={"X-Forwarded-For": spoof})
+            assert resp.status_code == 429
+            assert resp.json()["reason"] == "rate_limited"
+        assert len(fakerest.demo_sessions) == 1
+
+
+def test_client_ip_trusts_exactly_as_many_proxies_as_configured():
+    xff = "1.1.1.1, 2.2.2.2, 3.3.3.3"
+    assert sh.client_ip("127.0.0.1", xff, 0) == "127.0.0.1"   # default
+    assert sh.client_ip("127.0.0.1", xff, 1) == "3.3.3.3"     # one nginx
+    assert sh.client_ip("127.0.0.1", xff, 2) == "2.2.2.2"
+    assert sh.client_ip("127.0.0.1", xff, 9) == "1.1.1.1"     # never IndexError
+    assert sh.client_ip("127.0.0.1", None, 1) == "127.0.0.1"
+    assert sh.client_ip("127.0.0.1", " , ", 1) == "127.0.0.1"
+    assert sh.client_ip("", None, 0) == "?"
+
+
+def test_rate_limiter_windows_and_stays_bounded():
+    now = [1000.0]
+    lim = sh.RateLimiter(limit=2, window_s=60.0, max_keys=8,
+                         clock=lambda: now[0])
+    assert lim.allow("a") and lim.allow("a") and not lim.allow("a")
+    assert 1 <= lim.retry_after("a") <= 61
+    assert lim.allow("b"), "one visitor's quota is not another's"
+    now[0] += 61
+    assert lim.allow("a"), "the window rolled over"
+
+    # A flood of distinct keys must not grow the table without bound.
+    for i in range(500):
+        lim.allow(f"ip-{i}")
+    assert len(lim._hits) <= 8
+    # limit=0 turns the limiter off entirely.
+    off = sh.RateLimiter(limit=0, window_s=60.0)
+    assert all(off.allow("a") for _ in range(50))
+
+
+def test_http_reports_a_disabled_deployment_as_503(fakerest, state_file):
+    fakerest.demo_limits["enabled"] = False
+    with _door(fakerest, state_file) as door:
+        resp = _mint(door.base_url)
+        assert resp.status_code == 503
+        assert resp.json()["reason"] == "disabled"
+        limits = httpx.get(f"{door.base_url}{sh.ROUTE_LIMITS}",
+                           timeout=5.0).json()
+        assert limits["enabled"] is False and limits["available"] is False
+
+
+def test_http_limits_tells_the_page_whether_to_show_the_button(
+        fakerest, state_file):
+    fakerest.demo_limits["ttl_minutes"] = 45
+    with _door(fakerest, state_file, max_live=1) as door:
+        limits = httpx.get(f"{door.base_url}{sh.ROUTE_LIMITS}",
+                           timeout=5.0).json()
+        assert limits == {"ok": True, "enabled": True, "ttl_minutes": 45,
+                          "live": 0, "max_live": 1, "available": True}
+        assert _mint(door.base_url).status_code == 201
+        after = httpx.get(f"{door.base_url}{sh.ROUTE_LIMITS}",
+                          timeout=5.0).json()
+        assert after["live"] == 1 and after["available"] is False
+
+
+def test_http_health_needs_no_backend(fakerest, door):
+    body = httpx.get(f"{door.base_url}{sh.ROUTE_HEALTH}", timeout=5.0).json()
+    assert body["ok"] is True and body["service"] == "yantra-sandbox"
+    assert body["minted"] == 0 and body["refused"] == 0
+    assert body["max_live"] == sb.DEFAULT_MAX_LIVE
+
+
+def test_http_form_post_redirects_straight_into_the_console(fakerest, door):
+    """The zero-JavaScript button: <form method="post"> and nothing else."""
+    resp = httpx.post(f"{door.base_url}{sh.ROUTE_MINT}",
+                      headers={"Accept": "text/html,application/xhtml+xml"},
+                      follow_redirects=False, timeout=20.0)
+    assert resp.status_code == 303
+    location = resp.headers["location"]
+    assert location.startswith("https://x.test/c/?supa=")
+    assert "&demo=" in location
+    assert sb.valid_token(location.split("&demo=")[1])
+
+
+def test_http_rejects_every_other_route_and_method(fakerest, door):
+    # Minting must not be reachable by a link a browser might prefetch.
+    got = httpx.get(f"{door.base_url}{sh.ROUTE_MINT}", timeout=5.0)
+    assert got.status_code == 405 and "POST" in got.json()["error"]
+    for path in ("/", "/admin", "/api/demo", "/rest/v1/robots"):
+        assert httpx.get(f"{door.base_url}{path}",
+                         timeout=5.0).status_code == 404
+        assert httpx.post(f"{door.base_url}{path}",
+                          timeout=5.0).status_code == 404
+    assert httpx.request("DELETE", f"{door.base_url}{sh.ROUTE_MINT}",
+                         timeout=5.0).status_code >= 400
+    assert fakerest.demo_sessions == {}
+    # CORS preflight is answered so a cross-origin marketing page works.
+    pre = httpx.request("OPTIONS", f"{door.base_url}{sh.ROUTE_MINT}",
+                        timeout=5.0)
+    assert pre.status_code == 204
+    assert pre.headers["access-control-allow-origin"] == "*"
+
+
+def test_http_survives_a_backend_that_is_down(state_file, tmp_path):
+    """PostgREST unreachable is a 502, not a traceback and not a hang."""
+    config = sh.ServeConfig(base_url="http://127.0.0.1:1", key=ANON_KEY,
+                            state_file=state_file, sim=False, history=False,
+                            quiet=True)
+    with sh.SandboxHTTP(config, host="127.0.0.1", port=0) as door:
+        resp = _mint(door.base_url)
+        assert resp.status_code == 502 and resp.json()["reason"] == "error"
+        assert httpx.get(f"{door.base_url}{sh.ROUTE_HEALTH}",
+                         timeout=5.0).json()["ok"] is True
+
+
+def test_http_concurrent_bursts_never_exceed_the_ceiling(fakerest, state_file):
+    """Twelve browsers at once, four slots: exactly four sandboxes exist."""
+    import concurrent.futures as cf
+
+    with _door(fakerest, state_file, max_live=4, rate=0,
+               max_inflight=4) as door:
+        with cf.ThreadPoolExecutor(max_workers=12) as pool:
+            codes = [f.result().status_code
+                     for f in [pool.submit(_mint, door.base_url)
+                               for _ in range(12)]]
+        assert sorted(codes) == [201] * 4 + [429] * 8
+        assert len(fakerest.demo_sessions) == 4
+        assert len(sb.SandboxRegistry(state_file).load()) == 4
+        assert len({r["site_id"] for r in fakerest.tables["robots"]
+                    if r["site_id"].startswith(sb.DEMO_SITE_PREFIX)}) == 4
+
+
+def test_http_mints_a_moving_fleet_end_to_end(fakerest, state_file):
+    """THE arrival test: one POST, then robots that are actually moving.
+
+    Nothing is faked past the button — a real HTTP request, the real mint,
+    the real backfill, a real `sandbox-drive` child process — and the
+    assertion is that the fleet the visitor lands on CHANGES over time.
+    """
+    config = sh.ServeConfig(
+        base_url=fakerest.base_url, key=ANON_KEY, console="https://x.test/c/",
+        state_file=state_file, sim=True, history=True, robots=4, interval=0.2,
+        quiet=True)
+    with sh.SandboxHTTP(config, host="127.0.0.1", port=0) as door:
+        body = _mint(door.base_url).json()
+    site = body["site_id"]
+    pid = sb.SandboxRegistry(state_file).load()[0].pid
+    assert pid and sb._pid_alive(pid), "the door started no simulator"
+    try:
+        # 1) The visitor arrives to a seeded fleet, not an empty console.
+        fleet = [r for r in fakerest.tables["robots"] if r["site_id"] == site]
+        assert len(fleet) == 4
+        assert [r for r in fakerest.tables["robot_telemetry"]
+                if r["site_id"] == site], "no history to render on arrival"
+        assert [r for r in fakerest.tables["missions"]
+                if r["site_id"] == site]
+        assert [r for r in fakerest.tables["alerts"] if r["site_id"] == site]
+
+        # 2) ...and it is moving.
+        def snapshot():
+            return {f"{r['id']}@{r.get('updated_at')}@{r.get('pos')}"
+                    for r in fakerest.tables["robots"]
+                    if r["site_id"] == site}
+
+        seen, moved = snapshot(), False
+        deadline = time.time() + 30
+        while time.time() < deadline and not moved:
+            time.sleep(0.5)
+            moved = bool(snapshot() - seen)
+        assert moved, "the fleet behind the Try-it button never moved"
+
+        # 3) ...and it moved only inside its own sandbox.
+        assert [r["id"] for r in fakerest.tables["robots"]
+                if r["site_id"] == "BLR-DC1"] == ["AMR-01"]
+        assert all(r["site_id"] == site for r in fakerest.tables["robots"]
+                   if r["id"].startswith(sb.DEMO_SITE_PREFIX))
+    finally:
+        sb._stop_pid(pid)
+    assert not sb._pid_alive(pid)
+
+
+def test_http_sweep_stops_the_simulator_of_an_expired_sandbox(
+        fakerest, state_file):
+    """The door's own janitor: no orphaned sim, even with no reap cron."""
+    config = sh.ServeConfig(base_url=fakerest.base_url, key=ANON_KEY,
+                            state_file=state_file, sim=False, history=False,
+                            quiet=True)
+    service = sh.SandboxService(config)
+    proc = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(60)"])
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    sb.SandboxRegistry(state_file).save(
+        [sb.SandboxRecord(site_id="DEMO-000000000001", expires_at=past,
+                          pid=proc.pid)])
+    out = service.sweep()
+    assert out["stopped"] == ["DEMO-000000000001"]
+    assert proc.wait(timeout=10) is not None
+    assert service.sweep()["stopped"] == []       # idempotent
+
+
+def test_cli_parses_sandbox_serve():
+    parser = build_parser()
+    args = parser.parse_args([
+        "sandbox-serve", "--host", "0.0.0.0", "--port", "9099",
+        "--robots", "5", "--max-live", "4", "--rate", "2",
+        "--rate-window", "60", "--max-inflight", "3",
+        "--trusted-proxy-hops", "1", "--allow-origin", "https://yantrika.ai",
+        "--no-sim", "--quiet"])
+    assert args.command == "sandbox-serve" and args.port == 9099
+    assert args.host == "0.0.0.0" and args.robots == 5 and args.max_live == 4
+    assert args.rate == 2 and args.rate_window == 60 and args.max_inflight == 3
+    assert args.trusted_proxy_hops == 1
+    assert args.allow_origin == "https://yantrika.ai"
+    assert args.no_sim and args.quiet
+    # There is deliberately no way to hand the door a site or a token.
+    for flag in ("--site", "--token", "--demo-token"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["sandbox-serve", flag, "X"])
+
+
+def test_cli_dispatches_sandbox_serve(fakerest, state_file, capsys):
+    """`main()` really binds a socket and really serves, then exits."""
+    from yantraops.__main__ import main
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    result: dict[str, object] = {}
+
+    def hit():
+        base = f"http://127.0.0.1:{port}"
+        for _ in range(100):
+            try:
+                result["health"] = httpx.get(f"{base}{sh.ROUTE_HEALTH}",
+                                             timeout=2.0).json()
+                break
+            except Exception:  # noqa: BLE001 - not up yet
+                time.sleep(0.05)
+        result["mint"] = _mint(base).json()
+
+    import threading
+    t = threading.Thread(target=hit, daemon=True)
+    t.start()
+    rc = main(["sandbox-serve", "--url", fakerest.base_url, "--key", ANON_KEY,
+               "--state-file", str(state_file), "--port", str(port),
+               "--console", "https://x.test/c/", "--robots", "2",
+               "--no-sim", "--no-history", "--sweep-interval", "0",
+               "--duration", "3", "--quiet"])
+    t.join(timeout=10)
+    assert rc == sb.EXIT_OK
+    assert result["health"]["ok"] is True
+    assert result["mint"]["site_id"].startswith(sb.DEMO_SITE_PREFIX)
+    assert result["mint"]["url"].startswith("https://x.test/c/")
+
+
+def test_http_drops_an_oversized_or_chunked_body_without_desyncing(
+        fakerest, door):
+    """A body we do not read whole must close the socket, not confuse it."""
+    big = _mint(door.base_url, content=b"x" * 200_000,
+                headers={"Content-Type": "application/octet-stream"})
+    assert big.status_code == 201
+    assert big.json()["site_id"].startswith(sb.DEMO_SITE_PREFIX)
+
+    def chunks():
+        yield b"a" * 64
+        yield b"b" * 64
+
+    streamed = httpx.post(f"{door.base_url}{sh.ROUTE_MINT}", content=chunks(),
+                          timeout=20.0)
+    assert streamed.status_code == 201
+    assert streamed.json()["site_id"] != big.json()["site_id"]
+    # Two clean mints, two sandboxes, no third request invented from the
+    # leftover bytes of the first.
+    assert len(fakerest.demo_sessions) == 2
+
+
+def test_upsert_onto_a_real_robots_primary_key_is_a_FAKEREST_GAP(
+        fakerest, api):
+    """FAKE-BACKEND DIVERGENCE, pinned so it cannot quietly rot.
+
+    ``robots.id`` is a global primary key, so a demo visitor can aim an
+    upsert (``on_conflict=id``, ``resolution=merge-duplicates``) at a REAL
+    robot's id while declaring their own ``site_id``. Real PostgreSQL
+    refuses: for ``insert ... on conflict do update`` the UPDATE policy's
+    USING expression is evaluated against the EXISTING row, and
+    ``demo_sandbox_update`` requires ``site_id = yf_demo_site()`` — which
+    ``AMR-01`` is not — so the statement errors instead of merging. (The
+    row is not even SELECT-visible to that token, which fails it twice.)
+
+    ``e2e/fakerest.py`` does not model that: ``_insert_denied`` validates
+    only the *incoming* rows' ``site_id`` and then merges. The result below
+    is what the FAKE does, not what the database does — this is why the
+    test is named for the gap. See the report's NEEDS section for the
+    four-line fix to fakerest; when it lands, this assertion flips to
+    ``status_code == 403`` and ``site_id == "BLR-DC1"``.
+
+    Nothing in yantraops relies on the difference: every id the sandbox
+    ever writes is namespaced with its own site (robots ``<site>-Rnn``,
+    incidents ``<site>-INC-…``, missions ``<site>-<id>``, findings
+    ``<site>-MF-…``), so no code path here can collide with a real row.
+    """
+    session = api.mint(seed_robots=2)
+    resp = httpx.post(
+        f"{fakerest.base_url}/rest/v1/robots", params={"on_conflict": "id"},
+        json=[{"id": "AMR-01", "vendor": "EVIL", "status": "estop",
+               "site_id": session.site_id}],
+        headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}",
+                 sb.DEMO_TOKEN_HEADER: session.token,
+                 "Content-Type": "application/json",
+                 "Prefer": "return=minimal,resolution=merge-duplicates"},
+        timeout=5.0)
+    victim = next(r for r in fakerest.tables["robots"] if r["id"] == "AMR-01")
+    assert (resp.status_code, victim["site_id"]) == (201, session.site_id), \
+        "fakerest was fixed — invert this test to the real DB's behaviour"
+
+    # What DOES hold in both, and is the property that matters: no id this
+    # module writes can ever address a row outside its own sandbox. (A
+    # fresh sandbox, so the row hijacked above is not in the sample.)
+    other = api.mint(seed_robots=2)
+    sb.HistorySeeder(api, other.site_id, other.token).seed(
+        minutes=20, every_minutes=10)
+    driver = sb.SandboxDriver(api, other.site_id, other.token, robots=2,
+                              interval=0.0, history_every=1)
+    for _ in range(3):
+        driver.tick_once()
+    for table in ("robots", "incidents", "missions",
+                  "maintenance_findings"):
+        rows = [r for r in fakerest.tables[table]
+                if r.get("site_id") == other.site_id]
+        assert rows, table
+        for row in rows:
+            assert other.site_id in str(row["id"]), (table, row["id"])
+
+
+def test_driver_continues_from_where_the_visitor_found_the_fleet(fakerest, api):
+    """No teleport on tick one — the arrival snapshot has to stay true.
+
+    FleetSim scatters its robots over its own randomly chosen task nodes,
+    which are not where HistorySeeder parked the seeded fleet. Without
+    adoption the first tick moved robots up to 28 m across the floor and
+    orphaned the telemetry trail written seconds earlier.
+    """
+    session = api.mint(seed_robots=4)
+    sb.HistorySeeder(api, session.site_id, session.token).seed(
+        minutes=60, every_minutes=10)
+    parked = {r["id"]: list(r["pos"]) for r in fakerest.tables["robots"]
+              if r["site_id"] == session.site_id}
+    assert len(parked) == 4
+
+    driver = sb.SandboxDriver(api, session.site_id, session.token, robots=4,
+                              interval=0.0, history_every=1)
+    assert driver.adopt_live_fleet() == 4
+    driver.tick_once()
+    after = {r["id"]: list(r["pos"]) for r in fakerest.tables["robots"]
+             if r["site_id"] == session.site_id}
+    assert after == parked, "the fleet jumped the instant the driver started"
+
+    # The trail the seeder wrote still ends where each robot stands.
+    for robot_id, pos in parked.items():
+        track = sorted((t for t in fakerest.tables["robot_telemetry"]
+                        if t["robot_id"] == robot_id), key=lambda t: t["ts"])
+        assert track[-1]["pos"] == pos
+
+    # ...and adoption did not freeze anything: the fleet still moves.
+    for _ in range(10):
+        driver.tick_once()
+    moving = {r["id"]: list(r["pos"]) for r in fakerest.tables["robots"]
+              if r["site_id"] == session.site_id}
+    assert any(moving[i] != parked[i] for i in parked)
+
+
+def test_adoption_is_best_effort_and_never_fails_the_driver(fakerest, api):
+    """An empty or unreachable sandbox leaves the simulator's own layout."""
+    session = api.mint(seed_robots=0)          # nothing seeded to adopt
+    driver = sb.SandboxDriver(api, session.site_id, session.token, robots=2,
+                              interval=0.0)
+    assert driver.adopt_live_fleet() == 0
+    assert driver.tick_once()["robots"] == 2   # and it still drives
+
+    class _Dead:
+        def __getattr__(self, name):
+            if name in ("rest", "headers"):
+                return getattr(api, name)
+            raise sb.SandboxError("backend unreachable")
+
+        @property
+        def client(self):
+            raise sb.SandboxError("backend unreachable")
+
+    blind = sb.SandboxDriver(api, session.site_id, session.token, robots=2,
+                             interval=0.0)
+    blind.api = _Dead()
+    assert blind.adopt_live_fleet() == 0

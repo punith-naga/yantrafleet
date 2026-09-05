@@ -4,8 +4,15 @@
     yantra-conform run --broker mqtts://user@fleet.example:8883 --password ... \\
         --manufacturer acme --serial AGV_01 --json out.json --html out.html
     yantra-conform run --broker localhost --passive        # observe only
+    yantra-conform run --broker localhost --capture cap.json   # record it
+    yantra-conform replay cap.json --html out.html         # grade it offline
     yantra-conform checks --json                           # the rule set
     yantra-conform render out.json -o out.html             # re-render a report
+
+``run`` is the only subcommand that needs a broker. ``replay`` grades a
+capture file recorded by an earlier ``run`` and produces an identical report
+without contacting anything, which is how somebody hands over evidence instead
+of broker credentials.
 
 Exit codes: 0 = the run completed (and cleared ``--fail-under`` if given),
 1 = the score was below ``--fail-under``, 2 = the run could not be performed
@@ -18,10 +25,10 @@ import json
 import sys
 from pathlib import Path
 
-from . import checks, spec
+from . import capture, checks, spec
 from .model import TOOL_NAME, TOOL_VERSION
 from .report_html import render_html
-from .runner import RunOptions, run_conformance
+from .runner import ConformanceRunner, RunOptions, _now_iso
 from .session import PAHO_AVAILABLE, PahoSession, parse_broker
 
 EXIT_OK = 0
@@ -65,6 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="passive observation window (8)")
     run.add_argument("--settle-seconds", type=float, default=2.0,
                      help="wait after each active probe (2)")
+    run.add_argument("--retain-seconds", type=float, default=1.0,
+                     help="wait for retained messages to replay (1)")
     run.add_argument("--max-robots", type=int, default=5,
                      help="cap how many discovered vehicles are tested (5)")
     run.add_argument("--passive", action="store_true",
@@ -75,6 +84,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="write the machine-readable report here ('-' = stdout)")
     run.add_argument("--html", dest="html_out", default=None, metavar="PATH",
                      help="write the self-contained HTML report here")
+    run.add_argument("--capture", dest="capture_out", default=None,
+                     metavar="PATH",
+                     help="also save the raw session (every message seen and "
+                          "probe sent) here, so the run can be re-graded "
+                          "offline with 'yantra-conform replay' by someone "
+                          "who has no access to this broker")
     run.add_argument("--title", default=None,
                      help="heading for the HTML report")
     run.add_argument("--fail-under", type=float, default=None, metavar="SCORE",
@@ -92,6 +107,20 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument("-o", "--out", default="-",
                     help="output path ('-' = stdout)")
     rn.add_argument("--title", default=None, help="heading for the report")
+
+    rp = sub.add_parser(
+        "replay", help="grade a captured session offline (no broker needed)")
+    rp.add_argument("capture", help="path to a capture file ('-' = stdin)")
+    rp.add_argument("--json", dest="json_out", default=None, metavar="PATH",
+                    help="write the machine-readable report here "
+                         "('-' = stdout)")
+    rp.add_argument("--html", dest="html_out", default=None, metavar="PATH",
+                    help="write the self-contained HTML report here")
+    rp.add_argument("--title", default=None, help="heading for the report")
+    rp.add_argument("--fail-under", type=float, default=None, metavar="SCORE",
+                    help="exit 1 when the overall score is below SCORE")
+    rp.add_argument("--quiet", action="store_true",
+                    help="suppress the printed summary")
     return p
 
 
@@ -118,14 +147,49 @@ def cmd_checks(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_render(args: argparse.Namespace) -> int:
-    text = sys.stdin.read() if args.report == "-" else \
-        Path(args.report).read_text(encoding="utf-8")
+def _load_json(path: str) -> dict | None:
+    text = sys.stdin.read() if path == "-" else \
+        Path(path).read_text(encoding="utf-8")
     try:
         document = json.loads(text)
     except ValueError as exc:
-        print(f"yantra-conform: {args.report} is not valid JSON: {exc}",
+        print(f"yantra-conform: {path} is not valid JSON: {exc}",
               file=sys.stderr)
+        return None
+    if not isinstance(document, dict):
+        print(f"yantra-conform: {path} is not a JSON object", file=sys.stderr)
+        return None
+    return document
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    document = _load_json(args.capture)
+    if document is None:
+        return EXIT_CANNOT_RUN
+    if not capture.is_capture(document):
+        hint = (" That file looks like a scored report; render it with "
+                "'yantra-conform render' instead."
+                if "summary" in document and "robots" in document else "")
+        print(f"yantra-conform: {args.capture} is not a capture file "
+              f"(expected \"kind\": \"{capture.CAPTURE_KIND}\").{hint}",
+              file=sys.stderr)
+        return EXIT_CANNOT_RUN
+    try:
+        report = capture.replay(document, generated_at=_now_iso())
+    except ValueError as exc:
+        print(f"yantra-conform: {exc}", file=sys.stderr)
+        return EXIT_CANNOT_RUN
+    return _emit(args, report.to_dict(), quiet=args.quiet)
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    document = _load_json(args.report)
+    if document is None:
+        return EXIT_CANNOT_RUN
+    if capture.is_capture(document):
+        print("yantra-conform: that is a capture file, not a scored report. "
+              "Grade it with 'yantra-conform replay' (which will also write "
+              "the HTML).", file=sys.stderr)
         return EXIT_CANNOT_RUN
     if "summary" not in document or "robots" not in document:
         print("yantra-conform: that JSON is not a conformance report "
@@ -155,7 +219,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         discover_seconds=args.discover_seconds,
         observe_seconds=args.observe_seconds,
         settle_seconds=args.settle_seconds,
+        retain_seconds=args.retain_seconds,
         active=not args.passive, max_robots=args.max_robots,
+        capture=bool(args.capture_out),
     )
 
     def progress(msg: str) -> None:
@@ -169,11 +235,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"yantra-conform: cannot reach {target}: {exc}", file=sys.stderr)
         return EXIT_CANNOT_RUN
 
+    runner = ConformanceRunner(session=session, options=options,
+                               progress=progress, broker_label=str(target))
     try:
-        report = run_conformance(session, options, progress=progress,
-                                 broker_label=str(target))
+        report = runner.run()
     finally:
         session.close()
+
+    if args.capture_out:
+        Path(args.capture_out).write_text(
+            json.dumps(runner.capture_document(), indent=2), encoding="utf-8")
+        if not args.quiet:
+            print(f"session capture: {args.capture_out}")
 
     document = report.to_dict()
     return _emit(args, document, quiet=args.quiet)
@@ -234,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_checks(args)
     if args.command == "render":
         return cmd_render(args)
+    if args.command == "replay":
+        return cmd_replay(args)
     return cmd_run(args)
 
 

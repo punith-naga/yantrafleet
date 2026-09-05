@@ -1,0 +1,42 @@
+# Purge expired demo sandboxes: their database rows AND their simulator
+# processes. Idempotent — a run with nothing to reap deletes nothing and
+# exits 0, so it is safe on any schedule. Driven by
+# yantra-sandbox-reap.timer; run it by hand with
+#   sudo systemctl start yantra-sandbox-reap
+#
+# WHY A SECOND ENVIRONMENT FILE: demo_reap_expired() is granted to
+# authenticated and service_role, never to anon (supabase/0009). So this
+# unit needs the SERVICE key while yantra-sandbox.service must keep the
+# anon key. /etc/yantrafleet-sandbox.env is read second and its
+# SUPABASE_KEY wins for this unit only. Create it as root:
+#
+#   printf 'SUPABASE_KEY=%s\n' "<service_role key>" \
+#     > /etc/yantrafleet-sandbox.env
+#   chown root:yantra /etc/yantrafleet-sandbox.env
+#   chmod 640 /etc/yantrafleet-sandbox.env
+#
+# The key stays out of argv (and so out of `ps`) on purpose.
+#
+# The database also reaps opportunistically inside demo_mint_session(), so
+# a box that is minting keeps itself tidy without this. This unit is what
+# cleans up a box that stopped getting visitors, and it is the only thing
+# that stops orphaned simulator processes.
+
+[Unit]
+Description=YantraFleet demo sandbox reaper (purge expired sandboxes)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=yantra
+Group=yantra
+EnvironmentFile=/etc/yantrafleet.env
+EnvironmentFile=-/etc/yantrafleet-sandbox.env
+WorkingDirectory=/opt/yantrafleet
+StateDirectory=yantrafleet
+ExecStart=/opt/yantrafleet/.venv/bin/python -m yantraops sandbox-reap \
+    --state-file /var/lib/yantrafleet/sandboxes.json --grace 1 --json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

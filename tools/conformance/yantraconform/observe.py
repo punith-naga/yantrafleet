@@ -61,8 +61,18 @@ class Observation:
     connections: list[Received] = field(default_factory=list)
     factsheets: list[Received] = field(default_factory=list)
     visualizations: list[Received] = field(default_factory=list)
+    #: master-control -> AGV traffic (order, instantActions). Includes this
+    #: tester's own probes, and on a live fleet a real master control's
+    #: dispatches too. Kept apart from ``other`` so the report never implies
+    #: the vehicle published them.
+    commands: list[Received] = field(default_factory=list)
+    #: five-segment topics whose sub-topic name is not one the spec defines.
     other: list[Received] = field(default_factory=list)
     malformed: list[Received] = field(default_factory=list)
+    #: topics that reached this vehicle's namespace but are not five-segment
+    #: VDA paths at all (wrong depth). Attributed by serial, see
+    #: :meth:`Collector.attribute_offtopic`.
+    offtopic: list[str] = field(default_factory=list)
 
     probes: list[ProbeEvent] = field(default_factory=list)
     #: sub-topic -> was a retain=1 copy delivered when the tester re-subscribed
@@ -88,6 +98,8 @@ class Observation:
             "factsheet": self.factsheets,
             "visualization": self.visualizations,
         }.get(rec.subtopic)
+        if bucket is None and rec.subtopic in spec.SUBTOPICS_TO_AGV:
+            bucket = self.commands
         (bucket if bucket is not None else self.other).append(rec)
 
     def note_probe(self, name: str, **data: Any) -> ProbeEvent:
@@ -115,10 +127,12 @@ class Observation:
     @property
     def all_received(self) -> list[Received]:
         return (self.states + self.connections + self.factsheets
-                + self.visualizations + self.other + self.malformed)
+                + self.visualizations + self.commands + self.other
+                + self.malformed)
 
     def topics_seen(self) -> list[str]:
-        return sorted({r.message.topic for r in self.all_received})
+        return sorted({r.message.topic for r in self.all_received}
+                      | set(self.offtopic))
 
     def message_counts(self) -> dict[str, int]:
         return {
@@ -126,6 +140,7 @@ class Observation:
             "connection": len(self.connections),
             "factsheet": len(self.factsheets),
             "visualization": len(self.visualizations),
+            "commands": len(self.commands),
             "other": len(self.other),
             "malformed": len(self.malformed),
         }
@@ -174,17 +189,43 @@ class Collector:
     """
 
     def __init__(self, interface: str = spec.DEFAULT_INTERFACE,
-                 major: str = spec.DEFAULT_MAJOR_SEGMENT) -> None:
+                 major: str = spec.DEFAULT_MAJOR_SEGMENT,
+                 manufacturer: str | None = None,
+                 serial: str | None = None, record: bool = False) -> None:
         self.interface = interface
         self.major = major
+        #: when recording, every message this collector consumed, in the order
+        #: it consumed it. Replaying that list rebuilds byte-identical
+        #: evidence, which is what makes a capture file gradeable offline.
+        #: Off by default: a long passive run against a busy fleet would
+        #: otherwise hold the whole session in memory for no reason.
+        self.record = record
+        self.consumed: list[Message] = []
+        #: when set, only this vehicle is graded. The tester subscribes to the
+        #: whole interface namespace (that is the only way to SEE a
+        #: wrongly-named sub-topic at all), so without this a ``--serial`` run
+        #: would silently widen to the entire fleet.
+        self.manufacturer = manufacturer
+        self.serial = serial
         self.robots: dict[tuple[str, str], Observation] = {}
-        #: messages whose topic could not be parsed at all
+        #: messages whose topic is not a five-segment VDA path
         self.unroutable: list[Received] = []
+        #: well-formed messages belonging to a vehicle outside the pinned scope
+        self.foreign: list[Received] = []
+
+    def in_scope(self, manufacturer: str, serial: str) -> bool:
+        return ((self.manufacturer is None or manufacturer == self.manufacturer)
+                and (self.serial is None or serial == self.serial))
 
     def feed(self, msg: Message) -> Received:
+        if self.record:
+            self.consumed.append(msg)
         rec = parse_message(msg)
         if rec.topic is None:
             self.unroutable.append(rec)
+            return rec
+        if not self.in_scope(rec.topic.manufacturer, rec.topic.serial):
+            self.foreign.append(rec)
             return rec
         key = (rec.topic.manufacturer, rec.topic.serial)
         obs = self.robots.get(key)
@@ -199,6 +240,32 @@ class Collector:
     def feed_all(self, messages: list[Message]) -> None:
         for m in messages:
             self.feed(m)
+
+    def attribute_offtopic(self) -> list[str]:
+        """Pin each unroutable topic on the vehicle it most likely belongs to.
+
+        A vehicle that publishes ``uagv/acme/AGV_01/state`` (the version level
+        left out) cannot be identified from the topic the way the spec
+        intends, so the parse fails and there is nobody to charge for it. But
+        the serialNumber is still sitting there in the path, and it is the one
+        segment that is unique per vehicle -- so if a discovered vehicle's
+        serial appears as a whole segment, the topic is attributed to it and
+        ``protocol.topic_scheme`` fails, which is the correct outcome.
+
+        Returns the topics that could NOT be attributed, for a run warning.
+        """
+        unattributed: list[str] = []
+        for rec in self.unroutable:
+            segments = set(rec.message.topic.split("/"))
+            owners = [obs for (mfr, ser), obs in self.robots.items()
+                      if ser in segments]
+            if not owners:
+                unattributed.append(rec.message.topic)
+                continue
+            for obs in owners:
+                if rec.message.topic not in obs.offtopic:
+                    obs.offtopic.append(rec.message.topic)
+        return sorted(set(unattributed))
 
     def get(self, manufacturer: str, serial: str) -> Observation:
         key = (manufacturer, serial)

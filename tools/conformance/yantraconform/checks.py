@@ -262,6 +262,13 @@ def _connection_retained(cs, obs):
         return cs.result("skip", "retain probe did not cover the connection topic")
     if got:
         return cs.result("pass", "a retained copy was delivered on re-subscribe")
+    if not obs.connections:
+        # Double-counting policy: a vehicle that never publishes connection at
+        # all already fails connection.published (critical). Failing it a
+        # second time for "the message you never sent was not retained" is one
+        # defect charged twice.
+        return cs.result("skip", "no connection message was published at all "
+                                 "(see connection.published)")
     return cs.result("fail", "re-subscribing to the connection topic delivered "
                              "no retained message")
 
@@ -1176,8 +1183,23 @@ def _instant_unknown(cs, obs):
 def _factsheet_published(cs, obs):
     if obs.factsheets:
         return cs.result("pass", f"{len(obs.factsheets)} factsheet message(s) seen")
-    return cs.result("fail", "no factsheet observed, including after an explicit "
-                             "factsheetRequest")
+    # Say what was actually tried. In --passive mode no factsheetRequest is
+    # sent, so claiming one was asked for would be a false statement in a
+    # document the vendor is going to be shown.
+    if obs.probe("instant_factsheetRequest") is not None:
+        return cs.result("fail", "no factsheet observed, including after an "
+                                 "explicit factsheetRequest")
+    if not obs.active_probing:
+        return cs.result(
+            "fail",
+            "no factsheet was published or retained during a passive run; no "
+            "factsheetRequest was sent, so this only shows the factsheet is "
+            "not available to a fleet manager that has just subscribed",
+            remediation=cs.remediation + " If your vehicle only answers "
+                        "factsheetRequest, re-run without --passive to "
+                        "confirm that path works.")
+    return cs.result("fail", "no factsheet observed, and no factsheetRequest "
+                             "probe was sent")
 
 
 @check("factsheet.required_blocks", "Factsheet contains every required block",
@@ -1328,6 +1350,9 @@ def _visualization(cs, obs):
        "version level, or a renamed sub-topic mean a compliant fleet manager's "
        "subscriptions simply never match.")
 def _protocol_topic_scheme(cs, obs):
+    # topics_seen() includes obs.offtopic -- paths that are not five-segment
+    # VDA topics at all but that carry this vehicle's serialNumber, so the
+    # wrong-depth case is graded rather than silently dropped.
     seen = obs.topics_seen()
     if not seen:
         return cs.result("skip", "no messages observed for this vehicle")

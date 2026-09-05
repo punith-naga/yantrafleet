@@ -67,6 +67,9 @@ class RunOptions:
     #: node id to use for the order probe; discovered from the vehicle's own
     #: state when not supplied.
     node: str | None = None
+    #: keep every consumed message so the run can be written out as a capture
+    #: file and re-graded offline. Off unless --capture was asked for.
+    capture: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,9 +98,14 @@ class ConformanceRunner:
     broker_label: str = ""
 
     def __post_init__(self) -> None:
-        self.collector = Collector(self.options.interface, self.options.major)
+        self.collector = Collector(self.options.interface, self.options.major,
+                                   manufacturer=self.options.manufacturer,
+                                   serial=self.options.serial,
+                                   record=self.options.capture)
         self.warnings: list[str] = []
         self._header_id = 0
+        #: populated by :meth:`run` when --capture was requested
+        self.targets: list[Observation] = []
 
     # -- wire helpers ------------------------------------------------------
 
@@ -133,15 +141,18 @@ class ConformanceRunner:
     def discover(self) -> list[Observation]:
         for sub in spec.SUBTOPICS_FROM_AGV:
             self.session.subscribe(self._wildcard(sub), qos=1)
+        # ALSO subscribe to the whole interface namespace. Subscribing only to
+        # the four conformant sub-topics would make protocol.topic_scheme
+        # unfalsifiable by construction: a vehicle publishing on
+        # 'uagv/v2/acme/AGV_01/telemetry' (or on a path with the version level
+        # missing) is invisible to those filters, so the tester would report
+        # "all topics conformant" precisely when they are not. The collector is
+        # pinned to --manufacturer/--serial so the wider filter does not widen
+        # the run itself.
+        self.session.subscribe(f"{self.options.interface}/#", qos=1)
         self.progress(f"discovering for {self.options.discover_seconds:g}s ...")
         self._pump(self.options.discover_seconds)
         found = list(self.collector.robots.values())
-        if self.collector.unroutable:
-            bad = sorted({r.message.topic for r in self.collector.unroutable})
-            self.warnings.append(
-                f"{len(self.collector.unroutable)} message(s) arrived on "
-                f"{len(bad)} topic(s) that are not five-segment VDA 5050 paths: "
-                + ", ".join(bad[:3]))
         if len(found) > self.options.max_robots:
             self.warnings.append(
                 f"{len(found)} vehicles discovered; testing the first "
@@ -290,8 +301,16 @@ class ConformanceRunner:
 
         A broker replays retained messages on EVERY new subscription, so this
         works against any real broker without privileged access. Messages that
-        come back with retain=1 identify the retained topics; the rest of the
-        run's evidence is unaffected because the collector keys off the topic.
+        come back with retain=1 identify the retained topics.
+
+        A retained replay is a COPY of a message the vehicle already published,
+        so it is deliberately NOT fed back into the evidence buckets: doing so
+        double-counts one publish, and a vehicle that (wrongly) retains its
+        state topic would then be failed for a duplicate headerId and a
+        duplicate timestamp on top of the retention finding itself -- three
+        findings for one defect, two of them misattributed. Anything that is
+        NOT retained arrived in this window as a genuinely new publish and is
+        kept.
         """
         for obs in targets:
             for sub in ("connection", "factsheet", "state"):
@@ -313,8 +332,9 @@ class ConformanceRunner:
                 obs = self.collector.robots.get((parts.manufacturer, parts.serial))
                 if obs is not None and parts.subtopic in obs.retain_probe:
                     obs.retain_probe[parts.subtopic] = True
-        # the messages themselves are still evidence
-        self.collector.feed_all(batch)
+        # Fresh publishes that happened to land in this window are still
+        # evidence; the retained replays are not (see the docstring).
+        self.collector.feed_all([m for m in batch if not m.retain])
 
     # -- the whole thing ---------------------------------------------------
 
@@ -331,6 +351,8 @@ class ConformanceRunner:
         self._pump(0)
         self.retain_probe(targets)
         self._capture_wills_all(targets)
+        self._note_offtopic()
+        self.targets = targets
 
         report = Report(
             broker=self.broker_label,
@@ -356,6 +378,39 @@ class ConformanceRunner:
             rr.checks = checks.run_checks(obs)
             report.robots.append(rr)
         return report
+
+    def capture_document(self, generated_at: str = "") -> dict[str, Any]:
+        """The raw evidence of the run just performed, for offline re-grading.
+
+        Only meaningful when ``RunOptions.capture`` was set before the run --
+        otherwise nothing was recorded and the message list comes back empty.
+        """
+        from . import capture as _capture
+
+        return _capture.build(
+            self.collector, self.targets,
+            options=self.options.to_dict(),
+            broker=self.broker_label,
+            captured_at=generated_at or _now_iso(),
+            warnings=self.warnings)
+
+    def _note_offtopic(self) -> None:
+        """Charge malformed topic paths to a vehicle, or warn about them."""
+        orphans = self.collector.attribute_offtopic()
+        if orphans:
+            self.warnings.append(
+                f"{len(orphans)} topic(s) under '{self.options.interface}/' are "
+                "not five-segment VDA 5050 paths and carry no discovered "
+                "vehicle's serialNumber, so they could not be attributed: "
+                + ", ".join(orphans[:3]))
+        if self.collector.foreign:
+            others = sorted({(r.topic.manufacturer, r.topic.serial)
+                             for r in self.collector.foreign if r.topic})
+            self.warnings.append(
+                f"{len(others)} other vehicle(s) are publishing on this broker "
+                "and were ignored because the run is pinned to "
+                f"{self.options.manufacturer or '+'}/{self.options.serial or '+'}: "
+                + ", ".join(f"{m}/{s}" for m, s in others[:3]))
 
     # -- optional broker introspection -------------------------------------
 

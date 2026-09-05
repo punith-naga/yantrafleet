@@ -14,6 +14,7 @@
     python -m yantraops sandbox-mint --origin marketing   # zero-signup demo
     python -m yantraops sandbox-list                      # what's live here
     python -m yantraops sandbox-reap                      # cron: purge expired
+    python -m yantraops sandbox-serve --port 8088         # the "Try it" door
 """
 from __future__ import annotations
 
@@ -198,6 +199,78 @@ def add_sandbox_parsers(sub: Any) -> None:
                       help="extra minutes past expiry before purging "
                            "(default 0)")
 
+    from .sandbox_http import (DEFAULT_HOST, DEFAULT_MAX_INFLIGHT,
+                               DEFAULT_PORT, DEFAULT_RATE,
+                               DEFAULT_RATE_WINDOW_S, DEFAULT_SWEEP_S,
+                               ROUTE_MINT)
+
+    serve = sub.add_parser(
+        "sandbox-serve",
+        help="HTTP door for the marketing page's 'Try it with a live fleet' "
+             f"button: POST {ROUTE_MINT} mints one sandbox and answers its "
+             "console URL. Rate-limited per IP; never accepts a "
+             "caller-supplied site or TTL")
+    backend(serve)
+    serve.add_argument("--host", default=DEFAULT_HOST,
+                       help=f"bind address (default {DEFAULT_HOST} — put "
+                            "nginx in front; 0.0.0.0 exposes it directly)")
+    serve.add_argument("--port", type=int, default=DEFAULT_PORT,
+                       help=f"bind port (default {DEFAULT_PORT})")
+    serve.add_argument("--console", default=None, metavar="URL",
+                       help="console base for the minted link (env "
+                            f"YANTRA_CONSOLE_URL, default {DEFAULT_CONSOLE_URL})")
+    serve.add_argument("--ttl", type=int, default=None, metavar="MIN",
+                       help="lifetime of every sandbox this door mints "
+                            "(clamped by demo_limits.ttl_minutes; default: "
+                            "the server's). Operator config — a visitor "
+                            "cannot ask for a different one")
+    serve.add_argument("--robots", type=int, default=6, metavar="N",
+                       help="robots to seed per sandbox (default 6)")
+    serve.add_argument("--origin", default="web",
+                       help="coarse marker recorded on every session "
+                            "(default 'web')")
+    serve.add_argument("--max-live", type=int, default=None, metavar="N",
+                       help="ceiling on concurrent sandboxes ON THIS BOX "
+                            f"(default {DEFAULT_MAX_LIVE}, env "
+                            "YANTRAOPS_SANDBOX_MAX); answers HTTP 429")
+    serve.add_argument("--rate", type=int, default=DEFAULT_RATE, metavar="N",
+                       help=f"mints allowed per IP per window (default "
+                            f"{DEFAULT_RATE}; 0 disables the limiter)")
+    serve.add_argument("--rate-window", type=float,
+                       default=DEFAULT_RATE_WINDOW_S, metavar="S",
+                       help=f"rate-limit window seconds (default "
+                            f"{int(DEFAULT_RATE_WINDOW_S)})")
+    serve.add_argument("--max-inflight", type=int,
+                       default=DEFAULT_MAX_INFLIGHT, metavar="N",
+                       help="mints allowed to run at the same time "
+                            f"(default {DEFAULT_MAX_INFLIGHT})")
+    serve.add_argument("--trusted-proxy-hops", type=int, default=0,
+                       metavar="N",
+                       help="how many reverse proxies append to "
+                            "X-Forwarded-For (default 0 = ignore the header "
+                            "entirely and rate-limit the socket peer). Set 1 "
+                            "behind a single nginx")
+    serve.add_argument("--allow-origin", default="*", metavar="ORIGIN",
+                       help="Access-Control-Allow-Origin value (default *; "
+                            "pin it to https://yantrika.ai in production)")
+    serve.add_argument("--sweep-interval", type=float, default=DEFAULT_SWEEP_S,
+                       metavar="S",
+                       help="how often to stop the simulators of expired "
+                            f"sandboxes (default {int(DEFAULT_SWEEP_S)}; 0 "
+                            "disables). Purging database rows is "
+                            "sandbox-reap's job — it needs the service key")
+    serve.add_argument("--sim-interval", type=float, default=2.0, metavar="S",
+                       help="simulator tick interval seconds (default 2)")
+    serve.add_argument("--no-sim", action="store_true",
+                       help="mint and seed but start no simulator")
+    serve.add_argument("--no-history", action="store_true",
+                       help="skip the telemetry/incident/mission backfill")
+    serve.add_argument("--duration", type=float, default=None, metavar="S",
+                       help="exit cleanly after N seconds (default: run "
+                            "until SIGTERM)")
+    serve.add_argument("--quiet", action="store_true",
+                       help="no banner and no access log")
+
     drive = sub.add_parser(
         "sandbox-drive",
         help="internal: move one sandbox's fleet (spawned by sandbox-mint; "
@@ -327,6 +400,20 @@ def cmd_sandbox(args: argparse.Namespace) -> int:
         return sb.run_sandbox_reap(
             base_url, key, grace=args.grace, state_file=args.state_file,
             json_output=args.json_output)
+    if args.command == "sandbox-serve":
+        from .sandbox_http import run_sandbox_serve
+        return run_sandbox_serve(
+            base_url, key, host=args.host, port=args.port,
+            console=args.console, ttl=args.ttl, robots=args.robots,
+            origin=args.origin, max_live=args.max_live,
+            sim=not args.no_sim, history=not args.no_history,
+            interval=args.sim_interval, state_file=args.state_file,
+            rate=args.rate, rate_window=args.rate_window,
+            max_inflight=args.max_inflight,
+            trusted_proxy_hops=args.trusted_proxy_hops,
+            allow_origin=args.allow_origin,
+            sweep_interval=args.sweep_interval, duration=args.duration,
+            quiet=args.quiet)
     return sb.run_sandbox_drive(
         base_url, key, args.site, robots=args.robots,
         interval=args.interval, until=args.until, ticks=args.ticks)

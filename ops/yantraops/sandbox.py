@@ -15,6 +15,13 @@ Three commands (see ``yantraops --help``)::
 plus ``sandbox-drive``, the internal child command ``sandbox-mint`` spawns
 to actually move one sandbox's fleet.
 
+A *static* marketing page cannot shell out to argparse, so the button on
+yantrika.ai does not use any of these: it POSTs to the small stdlib HTTP
+door in :mod:`yantraops.sandbox_http` (``yantraops sandbox-serve``), which
+calls :func:`mint_sandbox` — the same function ``sandbox-mint`` calls —
+behind a per-IP rate limit. Both front doors share one code path on
+purpose; there is no second, laxer way to mint.
+
 WHAT THIS MODULE TRUSTS, AND WHAT IT DOES NOT
 ---------------------------------------------
 Everything an anonymous visitor is allowed to do is decided by 0009's RLS
@@ -766,6 +773,37 @@ def _telemetry_sample(robot: dict[str, Any], ts: datetime, age: int,
     }
 
 
+#: Columns read back when the sandbox's live fleet is inspected. A full row
+#: keeps an upsert unambiguous instead of relying on merge semantics.
+ROBOT_COLUMNS = ("id,vendor,status,battery,pos,speed,task_kind,health,"
+                 "motor_temp,tasks_done,site_id")
+
+
+def read_sandbox_robots(api: "SandboxAPI", token: str,
+                        limit: int = 60) -> list[dict[str, Any]]:
+    """The sandbox's fleet, read through the sandbox's own demo token.
+
+    Deliberately the visitor's credential and not a service key: if 0009's
+    read policy were ever misconfigured this comes back empty and the
+    sandbox breaks loudly, instead of quietly working for us and for
+    nobody else.
+    """
+    try:
+        resp = api.client.get(
+            f"{api.rest}/robots",
+            params={"select": ROBOT_COLUMNS, "order": "id.asc",
+                    "limit": str(int(limit))},
+            headers=api.headers(token=token))
+    except Exception as exc:  # noqa: BLE001
+        raise SandboxError(
+            f"robots: read failed ({type(exc).__name__}: {exc})") from exc
+    if resp.status_code >= 400:
+        raise SandboxAPI._error_from(resp, "select robots")
+    rows = resp.json()
+    return ([r for r in rows if isinstance(r, dict)]
+            if isinstance(rows, list) else [])
+
+
 class HistorySeeder:
     """Backfill just enough past for the console not to look empty.
 
@@ -777,10 +815,8 @@ class HistorySeeder:
     anon key + demo token the visitor's browser uses.
     """
 
-    #: Columns read back and re-written when the fleet is parked. A full row
-    #: keeps the upsert unambiguous instead of relying on merge semantics.
-    ROBOT_COLUMNS = ("id,vendor,status,battery,pos,speed,task_kind,health,"
-                     "motor_temp,tasks_done,site_id")
+    #: Columns read back and re-written when the fleet is parked.
+    ROBOT_COLUMNS = ROBOT_COLUMNS
 
     def __init__(self, api: SandboxAPI, site_id: str, token: str, *,
                  plan: FloorPlan | None = None) -> None:
@@ -803,19 +839,7 @@ class HistorySeeder:
 
     def robots(self) -> list[dict[str, Any]]:
         """The seeded fleet, read back through the sandbox's own token."""
-        try:
-            resp = self.api.client.get(
-                f"{self.api.rest}/robots",
-                params={"select": self.ROBOT_COLUMNS,
-                        "order": "id.asc", "limit": "60"},
-                headers=self.api.headers(token=self.token))
-        except Exception as exc:  # noqa: BLE001
-            raise SandboxError(
-                f"robots: read failed ({type(exc).__name__}: {exc})") from exc
-        if resp.status_code >= 400:
-            raise SandboxAPI._error_from(resp, "select robots")
-        rows = resp.json()
-        return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        return read_sandbox_robots(self.api, self.token)
 
     def write_telemetry(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
@@ -1041,6 +1065,73 @@ class SandboxDriver:
         """The id ``demo_mint_session`` already seeded: ``<site>-R01``."""
         return f"{self.site}-R{i:02d}"
 
+    # -- continuing from the fleet the visitor was handed -------------------
+
+    def adopt_live_fleet(self) -> int:
+        """Start the simulation from where the seeded fleet already stands.
+
+        ``FleetSim`` lays its robots out on its own randomly chosen task
+        nodes, and ``HistorySeeder.park_fleet`` has already parked the
+        *seeded* fleet somewhere else on the same grid — so without this,
+        the driver's very first tick teleports every robot across the
+        warehouse (measured: up to 28 m) and orphans the telemetry trail
+        the seeder just wrote. Reading the live rows once at startup costs
+        one GET and makes the first tick a step rather than a jump.
+
+        Best effort by construction: a sandbox with no rows yet, or a
+        backend blip, just leaves the simulator's own layout in place.
+        Returns how many robots were adopted.
+        """
+        try:
+            rows = read_sandbox_robots(self.api, self.token,
+                                       limit=max(self.robots, 1) + 10)
+        except SandboxError:
+            return 0
+        by_id = {str(r.get("id")): r for r in rows}
+        plan = FloorPlan()
+        adopted = 0
+        for robot in self.sim.robots:
+            row = by_id.get(getattr(robot, "robot_id", ""))
+            if row is None:
+                continue
+            pos = row.get("pos") or []
+            if not (isinstance(pos, (list, tuple)) and len(pos) >= 2):
+                continue
+            try:
+                x, y = float(pos[0]), float(pos[1])
+            except (TypeError, ValueError):
+                continue
+            node = min(plan.nodes,
+                       key=lambda n: (plan.nodes[n][0] - x) ** 2
+                       + (plan.nodes[n][1] - y) ** 2)
+            robot.node = node
+            robot.x, robot.y = plan.nodes[node][0], plan.nodes[node][1]
+            robot.path = []
+            robot.leg_progress_m = 0.0
+            robot.speed = 0.0
+            # 'charging' is only meaningful on a charge bay; anywhere else
+            # the simulator would be modelling a robot charging in an aisle.
+            # Everything else starts idle and picks up a task next tick,
+            # which is how a real floor resumes.
+            robot.status = ("charging"
+                            if str(row.get("status")) == "charging"
+                            and plan.nodes[node][2] == "charger" else "idle")
+            for field_name, key in (("battery", "battery"),
+                                    ("tasks_done", "tasks_done"),
+                                    ("health", "health"),
+                                    ("motor_temp", "motor_temp")):
+                value = row.get(key)
+                if value is None:
+                    continue
+                try:
+                    setattr(robot, field_name,
+                            int(value) if field_name == "tasks_done"
+                            else float(value))
+                except (TypeError, ValueError):
+                    pass
+            adopted += 1
+        return adopted
+
     # -- row shaping -------------------------------------------------------
 
     def _rows(self, out: Any) -> dict[str, list[dict[str, Any]]]:
@@ -1216,15 +1307,28 @@ def _fail(payload: dict[str, Any], message: str, json_output: bool) -> None:
         print(f"yantraops: {message}", file=sys.stderr)
 
 
-def run_sandbox_mint(base_url: str, key: str, *, ttl: int | None = None,
-                     robots: int = 6, origin: str | None = None,
-                     console: str | None = None, max_live: int | None = None,
-                     sim: bool = True, interval: float = 2.0,
-                     history: bool = True, claim: bool = False,
-                     state_file: Path | str | None = None,
-                     json_output: bool = False, api: SandboxAPI | None = None,
-                     spawn: Callable[..., int] = _spawn_driver) -> int:
-    """Mint + seed + start one sandbox. Prints the console URL."""
+def mint_sandbox(base_url: str, key: str, *, ttl: int | None = None,
+                 robots: int = 6, origin: str | None = None,
+                 console: str | None = None, max_live: int | None = None,
+                 sim: bool = True, interval: float = 2.0,
+                 history: bool = True,
+                 state_file: Path | str | None = None,
+                 api: SandboxAPI | None = None,
+                 spawn: Callable[..., int] = _spawn_driver) -> dict[str, Any]:
+    """Mint + seed + start one sandbox; return the payload, or raise.
+
+    This is the whole mint, with no printing and no exit codes, so both
+    front doors — ``sandbox-mint`` on a terminal and the HTTP endpoint in
+    :mod:`yantraops.sandbox_http` behind the "Try it" button — run exactly
+    the same path. Raises :class:`SandboxCeiling` when the box (or the
+    database) is full and :class:`SandboxDisabled` when the deployment has
+    the sandbox turned off, so a caller can map either onto its own
+    protocol without parsing prose.
+
+    The returned dict never carries the raw token; the only place it
+    appears is inside ``console_url``, which is the one thing the visitor
+    is meant to receive.
+    """
     registry = SandboxRegistry(state_file)
     registry.sweep()                       # dead sandboxes never hold a slot
     ceiling = resolve_max_live(max_live)
@@ -1282,14 +1386,40 @@ def run_sandbox_mint(base_url: str, key: str, *, ttl: int | None = None,
             origin=origin, started_at=_iso(_now()),
             robots=session.seeded_robots))
 
-        payload = dict(session.redacted(), console_url=console_url,
-                       pid=pid, seeded=seeded, warnings=warnings,
-                       live_on_this_box=registry.live_count(),
-                       max_live=ceiling)
+        return dict(session.redacted(), console_url=console_url,
+                    pid=pid, seeded=seeded, warnings=warnings,
+                    live_on_this_box=registry.live_count(),
+                    max_live=ceiling)
+    finally:
+        if owned:
+            api.close()
+
+
+def run_sandbox_mint(base_url: str, key: str, *, ttl: int | None = None,
+                     robots: int = 6, origin: str | None = None,
+                     console: str | None = None, max_live: int | None = None,
+                     sim: bool = True, interval: float = 2.0,
+                     history: bool = True, claim: bool = False,
+                     state_file: Path | str | None = None,
+                     json_output: bool = False, api: SandboxAPI | None = None,
+                     spawn: Callable[..., int] = _spawn_driver) -> int:
+    """Mint + seed + start one sandbox. Prints the console URL."""
+    try:
+        payload = mint_sandbox(base_url, key, ttl=ttl, robots=robots,
+                               origin=origin, console=console,
+                               max_live=max_live, sim=sim, interval=interval,
+                               history=history, state_file=state_file,
+                               api=api, spawn=spawn)
+        session_site = payload["site_id"]
+        seeded = payload["seeded"]
+        warnings = payload["warnings"]
+        pid = payload["pid"]
+        console_url = payload["console_url"]
         lines = [
-            f"  sandbox   {session.site_id}"
-            f"  ({session.seeded_robots} robots, ttl {session.ttl_minutes}m)",
-            f"  expires   {session.expires_at}",
+            f"  sandbox   {session_site}"
+            f"  ({payload['seeded_robots']} robots, "
+            f"ttl {payload['ttl_minutes']}m)",
+            f"  expires   {payload['expires_at']}",
             f"  simulator {'pid ' + str(pid) if pid else 'not started (--no-sim)'}",
             f"  history   {seeded.get('robot_telemetry', 0)} telemetry rows, "
             f"{seeded.get('incidents', 0)} incident, "
@@ -1310,9 +1440,6 @@ def run_sandbox_mint(base_url: str, key: str, *, ttl: int | None = None,
                "reason": "disabled" if isinstance(exc, SandboxDisabled)
                          else "error"}, exc.message, json_output)
         return EXIT_ERROR
-    finally:
-        if owned:
-            api.close()
 
 
 def run_sandbox_reap(base_url: str, key: str, *, grace: int = 0,
@@ -1425,6 +1552,10 @@ def run_sandbox_drive(base_url: str, key: str, site: str, *,
     try:
         driver = SandboxDriver(api, site, token, robots=robots,
                                interval=interval, deadline=_parse_ts(until))
+        # The visitor may already be looking at this fleet. Continue from
+        # where it stands rather than teleporting it to the simulator's own
+        # starting layout on tick one.
+        driver.adopt_live_fleet()
     except SandboxError as exc:
         print(f"yantraops: {exc.message}", file=sys.stderr)
         if owned:
