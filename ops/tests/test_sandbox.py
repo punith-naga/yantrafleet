@@ -17,6 +17,7 @@ import json
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -1247,27 +1248,23 @@ def test_demo_token_cannot_outlive_the_reaper(fakerest, api, service_api,
     assert api.info(session.token)["reason"] == "reaped"
 
 
-def test_commands_insert_is_not_constrained_to_the_sandboxs_own_robots(
+def test_commands_insert_is_constrained_to_the_sandboxs_own_robots(
         fakerest, api):
-    """SCHEMA GAP, asserted so it cannot be forgotten. See the report.
+    """0017 closed the schema gap this test used to pin open.
 
-    0009's `demo_sandbox_insert` checks `site_id` and nothing else, and
+    0009's `demo_sandbox_insert` checked `site_id` and nothing else, and
     `commands.robot_id` is a bare `text` column (0002 — no foreign key, no
-    same-site constraint). So an anonymous visitor can insert a command row
-    that *names a real fleet's robot* while still living in their own demo
-    site, and can set `status='approved'` at insert time (the column-level
-    grants only narrow UPDATE, never INSERT).
+    same-site constraint). An anonymous visitor could therefore insert a
+    command row that *named a real fleet's robot* while still living in
+    their own demo site, with `status='approved'` already set (the
+    column-level grants only narrow UPDATE, never INSERT). A service-key
+    executor polling `commands?status=eq.approved` without a site filter
+    would then have dispatched it as a VDA 5050 instantAction.
 
-    Nothing in the database is harmed by that row — it stays in the demo
-    site, and the real site's rows are untouched, which is what this test
-    pins down. The exposure is downstream: an executor that polls
-    `commands?status=eq.approved` WITHOUT a `site_id` filter would dispatch
-    it. `yantrasim.transports.supabase.poll_commands` has no site filter at
-    all, and `yantrabridge.CommandPublisher` only adds one when `--site` is
-    passed.
-
-    If a later migration adds the missing constraint, this test SHOULD
-    fail — invert it then, do not delete it.
+    supabase/0017_demo_command_scope.sql adds the missing WITH CHECK terms:
+    same-site robot, `pending` only, no decision stamps. The behaviour
+    below was verified against a real PostgreSQL 16 with 0001-0017 applied
+    before it was mirrored into the fake.
     """
     session = api.mint(seed_robots=2)
     forged = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -1278,15 +1275,52 @@ def test_commands_insert_is_not_constrained_to_the_sandboxs_own_robots(
                    "requested_by": "demo-visitor",
                    "site_id": session.site_id}],
                  token=session.token)
-    assert resp.status_code < 400, "0009 accepts this today — see the report"
-    row = next(r for r in fakerest.tables["commands"] if r["id"] == forged)
-    assert row["site_id"] == session.site_id, "…but it stays in the sandbox"
-    assert row["robot_id"] == "AMR-01", "…while naming another site's robot"
+    assert resp.status_code == 403
+    assert "row-level security" in resp.text
+    assert not [r for r in fakerest.tables["commands"] if r["id"] == forged]
 
-    # The real site's own rows are untouched either way.
+    # Even a *pending* command is refused when it names a foreign robot.
+    pending_at_a_real_robot = _post(
+        fakerest.base_url, "commands",
+        [{"id": str(uuid.uuid4()), "robot_id": "AMR-01", "cmd": "estop",
+          "params": {}, "status": "pending", "requested_by": "demo-visitor",
+          "site_id": session.site_id}],
+        token=session.token)
+    assert pending_at_a_real_robot.status_code == 403
+
+    # ...and so is a pre-approved command for the sandbox's OWN robot:
+    # the human approval gate cannot be satisfied at insert time.
+    own = f"{session.site_id}-R01"
+    preapproved = _post(
+        fakerest.base_url, "commands",
+        [{"id": str(uuid.uuid4()), "robot_id": own, "cmd": "estop",
+          "params": {}, "status": "approved", "requested_by": "demo-visitor",
+          "site_id": session.site_id}],
+        token=session.token)
+    assert preapproved.status_code == 403
+
+    # What the sandbox may still do: request a pending command for its own
+    # robot, then decide it — the loop the demo exists to show.
+    good = str(uuid.uuid4())
+    ok = _post(fakerest.base_url, "commands",
+               [{"id": good, "robot_id": own, "cmd": "charge", "params": {},
+                 "status": "pending", "requested_by": "demo-visitor",
+                 "site_id": session.site_id}],
+               token=session.token)
+    assert ok.status_code < 400
+    patched = httpx.patch(
+        f"{fakerest.base_url}/rest/v1/commands", params={"id": f"eq.{good}"},
+        json={"status": "approved", "decided_by": "demo-visitor"},
+        headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}",
+                 sb.DEMO_TOKEN_HEADER: session.token}, timeout=5.0)
+    assert patched.status_code == 204
+    row = next(r for r in fakerest.tables["commands"] if r["id"] == good)
+    assert (row["status"], row["site_id"]) == ("approved", session.site_id)
+
+    # The real site's own rows are untouched, and no approved command
+    # anywhere names a robot outside its own site.
     assert next(r for r in fakerest.tables["robots"]
                 if r["id"] == "AMR-01")["site_id"] == "BLR-DC1"
-    # And a site-filtered executor sees nothing: the one-line mitigation.
     scoped = [c for c in fakerest.tables["commands"]
               if c.get("site_id") == "BLR-DC1" and c.get("status") == "approved"]
     assert scoped == []
@@ -1697,9 +1731,8 @@ def test_http_drops_an_oversized_or_chunked_body_without_desyncing(
     assert len(fakerest.demo_sessions) == 2
 
 
-def test_upsert_onto_a_real_robots_primary_key_is_a_FAKEREST_GAP(
-        fakerest, api):
-    """FAKE-BACKEND DIVERGENCE, pinned so it cannot quietly rot.
+def test_upsert_onto_a_real_robots_primary_key_is_refused(fakerest, api):
+    """The fake now models what PostgreSQL actually does with ON CONFLICT.
 
     ``robots.id`` is a global primary key, so a demo visitor can aim an
     upsert (``on_conflict=id``, ``resolution=merge-duplicates``) at a REAL
@@ -1709,18 +1742,13 @@ def test_upsert_onto_a_real_robots_primary_key_is_a_FAKEREST_GAP(
     ``demo_sandbox_update`` requires ``site_id = yf_demo_site()`` — which
     ``AMR-01`` is not — so the statement errors instead of merging. (The
     row is not even SELECT-visible to that token, which fails it twice.)
+    Confirmed by hand against PostgreSQL 16 with 0001-0017 applied:
+    ``ERROR: new row violates row-level security policy (USING expression)
+    for table "robots"``.
 
-    ``e2e/fakerest.py`` does not model that: ``_insert_denied`` validates
-    only the *incoming* rows' ``site_id`` and then merges. The result below
-    is what the FAKE does, not what the database does — this is why the
-    test is named for the gap. See the report's NEEDS section for the
-    four-line fix to fakerest; when it lands, this assertion flips to
-    ``status_code == 403`` and ``site_id == "BLR-DC1"``.
-
-    Nothing in yantraops relies on the difference: every id the sandbox
-    ever writes is namespaced with its own site (robots ``<site>-Rnn``,
-    incidents ``<site>-INC-…``, missions ``<site>-<id>``, findings
-    ``<site>-MF-…``), so no code path here can collide with a real row.
+    ``e2e/fakerest.py`` used to validate only the *incoming* rows'
+    ``site_id`` and then merge, which is the divergence this test was
+    originally named for. It now checks the existing row's owner too.
     """
     session = api.mint(seed_robots=2)
     resp = httpx.post(
@@ -1732,9 +1760,25 @@ def test_upsert_onto_a_real_robots_primary_key_is_a_FAKEREST_GAP(
                  "Content-Type": "application/json",
                  "Prefer": "return=minimal,resolution=merge-duplicates"},
         timeout=5.0)
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "42501"
     victim = next(r for r in fakerest.tables["robots"] if r["id"] == "AMR-01")
-    assert (resp.status_code, victim["site_id"]) == (201, session.site_id), \
-        "fakerest was fixed — invert this test to the real DB's behaviour"
+    assert (victim["site_id"], victim["vendor"]) == ("BLR-DC1", "MiR"), \
+        "the real robot was hijacked by a demo upsert"
+
+    # ``do nothing`` is what PostgreSQL silently skips rather than errors,
+    # so the fake skips it too — the row is still not touched.
+    ignored = httpx.post(
+        f"{fakerest.base_url}/rest/v1/robots", params={"on_conflict": "id"},
+        json=[{"id": "AMR-01", "vendor": "EVIL", "site_id": session.site_id}],
+        headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}",
+                 sb.DEMO_TOKEN_HEADER: session.token,
+                 "Content-Type": "application/json",
+                 "Prefer": "return=minimal,resolution=ignore-duplicates"},
+        timeout=5.0)
+    assert ignored.status_code == 201
+    assert next(r for r in fakerest.tables["robots"]
+                if r["id"] == "AMR-01")["vendor"] == "MiR"
 
     # What DOES hold in both, and is the property that matters: no id this
     # module writes can ever address a row outside its own sandbox. (A

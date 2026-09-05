@@ -1,6 +1,11 @@
 """Offline tests for CommandPublisher: approved rows -> instantActions,
 actionState acks -> PATCH executed/failed. httpx.MockTransport + a fake
-publish callable — nothing leaves the process."""
+publish callable — nothing leaves the process.
+
+v0.17: a publisher is bound to exactly one site (``TestSiteGate`` below),
+so every fixture here names one. The 0005 column default is mirrored for
+rows that do not carry ``site_id``, exactly as the database does.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +14,12 @@ from typing import Any
 from urllib.parse import parse_qsl
 
 import httpx
+import pytest
 
-from yantrabridge.commands import CommandPublisher
+from yantrabridge.commands import ANY_SITE, CommandPublisher, resolve_site
+
+#: 0005's `site_id` column default — the site every row here lands in.
+SITE = "BLR-DC1"
 
 
 class FakeBackend:
@@ -34,11 +43,14 @@ class FakeBackend:
                     if f"eq.{r['status']}" == params.get("status", "eq.")]
             if "site_id" in params:
                 rows = [r for r in rows
-                        if f"eq.{r.get('site_id')}" == params["site_id"]]
+                        if f"eq.{r.get('site_id', SITE)}" == params["site_id"]]
             return httpx.Response(200, json=rows)
         if request.method == "GET" and request.url.path.endswith("/robots"):
             want = params.get("id", "")
             rows = [r for r in self.robots if f"eq.{r['id']}" == want]
+            if "site_id" in params:   # 0005 default for unstamped rows
+                rows = [r for r in rows
+                        if f"eq.{r.get('site_id', SITE)}" == params["site_id"]]
             return httpx.Response(200, json=rows)
         if request.method == "PATCH" and request.url.path.endswith("/commands"):
             if self.fail_patches:
@@ -64,7 +76,7 @@ class FakeMqtt:
         self.published.append((topic, json.loads(payload)))
 
 
-def make(site: str | None = None) -> tuple[FakeBackend, FakeMqtt, CommandPublisher]:
+def make(site: str | None = SITE) -> tuple[FakeBackend, FakeMqtt, CommandPublisher]:
     backend = FakeBackend()
     mqtt = FakeMqtt()
     pub = CommandPublisher(
@@ -74,7 +86,8 @@ def make(site: str | None = None) -> tuple[FakeBackend, FakeMqtt, CommandPublish
 
 
 CMD = {"id": "11111111-2222-3333-4444-555555555555",
-       "robot_id": "AMR_01", "cmd": "pause", "status": "approved"}
+       "robot_id": "AMR_01", "cmd": "pause", "status": "approved",
+       "site_id": SITE}
 STATE = {"manufacturer": "nexomotion", "serialNumber": "AMR_01",
          "actionStates": []}
 
@@ -286,3 +299,119 @@ class TestActionStateAcks:
         backend.fail_patches = False
         pub.handle_state(ack)           # repeat closes it
         assert backend.commands[0]["status"] == "executed"
+
+
+class TestSiteGate:
+    """v0.17 SECURITY: a bridge executes commands for exactly one site.
+
+    The attack this closes (reproduced end to end against a real
+    PostgreSQL 16 in the change report): an anonymous demo-sandbox
+    visitor inserts a ``commands`` row with ``robot_id='AMR-01'`` — a
+    REAL robot — ``status='approved'`` and its own ``DEMO-*`` site_id.
+    supabase/0017_demo_command_scope.sql now refuses that insert; these
+    tests cover the other half, the executor that must refuse to ACT on
+    such a row even if one already exists (0009 wrote it before 0017, or
+    the bridge points at an un-migrated project).
+    """
+
+    def test_a_site_is_required(self) -> None:
+        with pytest.raises(ValueError) as exc:
+            make(site=None)
+        assert "site is required" in str(exc.value)
+        # ...and the message says how to fix it, all three ways.
+        for hint in ("--site", "YANTRA_SITE_ID", "'*'"):
+            assert hint in str(exc.value)
+
+    def test_env_supplies_the_site_when_the_flag_does_not(
+            self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YANTRA_SITE_ID", "PNQ-DC2")
+        assert resolve_site() == "PNQ-DC2"
+        assert resolve_site("BLR-DC1") == "BLR-DC1"   # explicit still wins
+
+    def test_blank_site_is_not_a_site(self,
+                                      monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YANTRA_SITE_ID", "   ")
+        with pytest.raises(ValueError):
+            resolve_site("  ")
+
+    def test_a_forged_demo_command_is_never_published(self) -> None:
+        """The exact forged row, seen by a bridge serving the real site."""
+        backend, mqtt, pub = make(site=SITE)
+        backend.robots.append({"id": "AMR_01", "vendor": "agilus",
+                               "site_id": SITE})
+        backend.commands.append({
+            "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "robot_id": "AMR_01", "cmd": "estop", "status": "approved",
+            "requested_by": "demo-visitor", "site_id": "DEMO-DEADBEEF01"})
+        assert pub.poll() == 0
+        assert mqtt.published == []
+        assert backend.patches == []
+
+    def test_a_backend_that_ignores_the_filter_is_still_refused(self) -> None:
+        """Belt and braces: the row is re-checked after it comes back.
+
+        A stale PostgREST, a proxy that ate the query string or a
+        stand-in backend could return rows the server-side filter should
+        have removed. Simulated here by a backend that ignores
+        ``site_id``; the publisher must still refuse.
+        """
+        class Leaky(FakeBackend):
+            def handler(self, request: httpx.Request) -> httpx.Response:
+                if (request.method == "GET"
+                        and request.url.path.endswith("/commands")):
+                    self.requests.append(request)
+                    return httpx.Response(200, json=self.commands)
+                return super().handler(request)
+
+        backend, mqtt = Leaky(), FakeMqtt()
+        pub = CommandPublisher(
+            mqtt.publish, "https://example.supabase.co", "test-key",
+            site=SITE, transport=httpx.MockTransport(backend.handler))
+        pub.handle_state(STATE)          # manufacturer already known
+        backend.commands.append({**CMD, "site_id": "DEMO-DEADBEEF01"})
+        assert pub.poll() == 0
+        assert mqtt.published == []
+
+    def test_a_robot_at_another_site_cannot_be_routed(self) -> None:
+        """Third control: the robots lookup is site-scoped too."""
+        backend, mqtt, pub = make(site="PNQ-DC2")
+        backend.robots.append({"id": "AMR_01", "vendor": "agilus",
+                               "site_id": SITE})
+        backend.commands.append({**CMD, "site_id": "PNQ-DC2"})
+        assert pub.poll() == 0            # vendor never resolves
+        assert mqtt.published == []
+        robot_get = next(r for r in backend.requests
+                         if r.url.path.endswith("/robots"))
+        params = dict(parse_qsl(robot_get.url.query.decode()))
+        assert params["site_id"] == "eq.PNQ-DC2"
+
+    def test_rows_without_a_site_id_column_still_run(self) -> None:
+        """An older backend that does not project site_id must not
+        silently stop the bridge — the server-side filter is the control
+        there, and the behaviour is logged once."""
+        backend, mqtt, pub = make(site=SITE)
+        backend.commands.append({k: v for k, v in CMD.items()
+                                 if k != "site_id"})
+        pub.handle_state(STATE)
+        assert pub.poll() == 1
+        assert mqtt.published
+
+    def test_star_opts_out_of_every_filter(self) -> None:
+        backend, mqtt, pub = make(site=ANY_SITE)
+        backend.robots.append({"id": "AMR_01", "vendor": "agilus",
+                               "site_id": "DEMO-DEADBEEF01"})
+        backend.commands.append({**CMD, "site_id": "DEMO-DEADBEEF01"})
+        assert pub.poll() == 1            # deliberate, documented opt-out
+        get = next(r for r in backend.requests
+                   if r.url.path.endswith("/commands"))
+        assert "site_id" not in dict(parse_qsl(get.url.query.decode()))
+
+    def test_the_site_id_column_is_actually_requested(self) -> None:
+        backend, mqtt, pub = make()
+        backend.commands.append(dict(CMD))
+        pub.poll()
+        get = next(r for r in backend.requests
+                   if r.url.path.endswith("/commands"))
+        params = dict(parse_qsl(get.url.query.decode()))
+        assert "site_id" in params["select"].split(",")
+        assert params["site_id"] == f"eq.{SITE}"

@@ -59,6 +59,9 @@ FAULT_HINTS: dict[str, str] = {
     "estop": "Release e-stop and acknowledge on the vehicle HMI",
 }
 
+#: errorType the spec names for an order update the AGV discarded (2.1 6.5).
+ORDER_UPDATE_ERROR = "orderUpdateError"
+
 _SERIAL_BAD = re.compile(r"[^A-Za-z0-9_.:]")
 _SEGMENT_BAD = re.compile(r"[/$]")
 
@@ -113,6 +116,59 @@ def build_errors(fault_kind: str | None, serial_number: str) -> list[dict[str, A
     }]
 
 
+def build_order_update_error(serial_number: str, order_id: str,
+                             rejected_update_id: int,
+                             current_update_id: int) -> dict[str, Any]:
+    """errors[] entry for an order update the AGV discarded (2.1 6.5).
+
+    VDA 5050 has no ack topic for the order flow: the ONLY way master
+    control learns that an update was dropped rather than quietly applied
+    is an in-band ``errors[]`` entry on the next state message, of
+    errorType ``orderUpdateError`` at ``WARNING`` level (the vehicle keeps
+    running the order it already had, so this is not FATAL).
+    ``errorReferences`` name the exact message that was rejected;
+    referenceValue is a string per the spec's reference shape.
+    """
+    return {
+        "errorType": ORDER_UPDATE_ERROR,
+        "errorLevel": "WARNING",
+        "errorDescription": (
+            f"orderUpdateId {rejected_update_id} for order {order_id!r} is not "
+            f"newer than the update in progress ({current_update_id}); the "
+            "order update was discarded"),
+        "errorHint": (
+            "Re-send the update with an orderUpdateId strictly greater than "
+            f"{current_update_id}"),
+        "errorReferences": [
+            {"referenceKey": "serialNumber", "referenceValue": serial_number},
+            {"referenceKey": "orderId", "referenceValue": order_id},
+            {"referenceKey": "orderUpdateId",
+             "referenceValue": str(rejected_update_id)},
+        ],
+    }
+
+
+def merge_action_states(existing: list[dict[str, Any]],
+                        extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge staged actionStates into a state's array; later status wins.
+
+    ``actionStates`` is the CURRENT status of each action, not a log of
+    status changes (VDA 5050 2.1 6.9), so an entry whose actionId is
+    already present REPLACES it in place instead of appearing beside it --
+    two entries for one actionId leave a fleet manager reading whichever it
+    happens to see last, which is how an action appears to finish and then
+    start running again.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for entry in list(existing) + list(extra):
+        action_id = str(entry.get("actionId"))
+        if action_id not in merged:
+            order.append(action_id)
+        merged[action_id] = entry
+    return [merged[action_id] for action_id in order]
+
+
 def build_state(r: "Robot", header_id: int, timestamp: str) -> dict[str, Any]:
     """One VDA 5050 v2.1 state message for robot ``r``."""
     serial = sanitize_serial(r.robot_id)
@@ -141,7 +197,11 @@ def build_state(r: "Robot", header_id: int, timestamp: str) -> dict[str, Any]:
     action_states = []
     if r.status == "working" and r.task_kind is not None:
         action_states.append({
-            "actionId": f"a-{serial}-{r.tasks_done + 1}",
+            # Robot.action_id is the ONE definition of the in-flight
+            # action's id, shared with the terminal FINISHED/FAILED staging
+            # in sim.py -- an action must not report one id while RUNNING
+            # and a different one when it reaches a terminal status.
+            "actionId": r.action_id,
             "actionType": r.task_kind,
             "actionStatus": "RUNNING",
         })

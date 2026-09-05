@@ -70,6 +70,12 @@ AMBIENT_TEMP = 34.0           # motor temp floor (deg C)
 #: while bounding memory).
 TASK_ACTION_STATE_REPEATS = 3
 
+#: How many consecutive state messages carry a staged ``errors[]`` entry (an
+#: orderUpdateError for a discarded order update) before it is dropped. Same
+#: rationale and bound as TASK_ACTION_STATE_REPEATS: the rejection is an
+#: EVENT, and state messages are QoS 0, so reporting it once is a coin flip.
+ORDER_ERROR_STATE_REPEATS = 3
+
 
 @dataclass
 class Event:
@@ -142,6 +148,7 @@ class Robot:
     order_id: str = ""
     order_update_id: int = 0
     order_seq: int = 0              # per-robot order counter
+    action_seq: int = 0             # per-robot generated-actionId counter
     header_id: int = 0              # per-topic (state) headerId counter
     last_node_sequence_id: int = 0
     # actionId of the in-flight task action (order-supplied, else a
@@ -152,11 +159,32 @@ class Robot:
     #: actionStates (e.g. a just-finished task) awaiting a few state
     #: messages before being dropped -- see TASK_ACTION_STATE_REPEATS.
     pending_action_states: list = field(default_factory=list)
+    #: [[error dict, publishes-remaining], ...] staged ``errors[]`` entries
+    #: (an orderUpdateError for a discarded order update) awaiting a few
+    #: state messages -- see ORDER_ERROR_STATE_REPEATS.
+    pending_errors: list = field(default_factory=list)
 
     @property
     def localized(self) -> bool:
         """False while a localization fault is active (AMR-07 script)."""
         return self.fault_kind != "localization"
+
+    @property
+    def action_id(self) -> str:
+        """actionId of the action currently in flight.
+
+        THE single definition, used by ``vda.build_state`` when reporting
+        the action RUNNING and by both terminal-staging paths
+        (``FleetSim._stage_finished_action`` / ``_stage_failed_action``).
+        An order-supplied action keeps master control's own actionId --
+        that id is the only handle the fleet manager has to correlate what
+        it dispatched with what the vehicle reports -- and an internally
+        generated task gets an ``a-<serial>-<n>`` id minted by
+        ``FleetSim._new_generated_action_id``.
+        """
+        if self.current_action_id:
+            return self.current_action_id
+        return f"a-{vda.sanitize_serial(self.robot_id)}-{self.action_seq}"
 
 
 @dataclass
@@ -172,6 +200,51 @@ class TickOutput:
     missions: list[dict[str, Any]] = field(default_factory=list)
     """Missions snapshot: table-shaped dicts (id,name,robots,state,prog,eta,
     created_at) for the ``missions`` table."""
+
+
+# --------------------------------------------------------------------------
+# Staged evidence: events that a pure state snapshot would lose
+# --------------------------------------------------------------------------
+
+def attach_pending(r: Robot, state: dict[str, Any]) -> None:
+    """Merge ``r``'s staged actionStates and errors into one state message.
+
+    ``vda.build_state`` is a pure snapshot of the robot RIGHT NOW, so
+    anything that is an EVENT rather than a condition -- a task that just
+    finished, an action a new order superseded, an order update that was
+    rejected -- would never reach the wire at all. Those are staged on the
+    Robot and merged in here.
+
+    EVERY path that publishes a state message must go through this:
+    ``FleetSim.tick`` and the MQTT transport's ``stateRequest`` handler.
+    Otherwise which evidence a consumer sees depends on which of the two
+    published the message it happened to receive.
+    """
+    _attach_pending_action_states(r, state)
+    _attach_pending_errors(r, state)
+
+
+def _attach_pending_action_states(r: Robot, state: dict[str, Any]) -> None:
+    """Merge ``r``'s staged terminal actionStates into one outgoing state."""
+    if not r.pending_action_states:
+        return
+    state["actionStates"] = vda.merge_action_states(
+        state.get("actionStates") or [],
+        [dict(entry[0]) for entry in r.pending_action_states])
+    for entry in r.pending_action_states:
+        entry[1] -= 1
+    r.pending_action_states = [e for e in r.pending_action_states if e[1] > 0]
+
+
+def _attach_pending_errors(r: Robot, state: dict[str, Any]) -> None:
+    """Append ``r``'s staged ``errors[]`` entries to one outgoing state."""
+    if not r.pending_errors:
+        return
+    state["errors"] = list(state.get("errors") or []) + [
+        dict(entry[0]) for entry in r.pending_errors]
+    for entry in r.pending_errors:
+        entry[1] -= 1
+    r.pending_errors = [e for e in r.pending_errors if e[1] > 0]
 
 
 class FleetSim:
@@ -223,7 +296,7 @@ class FleetSim:
         for r in self.robots:
             r.header_id += 1
             state = vda.build_state(r, header_id=r.header_id, timestamp=ts)
-            self._attach_pending_action_states(r, state)
+            attach_pending(r, state)
             states.append(state)
             extras[r.robot_id] = {
                 "robot_id": r.robot_id,
@@ -288,8 +361,13 @@ class FleetSim:
 
         # Divert to charger when battery gets low (from any active state).
         if r.battery <= LOW_BATTERY_GO_CHARGE and r.status != "to_charger":
+            # The task in flight is abandoned -- report it terminal (6.9)
+            # before it stops being reported.
+            self._stage_failed_action(
+                r, f"diverted to charger: battery {r.battery:.0f}%")
             self._route_to(r, world.nearest_charger(r.node), "to_charger")
             r.task_kind = None
+            r.current_action_id = None
             r.task_mission = None  # abandoned task does not count for a mission
 
         if r.battery <= LOW_BATTERY_ALERT and not r.low_battery_alerted:
@@ -314,8 +392,11 @@ class FleetSim:
             r.battery = max(r.battery - WORK_DRAIN * dt, 0.0)
             r.work_left_s -= dt
             if r.work_left_s <= 0:
-                r.tasks_done += 1
+                # Stage FIRST, while task_kind/current_action_id still
+                # describe the action that just finished: the terminal entry
+                # has to report the id and type it was RUNNING under.
                 self._stage_finished_action(r)
+                r.tasks_done += 1
                 r.task_kind = None
                 r.current_action_id = None
                 r.status = "idle"
@@ -357,6 +438,10 @@ class FleetSim:
         targets = [n for n in world.TASK_NODES if n != r.node]
         target = self.rng.choice(targets)
         r.task_kind = self.rng.choice(TASK_KINDS)
+        # Internally generated task: no master-control actionId to honour,
+        # so mint one. Minting (rather than leaving whatever the last order
+        # set) is what stops a finished order's actionId being reused here.
+        r.current_action_id = self._new_generated_action_id(r)
         # Tag the task with the robot's mission (v0.5).
         r.task_mission = None
         if r.mission_id is not None:
@@ -400,6 +485,17 @@ class FleetSim:
         greater than the last one applied -- a stale/duplicate update is
         rejected so redelivery or an out-of-order master control message
         can never rewind progress.
+
+        Rejecting is not enough on its own. Per 6.5 the vehicle must SAY it
+        rejected the update: an ``orderUpdateId`` strictly LOWER than the
+        one in progress raises an ``orderUpdateError`` (WARNING) on the next
+        few state messages, because there is no ack topic in the order flow
+        and master control otherwise cannot tell "your update was dropped"
+        from "your update was applied and changed nothing". An ``orderUpdateId``
+        EQUAL to the one in progress is a duplicate -- exactly what MQTT
+        redelivery produces -- and 6.5 has the vehicle discard it silently;
+        raising a WARNING there would make every redelivery look like a
+        fault.
         """
         r = self.find_robot(robot_id)
         if r is None:
@@ -407,6 +503,8 @@ class FleetSim:
         if not order_id:
             return False, "order has no orderId"
         if r.order_id == order_id and order_update_id <= r.order_update_id:
+            if order_update_id < r.order_update_id:
+                self._stage_order_update_error(r, order_id, order_update_id)
             return False, (
                 f"stale orderUpdateId {order_update_id} for order "
                 f"{order_id!r} (have {r.order_update_id})")
@@ -424,6 +522,23 @@ class FleetSim:
             if isinstance(a, dict) and a.get("actionType"):
                 final_action = a
                 break
+        new_action_id = None
+        if final_action is not None:
+            # Master control's own actionId is authoritative; mint one only
+            # when the order left it out, so the action still has an
+            # identity to be reported and correlated under.
+            new_action_id = (str(final_action.get("actionId") or "") or
+                             self._new_generated_action_id(r))
+
+        # VDA 5050 2.1 6.9: this order replaces whatever the robot was doing,
+        # so the OUTGOING order's action must reach a terminal status before
+        # it stops being reported -- superseding an action does not make it
+        # disappear. (Skipped when the replacement restates the same
+        # actionId: that action carries on, it was not abandoned.)
+        if r.action_id != new_action_id:
+            self._stage_failed_action(r, (
+                f"superseded by order {order_id} update {order_update_id}"
+                if order_id == r.order_id else f"superseded by order {order_id}"))
 
         r.path = path
         r.leg_progress_m = 0.0
@@ -434,10 +549,9 @@ class FleetSim:
         r.mission_id = None  # an externally-dispatched order leaves the mission pool
         if final_action is not None:
             r.task_kind = str(final_action.get("actionType"))
-            r.current_action_id = str(final_action.get("actionId") or "") or None
         else:
             r.task_kind = None
-            r.current_action_id = None
+        r.current_action_id = new_action_id
         r.status = "moving"
         if not r.path:
             self._arrive(r)
@@ -497,6 +611,20 @@ class FleetSim:
         else:  # routed while idle with zero-length path
             r.status = "idle"
 
+    @staticmethod
+    def _new_generated_action_id(r: Robot) -> str:
+        """Mint the next internally-generated actionId for ``r``.
+
+        Its own monotonic counter, deliberately NOT derived from
+        ``tasks_done``: an ABANDONED task never increments tasks_done, so a
+        tasks_done-derived id would be handed straight back to the next
+        task -- and an action that had just reported FAILED would appear to
+        go back to RUNNING. VDA 5050 2.1 6.9 has action status advance only;
+        an actionId is one action's identity for the life of the run.
+        """
+        r.action_seq += 1
+        return f"a-{vda.sanitize_serial(r.robot_id)}-{r.action_seq}"
+
     def _stage_finished_action(self, r: Robot) -> None:
         """Queue a terminal FINISHED actionState for the task just completed.
 
@@ -504,27 +632,50 @@ class FleetSim:
         the next few state messages (see TASK_ACTION_STATE_REPEATS) so a
         consumer watching actionStates actually observes completion, rather
         than the action simply vanishing the moment status flips to idle.
+
+        Call BEFORE ``tasks_done`` is incremented, so ``Robot.action_id``
+        still resolves to the id the action was reported RUNNING under.
         """
         if r.task_kind is None:
             return
-        action_id = r.current_action_id or (
-            f"a-{vda.sanitize_serial(r.robot_id)}-{r.tasks_done}")
         r.pending_action_states.append([{
-            "actionId": action_id,
+            "actionId": r.action_id,
             "actionType": r.task_kind,
             "actionStatus": "FINISHED",
         }, TASK_ACTION_STATE_REPEATS])
 
-    @staticmethod
-    def _attach_pending_action_states(r: Robot, state: dict[str, Any]) -> None:
-        """Append ``r``'s staged terminal actionStates to one outgoing state."""
-        if not r.pending_action_states:
+    def _stage_failed_action(self, r: Robot, reason: str) -> None:
+        """Queue a terminal FAILED actionState for an ABANDONED action.
+
+        VDA 5050 2.1 6.9: an action that stops being reported must have
+        reached FINISHED or FAILED first. An action that simply vanishes
+        from ``actionStates`` leaves master control waiting forever for a
+        result it will never get, which is indistinguishable from a hung
+        vehicle. Every path that drops the in-flight task without
+        completing it -- a superseding order, ``cancelOrder``, a battery
+        divert, a resume that discards the held task -- reports it through
+        here, with ``resultDescription`` saying why.
+
+        No-op when nothing is in flight. Mirrors
+        :meth:`_stage_finished_action` exactly, including the repeat count.
+        """
+        if r.task_kind is None:
             return
-        state["actionStates"] = list(state.get("actionStates") or []) + [
-            dict(entry[0]) for entry in r.pending_action_states]
-        for entry in r.pending_action_states:
-            entry[1] -= 1
-        r.pending_action_states = [e for e in r.pending_action_states if e[1] > 0]
+        r.pending_action_states.append([{
+            "actionId": r.action_id,
+            "actionType": r.task_kind,
+            "actionStatus": "FAILED",
+            "resultDescription": reason,
+        }, TASK_ACTION_STATE_REPEATS])
+
+    def _stage_order_update_error(self, r: Robot, order_id: str,
+                                  order_update_id: int) -> None:
+        """Queue the ``orderUpdateError`` for a discarded order update."""
+        r.pending_errors.append([
+            vda.build_order_update_error(
+                vda.sanitize_serial(r.robot_id), order_id, order_update_id,
+                r.order_update_id),
+            ORDER_ERROR_STATE_REPEATS])
 
     # -- missions (v0.5) ---------------------------------------------------
 

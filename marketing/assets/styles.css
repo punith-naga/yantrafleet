@@ -62,7 +62,9 @@ header.site{position:sticky; top:0; z-index:20; background:rgba(251,250,247,.92)
 header.site .bar{display:flex; align-items:center; gap:20px; padding:14px 0}
 .brand{display:flex; align-items:center; gap:9px; font-weight:800; font-size:16.5px; color:var(--ink)}
 .brand .mark{width:26px; height:26px; border-radius:7px; background:linear-gradient(135deg,#2563c9,#0d8a4f); display:grid; place-items:center; font-size:12px; color:#fff}
-nav.top{margin-left:auto; display:flex; align-items:center; gap:22px; font-size:14.5px}
+/* gap was 22px with eight nav items; the VDA 5050 Test link makes nine and
+   the row wraps at --maxw unless the gutters come in a little. */
+nav.top{margin-left:auto; display:flex; align-items:center; gap:16px; font-size:14px}
 nav.top a{color:var(--muted); font-weight:600}
 nav.top a.on, nav.top a:hover{color:var(--ink); text-decoration:none}
 nav.top a.cta{background:var(--ink); color:#fff; padding:7px 15px; border-radius:999px; font-weight:700}
@@ -136,7 +138,7 @@ table.matrix td.no{color:var(--dim); text-align:center}
 
 /* ---------- footer ---------- */
 footer.site{border-top:1px solid var(--border); padding:38px 0 46px; margin-top:20px}
-footer.site .cols{display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:26px}
+footer.site .cols{display:grid; grid-template-columns:1.4fr 1fr 1fr 1fr; gap:26px}
 footer.site h4{font-size:12.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim); margin:0 0 10px}
 footer.site ul{list-style:none; margin:0; padding:0}
 footer.site li{margin:0 0 8px}
@@ -160,3 +162,74 @@ footer.site .fine{color:var(--dim); font-size:12.5px; margin-top:26px}
    served beside this site, see deploy/aws/nginx/yantrafleet.conf.template) */
 nav.top a.signin{font-weight:700; border:1.5px solid var(--ink); padding:6px 14px; border-radius:999px}
 nav.top a.signin:hover{background:var(--ink); color:#fff; text-decoration:none}
+
+/* ================================================================
+   "Try it with a live fleet" — the primary call to action
+   ================================================================
+   The markup underneath this is a plain <form method="post">; these
+   rules must never be what makes it usable. Nothing here hides the
+   button, sets pointer-events, or depends on a JS-applied class to
+   become visible — the only state attribute involved
+   (data-demo-state) is cosmetic. See marketing/assets/demo.js.
+   ================================================================ */
+.demo{margin:28px 0 6px}
+.demoform{margin:0}
+.btn.big{font-size:16px; padding:15px 28px; box-shadow:0 1px 0 rgba(0,0,0,.06)}
+.btn:disabled{opacity:.55; cursor:not-allowed}
+.btn.primary:disabled:hover{background:var(--ink)}
+.demonote{margin:12px 0 0; font-size:13.5px; color:var(--muted); max-width:58ch}
+/* :empty keeps the live region in the DOM (so screen readers are already
+   watching it) without leaving a blank gap on the page. */
+.demostatus{margin:10px 0 0; font-size:14px; font-weight:600; max-width:58ch}
+.demostatus:empty{display:none}
+.demostatus.ok{color:var(--good)}
+.demostatus.warn{color:var(--warn)}
+
+/* ================================================================
+   Conformance page bits
+   ================================================================ */
+/* The 52-check catalogue, printed straight from the rule set that
+   `yantra-conform checks --json` emits. */
+table.checks{width:100%; border-collapse:collapse; font-size:13.5px; min-width:680px}
+table.checks th, table.checks td{border:1px solid var(--border); padding:8px 11px; text-align:left; vertical-align:top}
+table.checks th{background:var(--surface2); font-weight:700; position:sticky; top:0}
+table.checks td.id{font-family:var(--mono); font-size:12.5px; white-space:nowrap; color:var(--ink)}
+table.checks td.ref{font-size:12.5px; color:var(--dim); white-space:nowrap}
+.sev{display:inline-block; border-radius:999px; padding:1px 9px; font-size:11.5px; font-weight:800; letter-spacing:.03em; text-transform:uppercase}
+.sev.critical{background:#fdeaea; color:#a12020; border:1px solid #f3c9c9}
+.sev.major{background:#fdf1e0; color:#8a5606; border:1px solid #f0dcb8}
+.sev.minor{background:#eef2f8; color:#3d5679; border:1px solid #d6dfec}
+.sev.info{background:var(--surface2); color:var(--dim); border:1px solid var(--border)}
+
+/* "how it fails in the real world" list */
+.failmodes{list-style:none; margin:22px 0 0; padding:0; display:grid; gap:14px}
+.failmodes li{margin:0; background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--warn); border-radius:var(--r-sm); padding:15px 18px}
+.failmodes h3{font-size:15.5px; margin:0 0 5px}
+.failmodes p{margin:0; font-size:14.5px; color:var(--muted)}
+.failmodes p + p{margin-top:8px}
+.failmodes code{font-size:12.5px}
+
+/* small "on this page" jump list */
+.toc{background:var(--surface2); border:1px solid var(--border); border-radius:var(--r); padding:16px 20px; margin:24px 0 0}
+.toc p{margin:0 0 8px; font-size:12.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--dim)}
+.toc ul{list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:6px 18px}
+.toc li{margin:0; font-size:14px}
+
+/* anchored section headings on long pages */
+h2[id], h3[id]{scroll-margin-top:78px}
+
+/* ================================================================
+   Site search (search.html)
+   ================================================================ */
+.searchbox{display:flex; gap:10px; flex-wrap:wrap; margin:22px 0 0}
+.searchbox input[type=search]{flex:1 1 320px; font:16px/1.4 var(--font); color:var(--ink); background:var(--surface); border:1px solid var(--border-strong); border-radius:999px; padding:12px 20px}
+.searchbox input[type=search]:focus{outline:2px solid var(--accent); outline-offset:1px}
+.results{list-style:none; margin:26px 0 0; padding:0; display:grid; gap:12px}
+.results li{margin:0}
+.results a{display:block; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); padding:14px 16px; color:var(--ink); font-weight:700}
+.results a:hover{border-color:var(--accent); text-decoration:none}
+.results a span.desc{display:block; font-weight:400; color:var(--muted); font-size:13.5px; margin-top:3px}
+.noresults{margin:26px 0 0; color:var(--muted)}
+table.checks tr.cathead th{background:var(--ink); color:#fff; font-size:13px; letter-spacing:.03em; position:static}
+table.checks tr.cathead .catcount{font-weight:400; color:#b8b4a6; margin-left:8px}
+table.checks .exp{display:block; color:var(--muted); font-size:13px; margin-top:3px; font-weight:400}

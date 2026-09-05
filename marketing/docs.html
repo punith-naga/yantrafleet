@@ -8,14 +8,34 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YantraFleet Documentation</title>
-<meta name="description" content="Architecture reference, security and RBAC guide, Windows runbook, and cloud deployment guides for YantraFleet, the open-source AMR fleet-operations platform.">
+<title>YantraFleet Documentation — Architecture, Security, Deployment</title>
+<meta name="description" content="Architecture reference, security and RBAC guide, the VDA 5050 conformance tester, Windows runbook and cloud deployment guides for YantraFleet.">
 <link rel="canonical" href="https://yantrafleet.example.com/docs.html">
-<meta property="og:title" content="YantraFleet Documentation">
+<meta name="theme-color" content="#2563c9">
+<meta property="og:site_name" content="YantraFleet">
+<meta property="og:title" content="YantraFleet Documentation — Architecture, Security, Deployment">
 <meta property="og:description" content="Architecture reference, security and RBAC guide, Windows runbook, and cloud deployment guides for YantraFleet, the open-source AMR fleet-operations platform.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://yantrafleet.example.com/docs.html">
+<meta property="og:image" content="https://yantrafleet.example.com/assets/og-yantrafleet.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="YantraFleet - open-source AMR fleet operations, VDA 5050 v2.1, MIT licensed.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="YantraFleet Documentation — Architecture, Security, Deployment">
+<meta name="twitter:description" content="Architecture reference, security and RBAC guide, the VDA 5050 conformance tester, Windows runbook and cloud deployment guides for YantraFleet.">
+<meta name="twitter:image" content="https://yantrafleet.example.com/assets/og-yantrafleet.png">
 <link rel="stylesheet" href="assets/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "YantraFleet", "item": "https://yantrafleet.example.com/index.html" },
+    { "@type": "ListItem", "position": 2, "name": "Documentation", "item": "https://yantrafleet.example.com/docs.html" }
+  ]
+}
+</script>
 </head>
 <body>
 <a class="skiplink" href="#main">Skip to content</a>
@@ -28,6 +48,7 @@
       <a href="index.html">Home</a>
       <a href="about.html">About</a>
       <a href="features.html">Features</a>
+      <a href="vda-5050-conformance-test.html">VDA 5050 Test</a>
       <a href="security.html">Security</a>
       <a class="on" href="docs.html">Docs</a>
       <a href="get-involved.html">Get Involved</a>
@@ -53,19 +74,26 @@
 
       <h2>Start here</h2>
       <ul class="linklist">
-        <li><a class="reslink" href="../docs/index.html">Documentation overview &amp; FAQ<span class="desc">docs/index.html — the project's own docs landing page: architecture summary, quickstart, FAQ.</span></a></li>
-        <li><a class="reslink" href="../docs/ARCHITECTURE.md">Architecture reference<span class="desc">docs/ARCHITECTURE.md — the comprehensive "what we built and how" document.</span></a></li>
+        <li><a class="reslink" href="/docs/index.html">Documentation overview &amp; FAQ<span class="desc">docs/index.html — the project's own docs landing page: architecture summary, quickstart, FAQ.</span></a></li>
+        <li><a class="reslink" href="/docs/ARCHITECTURE.md">Architecture reference<span class="desc">docs/ARCHITECTURE.md — the comprehensive "what we built and how" document.</span></a></li>
       </ul>
 
       <h2 style="margin-top:34px">Security &amp; compliance</h2>
       <ul class="linklist">
-        <li><a class="reslink" href="../docs/SECURITY.md">Security &amp; RBAC guide<span class="desc">docs/SECURITY.md — demo, hardened, and role-based modes; key classes; RPC-by-RPC write paths.</span></a></li>
-        <li><a class="reslink" href="../docs/COMPLIANCE.md">Compliance mappings<span class="desc">docs/COMPLIANCE.md — SOC 2, ISO 27001, EU AI Act, VDA 5050 conformance, ISA-18.2, NIST CSF.</span></a></li>
+        <li><a class="reslink" href="/docs/SECURITY.md">Security &amp; RBAC guide<span class="desc">docs/SECURITY.md — demo, hardened, and role-based modes; key classes; RPC-by-RPC write paths.</span></a></li>
+        <li><a class="reslink" href="/docs/COMPLIANCE.md">Compliance mappings<span class="desc">docs/COMPLIANCE.md — SOC 2, ISO 27001, EU AI Act, VDA 5050 conformance, ISA-18.2, NIST CSF.</span></a></li>
+      </ul>
+
+      <h2 style="margin-top:34px">Tools</h2>
+      <ul class="linklist">
+        <li><a class="reslink" href="vda-5050-conformance-test.html">VDA 5050 conformance test<span class="desc">What <code>yantra-conform</code> checks (all 52 rules), how to run it against your broker, how to hand over a capture instead of broker access, and how to read the report.</span></a></li>
+        <li><a class="reslink" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/tree/main/tools/conformance">Conformance tester README<span class="desc">tools/conformance/README.md — the tool's own reference: every flag, the report JSON schema, and how to use it as a library.</span></a></li>
+        <li><a class="reslink" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/blob/main/supabase/0009_demo_sandbox.sql">Zero-signup demo sandbox<span class="desc">supabase/0009_demo_sandbox.sql — the migration behind the "Try it with a live fleet" button, including its threat model. Read it before enabling the sandbox on a deployment.</span></a></li>
       </ul>
 
       <h2 style="margin-top:34px">Running it</h2>
       <ul class="linklist">
-        <li><a class="reslink" href="../docs/RUNBOOK-WINDOWS.md">Windows runbook<span class="desc">docs/RUNBOOK-WINDOWS.md — install.ps1 and the PowerShell operating procedure.</span></a></li>
+        <li><a class="reslink" href="/docs/RUNBOOK-WINDOWS.md">Windows runbook<span class="desc">docs/RUNBOOK-WINDOWS.md — install.ps1 and the PowerShell operating procedure.</span></a></li>
         <li><a class="reslink" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/blob/main/deploy/aws/README.md">Deploy to AWS EC2<span class="desc">deploy/aws/README.md — single-instance deployment walkthrough, systemd units, nginx template.</span></a></li>
         <li><a class="reslink" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/blob/main/deploy/azure/README.md">Deploy to Azure<span class="desc">deploy/azure/README.md — the Azure equivalent deployment path.</span></a></li>
       </ul>
@@ -97,6 +125,16 @@
           <li><a href="features.html">Features</a></li>
           <li><a href="security.html">Security</a></li>
           <li><a href="changelog.html">Changelog</a></li>
+          <li><a href="search.html">Search this site</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Tools</h4>
+        <ul>
+          <li><a href="vda-5050-conformance-test.html">VDA 5050 conformance test</a></li>
+          <li><a href="/console/">Fleet console</a></li>
+          <li><a href="/academy/">Operator academy</a></li>
+          <li><a href="/docs/">Documentation site</a></li>
         </ul>
       </div>
       <div>

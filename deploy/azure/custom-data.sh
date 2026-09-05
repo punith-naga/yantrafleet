@@ -295,11 +295,46 @@ install -m 755 -o root -g root "$APP_DIR/deploy/azure/refresh-secrets.sh" \
 # 8) systemd services (shared units - same files the AWS kit installs)
 # ---------------------------------------------------------------------------
 echo "== installing systemd units"
+# Both globs matter. *.timer is not optional decoration: the demo sandbox
+# reaper is a oneshot unit driven entirely by yantra-sandbox-reap.timer, so
+# installing only *.service lands a reaper that nothing ever runs, and
+# expired sandbox rows and orphaned simulator processes accumulate forever.
 install -m 644 "$APP_DIR"/deploy/aws/systemd/*.service /etc/systemd/system/
+install -m 644 "$APP_DIR"/deploy/aws/systemd/*.timer   /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now yantra-detect yantra-notify yantra-sarathi
 # yantra-sim is installed but NOT enabled: turn it on for a demo fleet with
 #   sudo systemctl enable --now yantra-sim
+#
+# yantra-sandbox + yantra-sandbox-reap.timer (the zero-signup "Try it with a
+# live fleet" button behind /api/demo/) are installed but NOT enabled either,
+# and deliberately so: the door hands anonymous strangers write access, which
+# only exists once you have read and applied supabase/0009_demo_sandbox.sql
+# yourself. Read that file's THREAT MODEL block first, then:
+#
+#   1) apply the migration
+#        sudo -u yantra /opt/yantrafleet/.venv/bin/python -m yantraops migrate
+#
+#   2) give the REAPER a service_role key. The door itself runs on the anon
+#      key from /etc/yantrafleet.env and must keep it, but 0009 grants
+#      demo_reap_expired() to authenticated and service_role and NEVER to
+#      anon, so the reaper cannot use that key. yantra-sandbox-reap.service
+#      reads a second env file after the first, and its SUPABASE_KEY wins
+#      for that unit only:
+#        printf 'SUPABASE_KEY=%s\n' '<your service_role key>' \
+#          | sudo tee /etc/yantrafleet-sandbox.env >/dev/null
+#        sudo chown root:yantra /etc/yantrafleet-sandbox.env
+#        sudo chmod 640 /etc/yantrafleet-sandbox.env
+#      640 root:yantra is the same mode /etc/yantrafleet.env gets: readable
+#      by the service user, not by anyone else on the box. Keeping the key
+#      in a file rather than in ExecStart is what keeps it out of `ps`.
+#      On a Key Vault deploy, store it as a vault secret and write this file
+#      the same way refresh-secrets.sh writes /etc/yantrafleet.env -- do NOT
+#      add it to the EDIT ME block, which is what ends up in the VM's
+#      custom_data property in Azure's control plane.
+#
+#   3) turn both on
+#        sudo systemctl enable --now yantra-sandbox yantra-sandbox-reap.timer
 
 # ---------------------------------------------------------------------------
 # 9) nginx: console + academy + docs + copilot proxy (shared template)

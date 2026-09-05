@@ -17,6 +17,9 @@ What you end up with, on a single small EC2 instance:
 | Incident detector| `yantra-detect` systemd service            |
 | Notifier         | `yantra-notify` systemd service            |
 | Demo simulator   | `yantra-sim` — installed, **disabled** (enable only for demo fleets) |
+| Conformance page | `marketing/vda-5050-conformance-test.html` at `http://<public-ip>/vda-5050-conformance-test.html` (generated `yantra-conform` reports link here) |
+| Demo sandbox door | `yantra-sandbox` (stdlib HTTP on 127.0.0.1:8088, proxied at `/api/demo/`) — installed, **disabled**; needs `supabase/0009` first |
+| Demo sandbox reaper | `yantra-sandbox-reap.timer` + `.service` — installed, **disabled**; purges expired sandboxes every minute |
 
 The data itself lives in your Supabase project; the instance only reads
 and writes it, so the box is disposable.
@@ -135,6 +138,74 @@ so it's already pointed at your backend. The operator academy lives at
 and the docs site at `http://<PUBLIC_IP>/docs/`. If nothing loads yet,
 the install is probably still running — give it another minute or two (a
 fresh apt + pip install takes a while on a t3.small).
+
+The full URL layout nginx serves (one server block, see
+`deploy/aws/nginx/yantrafleet.conf.template`):
+
+| URL | What answers | Anonymous? |
+|---|---|---|
+| `/` | marketing site, static, from `/opt/yantrafleet/marketing` | yes |
+| `/vda-5050-conformance-test.html` | the conformance-tester landing page; every report `yantra-conform` generates links here, so the filename is pinned by both `validate.sh` scripts | yes |
+| `/console/` | fleet console (302 from bare `/console` with `supa`/`key`/`site` attached) | yes |
+| `/academy/` | operator academy (same redirect trick) | yes |
+| `/docs/` | the checked-in docs site; `*.md` under it is served as `text/plain` so a browser renders it instead of downloading it | yes |
+| `/ask` | Sarathi copilot API -> `127.0.0.1:8001`; set `SARATHI_TOKEN` to require a bearer token | yes, unless `SARATHI_TOKEN` is set |
+| `/health` | copilot liveness -> `127.0.0.1:8001` | yes |
+| `/api/demo/session` (POST) | mints one throwaway demo sandbox -> `127.0.0.1:8088` | yes — **and it writes**, see below |
+| `/api/demo/limits` (GET) | whether the demo button should be shown | yes |
+| *(not exposed)* `/healthz` | the sandbox door's own health, loopback only | no |
+
+`/api/demo/` is the only anonymous route on the box that creates database
+rows, so it carries an nginx rate limit (`limit_req_zone yantra_demo`,
+6r/m with a burst of 3) on top of the application's own per-IP quota. Every
+location in that template carries a comment saying why it is safe to expose;
+if you add one, add that comment — `validate.sh` checks for it.
+
+### Turning on the zero-signup live demo (optional)
+
+The marketing site's primary call to action is a "Try it with a live fleet"
+button that mints a throwaway sandbox with no signup. It is **off by
+default**, because it grants anonymous visitors write access. To enable it:
+
+1. **Read `supabase/0009_demo_sandbox.sql`**, in particular its THREAT MODEL
+   block, then apply it:
+
+   ```bash
+   sudo -u yantra /opt/yantrafleet/.venv/bin/python -m yantraops migrate
+   ```
+
+2. **Give the reaper a service_role key.** `yantra-sandbox` itself runs on
+   the *anon* key from `/etc/yantrafleet.env` and must keep it — that is what
+   0009's row-level security confines. But `demo_reap_expired()` is granted
+   to `authenticated` and `service_role` and **never** to `anon`, so the
+   reaper cannot use that key. It reads a second env file after the first,
+   and that file's `SUPABASE_KEY` wins for that unit only:
+
+   ```bash
+   printf 'SUPABASE_KEY=%s\n' '<your service_role key>' \
+     | sudo tee /etc/yantrafleet-sandbox.env >/dev/null
+   sudo chown root:yantra /etc/yantrafleet-sandbox.env
+   sudo chmod 640 /etc/yantrafleet-sandbox.env
+   ```
+
+   Mode `640`, owner `root`, group `yantra` — the same as
+   `/etc/yantrafleet.env`: readable by the service user and nobody else.
+   Keeping the key in a file rather than on the command line is what keeps
+   it out of `ps`.
+
+3. **Enable both units** — the door and the timer that cleans up after it.
+   Without the timer, expired sandbox rows and orphaned simulator processes
+   accumulate forever:
+
+   ```bash
+   sudo systemctl enable --now yantra-sandbox yantra-sandbox-reap.timer
+   systemctl list-timers yantra-sandbox-reap.timer
+   curl -s localhost:8088/healthz
+   curl -s localhost/api/demo/limits
+   ```
+
+Skip step 2 and the reaper runs every minute and fails with a permission
+error every minute. Skip step 3's timer and nothing reaps at all.
 
 No robots on screen? That's expected until something writes rows: either
 real robots via the connector, or the demo simulator

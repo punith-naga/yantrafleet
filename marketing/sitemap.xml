@@ -1,4 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Every indexable page on the marketing site, and nothing else.
+
+  NOT LISTED, on purpose:
+    search.html   - a search-results page is thin content that should never
+                    be in an index; it carries <meta name="robots"
+                    content="noindex,follow"> to say so directly.
+    /console/ /academy/ /docs/
+                  - served by the same nginx site but they are not part of
+                    this static site; /docs/ is checked-in Markdown, and the
+                    console/academy are applications behind a query string.
+
+  The host below is the placeholder https://yantrafleet.example.com and MUST
+  be replaced at deploy time along with every canonical/og:url tag - see
+  marketing/README.md, which lists every file and tag that carries it.
+-->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://yantrafleet.example.com/index.html</loc>
@@ -6,12 +22,17 @@
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/about.html</loc>
+    <loc>https://yantrafleet.example.com/vda-5050-conformance-test.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://yantrafleet.example.com/features.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/features.html</loc>
+    <loc>https://yantrafleet.example.com/about.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>

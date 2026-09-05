@@ -46,6 +46,17 @@ and every DELETE is refused, exactly as the SQL policies do. Demo identity
 is only consulted when there is no authenticated JWT, mirroring the fact
 that 0009's policies are declared ``to anon``.
 
+Two things the demo emulation models as of v0.17, both verified against a
+real PostgreSQL 16 with 0001-0017 applied:
+  * supabase/0017_demo_command_scope.sql — a sandbox insert that names a
+    robot (``commands``/``robot_telemetry``/``maintenance_findings``
+    ``robot_id``) must name a robot of its OWN site, and a demo
+    ``commands`` row must be inserted ``pending`` with no decision or
+    execution stamps;
+  * ``insert ... on conflict do update`` runs the UPDATE policy's USING
+    clause against the EXISTING row, so an upsert aimed at another site's
+    primary key is refused (42501) rather than merged.
+
 Everything stays on localhost sockets, so tests remain hermetic — no
 Supabase, no DNS, no network egress.
 """
@@ -86,6 +97,26 @@ DEMO_UPDATE_COLUMNS: dict[str, frozenset[str]] = {
 
 #: 0009 demo site namespace (public.yf_is_demo_site).
 DEMO_SITE_PREFIX = "DEMO-"
+
+#: 0017 (supabase/0017_demo_command_scope.sql): tables whose demo INSERT
+#: must name a robot that lives in the SAME sandbox site, and the column
+#: holding that robot id. Before 0017 these columns were bare ``text`` with
+#: no foreign key, so a sandbox could queue a command / write telemetry /
+#: open a maintenance finding against a REAL fleet's robot id.
+DEMO_ROBOT_SCOPED: dict[str, str] = {
+    "commands": "robot_id",
+    "robot_telemetry": "robot_id",
+    "maintenance_findings": "robot_id",
+}
+
+#: 0017 leaves ``missions.robots`` (a jsonb array of robot ids) alone, and
+#: so does this: YantraFleet's own sandbox driver writes real fleet robot
+#: ids there (ops/yantraops/sandbox.py renames its FleetSim robots AFTER
+#: FleetSim.__init__ has already captured mission crews from the original
+#: ids). Nothing dispatches from that column. See the note in 0017 and
+#: docs/SECURITY.md; the mapping stays here so enabling it later is a
+#: one-line change on both sides.
+DEMO_ROBOT_LIST_SCOPED: dict[str, str] = {}
 
 #: Tables that carry a ``site_id`` column with a server-side default
 #: (supabase/0005_sites.sql). The fake mirrors that default so rows from
@@ -2356,7 +2387,9 @@ class _Handler(BaseHTTPRequestHandler):
         if self.fake.rbac:
             ident = self.fake.identity(self.headers)
             if ident.kind != "service":
-                err = self._insert_denied(table, rows, ident)
+                err = self._insert_denied(
+                    table, rows, ident, on_conflict=on_conflict,
+                    resolution=self._prefer_resolution())
                 if err is not None:
                     return err
         with self.fake.lock:
@@ -2365,15 +2398,37 @@ class _Handler(BaseHTTPRequestHandler):
         self._reply(201)
 
     def _insert_denied(self, table: str, rows: list[Row],
-                       ident: _Identity) -> None | Any:
+                       ident: _Identity, *, on_conflict: str | None = None,
+                       resolution: str | None = None) -> None | Any:
         """rbac gate for non-service INSERTs. None = allowed; otherwise the
         rejection has been written and its (truthy) sentinel is returned.
 
         Mirrors 0007: only ``rbac_commands_insert`` exists — an operator+
         may insert a *pending* command as themselves at their own site;
         every other table has no insert policy at all. Plus 0009's
-        ``demo_sandbox_insert``: a live demo token may insert into the
-        seven fleet tables, pinned to its own DEMO-* site.
+        ``demo_sandbox_insert`` as tightened by 0017: a live demo token may
+        insert into the seven fleet tables, pinned to its own DEMO-* site,
+        and — on the four tables that name a robot — only for robots of
+        that same sandbox.
+
+        The ``on_conflict`` / ``resolution`` arguments model what real
+        PostgreSQL does with ``insert ... on conflict``, which the fake used
+        to skip entirely (a divergence that hid a live hole: a demo token
+        could aim ``on_conflict=id`` + ``resolution=merge-duplicates`` at a
+        REAL robot's primary key and the fake merged it). Verified against
+        PostgreSQL 16 with 0001-0017 applied:
+
+          * ``do update`` (``resolution=merge-duplicates``) evaluates the
+            UPDATE policy's USING clause against the EXISTING row, so a row
+            owned by another site raises ``42501 new row violates row-level
+            security policy (USING expression)``;
+          * ``do nothing`` (``resolution=ignore-duplicates``) silently
+            skips the row — no error, no change. :meth:`FakePostgREST.insert`
+            already drops it, so nothing extra is needed here;
+          * a plain insert with no ``on_conflict`` raises ``23505``, which
+            :meth:`FakePostgREST.insert` does not model (it appends a second
+            row with the same id). That remains a known divergence — it is
+            an id oracle, not a write path, and no writer here collides.
         """
         what = f"insert into {table}"
         if ident.is_demo:
@@ -2389,6 +2444,24 @@ class _Handler(BaseHTTPRequestHandler):
                                    f"policy for table \"{table}\" — a demo "
                                    "token may only write its own sandbox "
                                    f"site {ident.site_id}",
+                        "code": "42501"}) or True
+                bad = self._demo_scope_violation(table, row, ident)
+                if bad is not None:
+                    return self._reply(403, {
+                        "message": "new row violates row-level security "
+                                   f"policy for table \"{table}\" — {bad} "
+                                   "(supabase/0017_demo_command_scope.sql)",
+                        "code": "42501"}) or True
+            if on_conflict and resolution == "merge-duplicates":
+                victim = self._conflict_owner(table, rows, on_conflict,
+                                              ident.site_id)
+                if victim is not None:
+                    return self._reply(403, {
+                        "message": "new row violates row-level security "
+                                   f"policy (USING expression) for table "
+                                   f"\"{table}\" — {on_conflict}="
+                                   f"{victim!r} already belongs to another "
+                                   "site; a demo token cannot merge onto it",
                         "code": "42501"}) or True
             return None
         if ident.kind == "anon" or ident.rank < 1:
@@ -2409,6 +2482,68 @@ class _Handler(BaseHTTPRequestHandler):
                                "for table \"commands\" — only a pending command "
                                "requested_by yourself at your own site",
                     "code": "42501"}) or True
+        return None
+
+    def _demo_scope_violation(self, table: str, row: Row,
+                              ident: _Identity) -> str | None:
+        """0017's extra WITH CHECK terms. None = the row is allowed.
+
+        Returns a short human phrase naming the term that failed, so the
+        403 body reads like the policy that would have refused it.
+        """
+        if table == "commands":
+            if row.get("status", "pending") != "pending":
+                return ("a demo token may only insert a 'pending' command — "
+                        "the approval gate cannot be pre-satisfied")
+            for column in ("decided_by", "decided_at", "executed_at"):
+                if row.get(column) is not None:
+                    return (f"a demo token may not set {column} at insert "
+                            "time")
+        column = DEMO_ROBOT_SCOPED.get(table)
+        if column is not None:
+            robot = row.get(column)
+            if not self._demo_owns_robot(robot, ident.site_id):
+                return (f"{column}={robot!r} is not a robot of sandbox site "
+                        f"{ident.site_id}")
+        listed = DEMO_ROBOT_LIST_SCOPED.get(table)
+        if listed is not None:
+            value = row.get(listed, [])
+            if not isinstance(value, list):
+                return f"{listed} must be a JSON array of robot ids"
+            for robot in value:
+                if not self._demo_owns_robot(robot, ident.site_id):
+                    return (f"{listed} names {robot!r}, which is not a robot "
+                            f"of sandbox site {ident.site_id}")
+        return None
+
+    def _demo_owns_robot(self, robot: Any, site_id: str) -> bool:
+        """Is ``robot`` a robots row at ``site_id``? (0017's EXISTS probe.)"""
+        if not isinstance(robot, str) or not robot:
+            return False
+        with self.fake.lock:
+            return any(r.get("id") == robot
+                       and r.get("site_id", DEFAULT_SITE_ID) == site_id
+                       for r in self.fake.tables["robots"])
+
+    def _conflict_owner(self, table: str, rows: list[Row], on_conflict: str,
+                        site_id: str) -> Any | None:
+        """The conflict key of the first incoming row that would MERGE onto
+        an existing row belonging to a different site, else None.
+
+        This is the ``on conflict do update`` half of RLS that the fake used
+        to ignore: PostgreSQL evaluates ``demo_sandbox_update``'s USING
+        clause against the row already in the table, so an upsert aimed at
+        another site's primary key is refused rather than merged.
+        """
+        with self.fake.lock:
+            existing = list(self.fake.tables.get(table, ()))
+        by_key = {r.get(on_conflict): r for r in existing}
+        for row in rows:
+            hit = by_key.get(row.get(on_conflict))
+            if hit is None:
+                continue
+            if hit.get("site_id", DEFAULT_SITE_ID) != site_id:
+                return row.get(on_conflict)
         return None
 
     def do_PATCH(self) -> None:  # noqa: N802

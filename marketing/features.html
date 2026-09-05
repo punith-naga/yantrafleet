@@ -7,14 +7,34 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YantraFleet Features — Incident Detection, Predictive Maintenance, RBAC</title>
-<meta name="description" content="A detailed look at YantraFleet's fleet console, human-in-the-loop command approval, automatic incident detection, predictive maintenance heuristics, and role-based access control.">
+<title>YantraFleet Features — VDA 5050, Incidents, RBAC, AI Copilot</title>
+<meta name="description" content="Every capability YantraFleet has today: VDA 5050 connector, live console, approved commands, incident detection, predictive maintenance, RBAC, AI copilot.">
 <link rel="canonical" href="https://yantrafleet.example.com/features.html">
-<meta property="og:title" content="YantraFleet Features — Incident Detection, Predictive Maintenance, RBAC">
-<meta property="og:description" content="A detailed look at YantraFleet's fleet console, human-in-the-loop command approval, automatic incident detection, predictive maintenance heuristics, and role-based access control.">
+<meta name="theme-color" content="#2563c9">
+<meta property="og:site_name" content="YantraFleet">
+<meta property="og:title" content="YantraFleet Features — VDA 5050, Incidents, RBAC, AI Copilot">
+<meta property="og:description" content="Every capability YantraFleet has today: a VDA 5050 v2.1 connector and simulator, live fleet console, human-approved commands, incident detection, predictive maintenance, alert delivery, a grounded AI copilot, Postgres-enforced RBAC, an operator academy, a free conformance tester and a zero-signup live demo.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://yantrafleet.example.com/features.html">
+<meta property="og:image" content="https://yantrafleet.example.com/assets/og-yantrafleet.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="YantraFleet - open-source AMR fleet operations, VDA 5050 v2.1, MIT licensed.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="YantraFleet Features — VDA 5050, Incidents, RBAC, AI Copilot">
+<meta name="twitter:description" content="Every capability YantraFleet has today: VDA 5050 connector, live console, approved commands, incident detection, predictive maintenance, RBAC, AI copilot.">
+<meta name="twitter:image" content="https://yantrafleet.example.com/assets/og-yantrafleet.png">
 <link rel="stylesheet" href="assets/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "YantraFleet", "item": "https://yantrafleet.example.com/index.html" },
+    { "@type": "ListItem", "position": 2, "name": "Features", "item": "https://yantrafleet.example.com/features.html" }
+  ]
+}
+</script>
 </head>
 <body>
 <a class="skiplink" href="#main">Skip to content</a>
@@ -27,6 +47,7 @@
       <a href="index.html">Home</a>
       <a href="about.html">About</a>
       <a class="on" href="features.html">Features</a>
+      <a href="vda-5050-conformance-test.html">VDA 5050 Test</a>
       <a href="security.html">Security</a>
       <a href="docs.html">Docs</a>
       <a href="get-involved.html">Get Involved</a>
@@ -42,25 +63,48 @@
   <section class="hero" style="padding-bottom:20px">
     <div class="wrap">
       <p class="kicker">Features</p>
-      <h1 style="max-width:22ch">Five services, one shared source of truth.</h1>
-      <p class="lede">Every component below reads and writes the same Postgres (Supabase) schema — the console, the detector, the maintenance engine, the notifier, and the copilot are never looking at different data.</p>
+      <h1 style="max-width:22ch">One shared source of truth, and the services that act on it.</h1>
+      <p class="lede">Every component below reads and writes the same Postgres (Supabase) schema — the console, the detector, the maintenance engine, the notifier, and the copilot are never looking at different data. Around that core sit the pieces that get data in (a VDA 5050 connector and a simulator) and the pieces that get people up to speed (an operator academy, a conformance tester, and a live demo that needs no signup).</p>
+      <div class="toc">
+        <p>On this page</p>
+        <ul>
+          <li><a href="#connector">VDA 5050 connector</a></li>
+          <li><a href="#console">Fleet console</a></li>
+          <li><a href="#approval">Command approval</a></li>
+          <li><a href="#incidents">Incident detection</a></li>
+          <li><a href="#maintenance">Predictive maintenance</a></li>
+          <li><a href="#notifier">Alert delivery</a></li>
+          <li><a href="#copilot">AI copilot</a></li>
+          <li><a href="#rbac">Role-based access control</a></li>
+          <li><a href="#conformance">Conformance tester</a></li>
+          <li><a href="#academy">Operator academy</a></li>
+          <li><a href="#sandbox">Zero-signup demo</a></li>
+        </ul>
+      </div>
     </div>
   </section>
 
   <section class="tight">
     <div class="wrap" style="max-width:780px">
 
-      <h2>Live fleet console</h2>
+      <h2 id="connector">VDA 5050 connector &amp; warehouse simulator</h2>
+      <p>The data has to come from somewhere. <code>yantrabridge</code> consumes <strong>VDA 5050 v2.1 <code>state</code> messages</strong> — live from MQTT, or replayed from a JSONL recording — and translates them into the shared schema: a <code>robots</code> row per vehicle (upserted), <code>alerts</code> rows derived from the message's <code>errors[]</code> array and from low battery, and a connector heartbeat so the console can tell the difference between "no robots" and "nothing is feeding me". Writes are retry-safe by construction: the robot upsert merges duplicates and the alert insert ignores them.</p>
+      <p>It also imports recordings you already have (JSONL, or MCAP with the optional extra), so a fleet's historical data can be loaded into the platform rather than starting from an empty table.</p>
+      <p>When there are no robots to hand, the bundled deterministic simulator (<code>yantrasim</code>) publishes the same VDA 5050 traffic for a 10-robot fleet across 3 simulated vendors on an 8×5 warehouse grid — which is what makes the three-command quickstart, the demo sandbox and the test suites possible without hardware.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2 id="console">Live fleet console</h2>
       <p>A single-file web console (<code>console/index.html</code>, no build step) with a live map, per-robot detail panel, an alerts feed, an incidents view with recorded-telemetry replay, a mission board, and a command palette. It's what an operator watches all day — and it's exactly one static HTML file you can open directly or serve from any web server.</p>
 
       <hr class="rule" style="margin:26px 0">
 
-      <h2>Human-in-the-loop command approval</h2>
+      <h2 id="approval">Human-in-the-loop command approval</h2>
       <p>Robot commands — pause, send-to-charge, e-stop — never execute directly from the console. They're inserted as <code>pending</code> rows in a <code>commands</code> table. An operator with the right role approves or rejects each one from an "Pending approvals" queue, and the simulator (or a real robot connector) only acts once a command is approved. Every request records who asked, and every decision records who decided and when — a full audit trail, not a fire-and-forget button.</p>
 
       <hr class="rule" style="margin:26px 0">
 
-      <h2>Automatic incident detection</h2>
+      <h2 id="incidents">Automatic incident detection</h2>
       <p>The detector (<code>detector/</code>, package <code>yantradetect</code>) polls the <code>robots</code> table and maintains an <code>incidents</code> table using patterns borrowed from production alerting systems:</p>
       <ul>
         <li><strong>PagerDuty-style dedup</strong> — one open incident per robot, with deterministic <code>INC-XXXX</code> ids so a retried write is idempotent rather than creating a duplicate.</li>
@@ -72,7 +116,7 @@
 
       <hr class="rule" style="margin:26px 0">
 
-      <h2>Predictive maintenance</h2>
+      <h2 id="maintenance">Predictive maintenance</h2>
       <p>The detector's maintenance mode (<code>--maintenance</code>) reads a rolling <code>robot_telemetry</code> window per robot and runs three independent heuristics:</p>
       <div class="grid">
         <div class="card">
@@ -92,12 +136,12 @@
 
       <hr class="rule" style="margin:26px 0">
 
-      <h2>Real alert delivery</h2>
+      <h2 id="notifier">Real alert delivery</h2>
       <p>The notifier (<code>notifier/</code>, package <code>yantranotify</code>) polls unacknowledged critical/serious alerts and open incidents and pushes them out through the console, a generic webhook, or WhatsApp (via Twilio) — with per-event dedup so the same event doesn't spam a channel repeatedly.</p>
 
       <hr class="rule" style="margin:26px 0">
 
-      <h2>Sarathi, the AI copilot</h2>
+      <h2 id="copilot">Sarathi, the AI copilot</h2>
       <p>Ask questions about your fleet in plain language. Sarathi answers are grounded in your fleet's live data with cited sources, and degrade gracefully through tiers: <code>grounded</code> (LLM plus live tool calls) → <code>llm_only</code> → <code>offline</code> (template-based answers, no LLM key required at all). It always works — it just gets smarter with a key.</p>
 
       <hr class="rule" style="margin:26px 0">
@@ -119,7 +163,26 @@
           </tbody>
         </table>
       </div>
-      <p>Command approval, in particular, goes through a dedicated <code>SECURITY DEFINER</code> database function rather than a direct table write — a hand-crafted API request can't bypass it. See <a href="security.html">Security</a> and <a href="../docs/SECURITY.md">docs/SECURITY.md</a> for the full model, including exactly which enforcement is done in the database versus the application layer.</p>
+      <p>Command approval, in particular, goes through a dedicated <code>SECURITY DEFINER</code> database function rather than a direct table write — a hand-crafted API request can't bypass it. See <a href="security.html">Security</a> and <a href="/docs/SECURITY.md">docs/SECURITY.md</a> for the full model, including exactly which enforcement is done in the database versus the application layer.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2 id="conformance">VDA 5050 conformance tester</h2>
+      <p>Speaking an open protocol only helps if the vehicles on your floor actually implement it. <code>yantra-conform</code> is a standalone command-line tester that points at your MQTT broker, watches your vehicles, sends them the standard commands the specification requires them to answer, and writes a graded HTML report across <strong>52 checks</strong> covering connection, state, orders, action states, instant actions, the factsheet, the visualization topic and protocol hygiene.</p>
+      <p>Every finding names the clause, what the specification expects, what your vehicle actually did (with counts and examples), and what to change in the firmware — so the report is forwardable to a vendor rather than just a red label. <code>--passive</code> publishes nothing at all, for grading a fleet you do not own; <code>--capture</code> records a session as plain JSON that anyone can <code>replay</code> offline with no broker, which is the path for the common case where nobody can grant an outsider access to production MQTT.</p>
+      <p>It is free, MIT licensed, needs no account, and does not require YantraFleet itself to be running. It has 188 tests of its own, including a meta-test that fails the build if a check is ever added without a case that makes it fail on purpose.</p>
+      <p><a href="vda-5050-conformance-test.html"><strong>What it tests, how to run it, and what the report gives you →</strong></a></p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2 id="academy">Operator academy</h2>
+      <p>A single-file learning app (<code>academy/index.html</code>, same zero-build philosophy as the console) that teaches fleet operation against a live fleet rather than screenshots. Lessons, a searchable rail, printable single-lesson views, and practicals and checkrides whose "Verify" step is checked against the actual backend — so passing means you really did the thing, not that you clicked "next". It falls back to an embedded starter pack when opened with no backend, so it works offline too.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2 id="sandbox">Zero-signup live demo</h2>
+      <p>A deployment can offer visitors a real fleet with no account, no email and no form. One POST to a small loopback-bound HTTP door mints a throwaway sandbox — its own site id, its own small simulated fleet, its own expiry — and redirects straight into the console. It reads nothing from the request: TTL, fleet size and site id are operator configuration, so a caller cannot aim a mint at somebody else's data. Sandboxes are confined by row-level security, expire on their own, and are purged (database rows <em>and</em> simulator processes) by a systemd timer.</p>
+      <p>It is off by default and stays off until an operator deliberately applies the migration that grants anonymous visitors that access — the whole thing is documented, with its threat model, in <code>supabase/0009_demo_sandbox.sql</code> and the two cloud deploy guides. On this site, it is <a href="index.html#demo">the Try it button on the home page</a>.</p>
 
     </div>
   </section>
@@ -152,6 +215,16 @@
           <li><a href="features.html">Features</a></li>
           <li><a href="security.html">Security</a></li>
           <li><a href="changelog.html">Changelog</a></li>
+          <li><a href="search.html">Search this site</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Tools</h4>
+        <ul>
+          <li><a href="vda-5050-conformance-test.html">VDA 5050 conformance test</a></li>
+          <li><a href="/console/">Fleet console</a></li>
+          <li><a href="/academy/">Operator academy</a></li>
+          <li><a href="/docs/">Documentation site</a></li>
         </ul>
       </div>
       <div>

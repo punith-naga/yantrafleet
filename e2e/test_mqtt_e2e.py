@@ -49,9 +49,12 @@ pytestmark = pytest.mark.skipif(
     not (_PAHO and AMQTT_AVAILABLE),
     reason="MQTT e2e needs paho-mqtt + amqtt: pip install -e ops[mqtt]")
 
-from fakerest import FakePostgREST  # noqa: E402
+from fakerest import DEFAULT_SITE_ID, FakePostgREST  # noqa: E402
 from yantracore import CANONICAL  # noqa: E402
 
+#: The site every row in this world lands in (0005's column default), and
+#: therefore the one the command bridge is scoped to.
+SITE_ID = DEFAULT_SITE_ID
 SEED = 9      # deterministic fault on AMR-09 within the window
 TICKS = 8
 CONNECT_BUDGET_S = 15.0
@@ -82,9 +85,13 @@ class MqttWorld:
         # command gate: approved rows -> instantActions; acked by the
         # actionStates the sim's state messages carry back (v0.9).
         # source.publish is bound lazily via self — source exists below.
+        # v0.17: a bridge serves exactly one site and says which — an
+        # unfiltered publisher would also execute a command an anonymous
+        # demo sandbox queued (supabase/0017_demo_command_scope.sql).
+        # Rows here carry the 0005 column default, so that site is BLR-DC1.
         self.publisher = CommandPublisher(
             lambda topic, payload: self.source.publish(topic, payload),
-            self.base_url, "test-key")
+            self.base_url, "test-key", site=SITE_ID)
 
         def on_state(msg: dict[str, Any]) -> None:
             self.publisher.handle_state(msg)

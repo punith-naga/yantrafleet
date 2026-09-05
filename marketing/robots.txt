@@ -1,4 +1,32 @@
+# YantraFleet — https://yantrafleet.example.com
+#
+# The marketing site owns the bare host root; the console, the operator
+# academy and the docs site are served beside it out of the same nginx
+# server block (deploy/aws/nginx/yantrafleet.conf.template).
+#
+# Replace the placeholder host in the Sitemap line at deploy time, together
+# with every canonical/og:url/JSON-LD URL — marketing/README.md lists every
+# file and tag that carries it.
+
 User-agent: *
 Allow: /
+
+# Search results are thin content and every one of them is reachable from
+# the pages it links to anyway. (search.html also sends
+# `<meta name="robots" content="noindex,follow">`; this line just saves the
+# crawl.)
+Disallow: /search.html
+
+# The demo door. POST /api/demo/session mints a real, resource-consuming
+# sandbox, so nothing that crawls should ever touch it — it is POST-only by
+# design (a GET answers 405 precisely so a link prefetch cannot burn one),
+# but saying so here costs nothing and stops the requests earlier.
+Disallow: /api/
+
+# Applications, not documents: both need a query string carrying backend
+# config to be anything but an empty shell, so an indexed copy would be a
+# blank page under the site's own name.
+Disallow: /console/
+Disallow: /academy/
 
 Sitemap: https://yantrafleet.example.com/sitemap.xml

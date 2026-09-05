@@ -417,3 +417,137 @@ def test_non_rbac_mode_rpcs_skip_role_checks() -> None:
                           ).status_code == 200
     finally:
         f.stop()
+
+
+# -------------------------------------------- demo sandbox scope (0017)
+
+DEMO_TOKEN_HEADER = "x-yf-demo-token"
+
+
+def _sandbox(fake: FakePostgREST) -> tuple[str, str]:
+    """Mint a live demo sandbox; returns (token, site_id)."""
+    with httpx.Client(base_url=f"{fake.base_url}/rest/v1", timeout=5.0) as c:
+        r = c.post("/rpc/demo_mint_session", headers=ANON,
+                   json={"p_seed_robots": 2})
+        r.raise_for_status()
+        body = r.json()
+    return body["token"], body["site_id"]
+
+
+def _demo(token: str) -> dict[str, str]:
+    return {**ANON, DEMO_TOKEN_HEADER: token}
+
+
+def test_demo_cannot_queue_a_command_for_a_real_robot(
+        fake: FakePostgREST, http: httpx.Client) -> None:
+    """supabase/0017_demo_command_scope.sql, end to end over HTTP.
+
+    Before 0017 an anonymous sandbox visitor could POST a ``commands``
+    row naming ``AMR-01`` — a REAL robot at a REAL site — with
+    ``status='approved'`` already set, because 0009's insert policy
+    checked ``site_id`` and nothing else and ``commands.robot_id`` is a
+    bare ``text`` column (0002). Reproduced against PostgreSQL 16 before
+    the fix; refused after it.
+    """
+    token, site = _sandbox(fake)
+    forged = {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+              "robot_id": "AMR-01", "cmd": "estop", "params": {},
+              "status": "approved", "requested_by": "demo-visitor",
+              "site_id": site}
+    r = http.post("/commands", headers=_demo(token), json=[forged])
+    assert r.status_code == 403
+    assert r.json()["code"] == "42501"
+    assert not [c for c in fake.tables["commands"] if c["id"] == forged["id"]]
+
+    # ...and a *pending* one naming the same real robot is refused too.
+    r = http.post("/commands", headers=_demo(token),
+                  json=[{**forged, "id": "bbbb", "status": "pending"}])
+    assert r.status_code == 403
+
+    # ...and a pre-approved one for its OWN robot: the approval gate
+    # cannot be satisfied at insert time either.
+    r = http.post("/commands", headers=_demo(token),
+                  json=[{**forged, "id": "cccc",
+                         "robot_id": f"{site}-R01"}])
+    assert r.status_code == 403
+
+
+def test_demo_may_still_request_and_decide_its_own_command(
+        fake: FakePostgREST, http: httpx.Client) -> None:
+    """The demo loop the sandbox exists to show still works."""
+    token, site = _sandbox(fake)
+    r = http.post("/commands", headers=_demo(token),
+                  json=[{"id": "dddd", "robot_id": f"{site}-R01",
+                         "cmd": "charge", "params": {}, "status": "pending",
+                         "requested_by": "demo-visitor", "site_id": site}])
+    assert r.status_code == 201
+    r = http.patch("/commands?id=eq.dddd", headers=_demo(token),
+                   json={"status": "approved", "decided_by": "demo-visitor"})
+    assert r.status_code == 204
+    row = next(c for c in fake.tables["commands"] if c["id"] == "dddd")
+    assert (row["status"], row["site_id"]) == ("approved", site)
+
+
+def test_demo_cannot_forge_telemetry_or_findings_for_a_real_robot(
+        fake: FakePostgREST, http: httpx.Client) -> None:
+    """The same class of gap on the other robot-naming tables.
+
+    Forged telemetry matters because ``detector/yantradetect``'s
+    ``fetch_telemetry`` has no site filter; a forged OPEN maintenance
+    finding matters more, because the detector seeds its dedup set from
+    open findings and one could SUPPRESS a genuine finding for that
+    robot.
+    """
+    token, site = _sandbox(fake)
+    bad_sample = http.post(
+        "/robot_telemetry", headers=_demo(token),
+        json=[{"robot_id": "AMR-01", "ts": "2026-09-05T10:00:00Z",
+               "battery": 1, "status": "fault", "pos": [0, 0],
+               "site_id": site}])
+    assert bad_sample.status_code == 403
+    assert not [t for t in fake.tables["robot_telemetry"]
+                if t["robot_id"] == "AMR-01"]
+
+    bad_finding = http.post(
+        "/maintenance_findings", headers=_demo(token),
+        json=[{"id": "MF-FORGED", "robot_id": "AMR-01",
+               "component": "battery", "finding": "forged", "state": "Open",
+               "site_id": site}])
+    assert bad_finding.status_code == 403
+
+    # Its own robots are still writable — the sandbox stays usable.
+    ok = http.post("/robot_telemetry", headers=_demo(token),
+                   json=[{"robot_id": f"{site}-R01",
+                          "ts": "2026-09-05T10:00:00Z", "battery": 55,
+                          "status": "active", "pos": [1, 2],
+                          "site_id": site}])
+    assert ok.status_code == 201
+
+
+def test_demo_upsert_cannot_merge_onto_a_real_robots_primary_key(
+        fake: FakePostgREST, http: httpx.Client) -> None:
+    """``insert ... on conflict do update`` runs the UPDATE policy's USING
+    clause against the EXISTING row, so a demo token cannot hijack a real
+    robot by aiming an upsert at its id. Verified against PostgreSQL 16:
+    ``ERROR: new row violates row-level security policy (USING expression)
+    for table "robots"``. ``do nothing`` silently skips instead.
+    """
+    token, site = _sandbox(fake)
+    before = dict(next(r for r in fake.tables["robots"] if r["id"] == "AMR-01"))
+    merged = http.post(
+        "/robots?on_conflict=id",
+        headers={**_demo(token),
+                 "Prefer": "return=minimal,resolution=merge-duplicates"},
+        json=[{"id": "AMR-01", "vendor": "EVIL", "status": "estop",
+               "site_id": site}])
+    assert merged.status_code == 403
+    assert merged.json()["code"] == "42501"
+
+    ignored = http.post(
+        "/robots?on_conflict=id",
+        headers={**_demo(token),
+                 "Prefer": "return=minimal,resolution=ignore-duplicates"},
+        json=[{"id": "AMR-01", "vendor": "EVIL", "site_id": site}])
+    assert ignored.status_code == 201        # PostgreSQL: DO NOTHING
+    assert next(r for r in fake.tables["robots"]
+                if r["id"] == "AMR-01") == before

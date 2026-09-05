@@ -141,18 +141,28 @@ def test_apply_order_drives_robot_and_reports_progress():
     assert r.node == target
     assert r.task_kind == "pick"
 
+    # The order's OWN actionId is what gets reported, from RUNNING through
+    # to FINISHED -- master control correlates by that id and nothing else,
+    # so an action must never run under one id and finish under another.
+    seen: list[str] = []
     for _ in range(5):
         out = fleet.tick(dt_s=10.0, now=FIXED_NOW)
         s = next(st for st in out.states
                  if st["serialNumber"] == vda.sanitize_serial(r.robot_id))
         assert s["orderId"] == "order-abc"
         assert s["orderUpdateId"] == 0
-        finished = [a for a in s["actionStates"] if a["actionId"] == "act-1"]
-        if finished:
-            assert finished[0]["actionStatus"] == "FINISHED"
-            assert finished[0]["actionType"] == "pick"
+        # Every actionId in one message appears exactly once (2.1 6.9).
+        ids = [a["actionId"] for a in s["actionStates"]]
+        assert len(ids) == len(set(ids)), ids
+        entries = [a for a in s["actionStates"] if a["actionId"] == "act-1"]
+        assert entries, "the order's action was not reported at all"
+        assert entries[0]["actionType"] == "pick"
+        seen.append(entries[0]["actionStatus"])
+        if entries[0]["actionStatus"] == "FINISHED":
+            assert seen[0] == "RUNNING", seen
             return
-    raise AssertionError("order action never reached a terminal actionState")
+    raise AssertionError(
+        f"order action never reached a terminal actionState; saw {seen}")
 
 
 def test_apply_order_rejects_stale_order_update_id():

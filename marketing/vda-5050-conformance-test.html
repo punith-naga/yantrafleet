@@ -1,0 +1,921 @@
+<!doctype html>
+<!-- ================================================================
+  YantraFleet MARKETING SITE — VDA 5050 conformance tester
+  ================================================================
+  THIS FILENAME IS LOAD-BEARING. Every HTML report that
+  `yantra-conform` generates hard-codes a footer link to
+  <domain>/vda-5050-conformance-test.html (see
+  tools/conformance/yantraconform/report_html.py, TOOL_URL). Renaming
+  this file breaks that link in every report already sitting in
+  somebody's inbox. Both deploy validate.sh scripts pin the name.
+
+  PLACEHOLDERS TO REPLACE BEFORE GOING LIVE (see marketing/README.md
+  for the complete per-file list):
+    - https://yantrafleet.example.com  → your real domain
+    - https://github.com/YOUR_GITHUB_USERNAME/yantrafleet → your repo
+
+  SOURCING. The 52-row catalogue table below is a rendering of the
+  tool's own rule set, i.e. the output of `yantra-conform checks
+  --json` (tools/conformance/yantraconform/checks.py). Check ids,
+  titles, "expected" lines, severities and clause references are
+  copied from there rather than written by hand, so the page cannot
+  drift from the tool. Everything else on this page is sourced from
+  tools/conformance/README.md and the checks' own remediation text.
+  No customer names, no adoption statistics, no benchmark claims —
+  the project has none of those.
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Free VDA 5050 Conformance Test — Grade Your AMR Fleet in 52 Checks</title>
+<meta name="description" content="Free open-source VDA 5050 v2.1 conformance tester. 52 checks, a graded HTML report naming the clause, the evidence and the fix. No account, no sales call.">
+<link rel="canonical" href="https://yantrafleet.example.com/vda-5050-conformance-test.html">
+<meta name="theme-color" content="#2563c9">
+<meta property="og:site_name" content="YantraFleet">
+<meta property="og:title" content="Free VDA 5050 Conformance Test — Grade Your AMR Fleet in 52 Checks">
+<meta property="og:description" content="Open-source VDA 5050 v2.1 conformance tester. Point it at your MQTT broker, get a graded HTML report across 52 checks with the clause, the evidence and the fix. No account, no sales call.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yantrafleet.example.com/vda-5050-conformance-test.html">
+<meta property="og:image" content="https://yantrafleet.example.com/assets/og-vda-5050-conformance.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="yantra-conform — a free VDA 5050 v2.1 conformance tester, 52 checks, MIT licensed.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Free VDA 5050 Conformance Test — 52 Checks, Graded HTML Report">
+<meta name="twitter:description" content="Free open-source VDA 5050 v2.1 conformance tester. 52 checks, a graded HTML report naming the clause, the evidence and the fix. No account, no sales call.">
+<meta name="twitter:image" content="https://yantrafleet.example.com/assets/og-vda-5050-conformance.png">
+<link rel="stylesheet" href="assets/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://yantrafleet.example.com/vda-5050-conformance-test.html#tool",
+      "name": "yantra-conform",
+      "alternateName": "YantraFleet VDA 5050 conformance tester",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Protocol conformance testing",
+      "operatingSystem": "Linux, macOS, Windows (Python 3.10+)",
+      "license": "https://opensource.org/licenses/MIT",
+      "isAccessibleForFree": true,
+      "codeRepository": "https://github.com/YOUR_GITHUB_USERNAME/yantrafleet",
+      "url": "https://yantrafleet.example.com/vda-5050-conformance-test.html",
+      "description": "A free, open-source command-line conformance tester for VDA 5050 v2.1. It observes an AMR fleet over MQTT, sends the standard commands the specification requires a vehicle to answer, and produces a graded HTML report across 52 checks naming the clause, the expectation, the observed behaviour and the fix.",
+      "softwareRequirements": "Python 3.10 or newer; paho-mqtt only to talk to a broker",
+      "isPartOf": { "@id": "https://yantrafleet.example.com/#software" },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://yantrafleet.example.com/vda-5050-conformance-test.html#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is the VDA 5050 conformance test really free?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. It is MIT-licensed open-source software that ships inside the YantraFleet repository. There is no account, no trial, no quota, no watermark on the report and no sales call. You can read every rule it applies in the source."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I test my robots from a web browser?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No, and no honest tool can. A browser cannot open a raw MQTT/TCP connection, so any web-based tester would need you to stand up a websocket listener and hand a website your broker credentials. yantra-conform is a command-line tool that runs on your machine, on your network, against your broker. Nothing leaves your network unless you choose to send someone the report."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is it safe to run against a production fleet?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not by default, and the tool says so plainly. It is an active tester: it publishes real order and instantActions messages, including a cancelOrder, so it will interrupt work in progress. Run it against a vehicle on a test stand, or use --passive, which publishes nothing at all and grades everything observable from the wire, reporting the command-surface checks as not applicable rather than passing them on no evidence."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What if I cannot give an outside party access to my MQTT broker?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Record a capture instead. Running with --capture writes a plain, indented JSON file containing exactly the MQTT messages that crossed the wire and the probes the tester sent. You can read it before you send it. Anyone can then run yantra-conform replay capture.json with no broker and without paho-mqtt installed, and get a report identical to the live one, check for check."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which version of VDA 5050 does it grade?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "VDA 5050 version 2.1. The 52 checks cover connection, state, orders, action states, instant actions, the factsheet, the visualization topic and protocol hygiene, and each one names the clause it comes from so a disagreement with the specification is a short conversation rather than an argument."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I use it as a CI gate?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Add --fail-under to set a score floor and --quiet to keep the output short. Exit code 0 means the run passed the floor, 1 means the score was below it, and 2 means the run could not be performed at all. Because replay needs no broker, you can also gate on a recorded capture in a CI job that has no MQTT access."
+          }
+        }
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "YantraFleet", "item": "https://yantrafleet.example.com/index.html" },
+        { "@type": "ListItem", "position": 2, "name": "VDA 5050 conformance test", "item": "https://yantrafleet.example.com/vda-5050-conformance-test.html" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skiplink" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><span class="mark">Y</span> YantraFleet</a>
+    <button class="navtoggle" aria-expanded="false" aria-label="Toggle navigation">&#9776;</button>
+    <nav class="top">
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="features.html">Features</a>
+      <a class="on" href="vda-5050-conformance-test.html">VDA 5050 Test</a>
+      <a href="security.html">Security</a>
+      <a href="docs.html">Docs</a>
+      <a href="get-involved.html">Get Involved</a>
+      <a href="changelog.html">Changelog</a>
+      <a class="signin" href="/console/">Sign in</a>
+      <a class="cta" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" style="padding-bottom:18px">
+    <div class="wrap">
+      <p class="kicker">Free &middot; Open source &middot; MIT licensed</p>
+      <h1 style="max-width:24ch">A free VDA 5050 conformance test for your AMR fleet.</h1>
+      <p class="lede">Point <code>yantra-conform</code> at your MQTT broker. It watches your vehicles, sends them the standard commands the specification says they must answer, and writes a graded HTML report across <strong>52 checks</strong> &mdash; each one naming the clause, what the specification expects, what your robot actually did, and what to change. No account. No sales call. No cloud service that wants your broker credentials.</p>
+
+      <div class="actions">
+        <a class="btn primary" href="#run">How to run it &rarr;</a>
+        <a class="btn secondary" href="#checks">See all 52 checks</a>
+        <a class="btn secondary" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/tree/main/tools/conformance">Source on GitHub</a>
+      </div>
+
+      <p class="proofline"><strong>It is a command-line tool, not a web service.</strong> That is a deliberate choice, explained <a href="#no-web-version">further down</a> &mdash; a browser physically cannot open a raw MQTT connection, and any site that claims otherwise is asking you for broker credentials.</p>
+
+      <div class="toc">
+        <p>On this page</p>
+        <ul>
+          <li><a href="#what-is-vda-5050">What VDA 5050 is</a></li>
+          <li><a href="#what-conformance-means">What conformance means</a></li>
+          <li><a href="#how-they-fail">How implementations fail</a></li>
+          <li><a href="#checks">The 52 checks</a></li>
+          <li><a href="#run">Running it</a></li>
+          <li><a href="#report">Reading the report</a></li>
+          <li><a href="#capture">Capture &amp; handover</a></li>
+          <li><a href="#no-web-version">Why no web version</a></li>
+          <li><a href="#faq">FAQ</a></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="tight">
+    <div class="wrap" style="max-width:820px">
+      <pre><code><span class="dollar">$</span> yantra-conform run --broker mqtt://localhost:1883 --html report.html
+
+A  100.0  uagv/v2/nexomotion/AMR_01   (47 pass / 0 fail / 0 warn / 5 n-a)
+B   94.6  uagv/v2/nexomotion/AMR_04   (44 pass / 1 fail / 2 warn / 5 n-a)
+       FAIL actions.terminal_reported   1 action(s) disappeared without a
+                                        terminal status: a-AMR_04-4 (last RUNNING)
+            fix: Keep a finished action in actionStates with its terminal status
+            until the next order arrives ...
+
+OVERALL B  score 97.3/100  (91 pass, 1 fail, 2 warn, 10 n/a)
+grade capped by: actions.terminal_reported
+HTML report: report.html</code></pre>
+      <p class="platnote" style="font-size:13px;color:var(--dim)">Example output from <code>tools/conformance/README.md</code>. The vehicle names are the bundled simulator's, not a customer's.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= WHAT VDA 5050 IS ================= -->
+  <section>
+    <div class="wrap" style="max-width:780px">
+      <p class="kicker">Background</p>
+      <h2 id="what-is-vda-5050">What VDA 5050 is, and why it exists</h2>
+
+      <p>VDA 5050 is an open, vendor-neutral interface between a <strong>fleet manager</strong> (the software that decides what happens) and an <strong>AGV or AMR</strong> (the vehicle that does it). It was published by the German automotive industry association (VDA) together with the mechanical engineering association (VDMA), and it exists to solve one specific commercial problem: before it, buying a second brand of robot meant buying a second fleet manager, a second operator console, a second integration project and a second set of people who understand it.</p>
+
+      <p>That is not a technical limitation, it is a business model. Every AMR vendor had its own proprietary API, so the fleet-management layer &mdash; the part that actually knows your building, your traffic rules and your workflows &mdash; was locked to the vehicle vendor who happened to win the first order. Adding a second vendor to the same floor meant two systems that could not see each other's robots, which in practice means two systems that will eventually drive two robots into the same aisle.</p>
+
+      <p>VDA 5050 defines that boundary once, so any conforming vehicle can be driven by any conforming fleet manager. Concretely it specifies:</p>
+
+      <ul>
+        <li><strong>MQTT as the transport</strong>, with a five-segment topic scheme: <code>interfaceName/majorVersion/manufacturer/serialNumber/topic</code> &mdash; for example <code>uagv/v2/acme/AGV_01/state</code>.</li>
+        <li><strong>A small set of topics with fixed meanings.</strong> The vehicle publishes <code>connection</code> (am I alive), <code>state</code> (where I am, what I am doing, what is wrong), <code>factsheet</code> (my footprint, speeds, and which actions I support) and optionally <code>visualization</code> (a cheap high-rate pose feed). The fleet manager publishes <code>order</code> (drive this graph of nodes and edges, do these actions) and <code>instantActions</code> (do this right now, regardless of the current order).</li>
+        <li><strong>A JSON payload shape for each</strong>, with a common header carrying <code>headerId</code>, <code>timestamp</code>, <code>version</code>, <code>manufacturer</code> and <code>serialNumber</code>.</li>
+        <li><strong>A state machine for orders</strong>: orders are identified by an <code>orderId</code> and revised by a monotonically increasing <code>orderUpdateId</code>, so a fleet manager can extend or amend a route that a vehicle is already driving without ambiguity about which version wins.</li>
+        <li><strong>A lifecycle for actions</strong>: every action moves through <code>WAITING</code>, <code>INITIALIZING</code>, <code>RUNNING</code>, <code>PAUSED</code> to a terminal <code>FINISHED</code> or <code>FAILED</code>, reported back in the vehicle's <code>actionStates</code>.</li>
+      </ul>
+
+      <p>YantraFleet is on the fleet-manager side of that boundary: it speaks <a href="features.html">VDA 5050 v2.1</a> so it can drive a mixed-vendor floor. This tester exists because that promise is only as good as the vehicles' implementations of the standard &mdash; and those vary a great deal.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= WHAT CONFORMANCE MEANS ================= -->
+  <section>
+    <div class="wrap" style="max-width:780px">
+      <p class="kicker">The actual problem</p>
+      <h2 id="what-conformance-means">What conformance actually means in practice</h2>
+
+      <p>&ldquo;Supports VDA 5050&rdquo; is a claim on a datasheet. In practice it can mean anything from a complete, correct implementation to &ldquo;we publish a JSON blob on an MQTT topic with roughly the right name.&rdquo; The gap between those two things is where integration projects go to die: three weeks into commissioning, on a customer site, with a forklift-sized deadline.</p>
+
+      <p>The reason is structural. VDA 5050 is a <em>protocol</em> specification, not a certification programme with a mandatory test suite behind it. There is no conformance badge you must earn before shipping. So an implementation is typically validated against exactly one thing: the fleet manager it was first sold with. Everything both sides happen to agree on &mdash; including things neither side reads from the spec &mdash; looks like it works. Everything the pair never exercised is untested, and stays untested until somebody plugs in a different fleet manager.</p>
+
+      <p>Conformance testing, then, is not about a certificate. It is about answering three questions before the robots are on your floor:</p>
+
+      <ul>
+        <li><strong>Does the vehicle publish what the specification requires, in the shape it requires?</strong> Not &ldquo;does the fleet manager we tested with cope with it&rdquo; &mdash; a consumer written to the spec will index a required field directly and raise on its absence. An empty array is a valid value; a missing key is not.</li>
+        <li><strong>Does the vehicle respond correctly to the commands the specification says it must answer?</strong> Publishing telemetry is the easy half. The interesting half is what happens when a fleet manager cancels an order mid-drive, asks for a factsheet, or replays a stale order update.</li>
+        <li><strong>Does it behave correctly in the failure cases?</strong> Duplicate deliveries, a fleet-manager restart, an unsupported action, a vehicle that loses power mid-order. These are precisely the paths a happy-path integration never touches, and precisely the ones that cause incidents.</li>
+      </ul>
+
+      <p>A conformance test is not a substitute for a safety assessment, a site acceptance test, or reading the specification. It is a fast, repeatable, mechanical answer to &ldquo;is this vehicle going to behave the way a standards-compliant fleet manager assumes it will?&rdquo; &mdash; which is a question worth answering during vendor evaluation, not during commissioning.</p>
+
+      <div class="callout" style="margin-top:22px">
+        <p style="margin-bottom:0"><strong>What this tool does not claim.</strong> It is not an official VDA or VDMA certification, it does not issue a certificate, and it has no standing with either body. It is an independent open-source implementation of the checks a careful reader of VDA 5050 v2.1 would perform. Where the tool and the specification disagree, the specification wins &mdash; every check names its clause precisely so that disagreement is a short conversation. <a href="get-involved.html">Corrections are welcome.</a></p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= HOW THEY FAIL ================= -->
+  <section>
+    <div class="wrap" style="max-width:820px">
+      <p class="kicker">Failure modes</p>
+      <h2 id="how-they-fail">The ways real implementations actually fail</h2>
+      <p class="lede">Every item below is one of the tester's own checks, described by what goes wrong downstream when a vehicle gets it wrong. None of them are exotic. They are the things that pass a demo and fail a Tuesday.</p>
+
+      <ul class="failmodes">
+        <li>
+          <h3>A stale order update rewinds the robot</h3>
+          <p>An <code>orderUpdateId</code> lower than or equal to the one already in progress must be rejected. MQTT redelivery and a fleet-manager restart both replay old orders, so this happens on ordinary days, not just bad ones.</p>
+          <p>A vehicle that accepts them re-drives a route it already finished. Checked by <code>order.reject_stale</code> (critical).</p>
+        </li>
+        <li>
+          <h3>An action disappears instead of finishing</h3>
+          <p>An action that stops being reported must have reached <code>FINISHED</code> or <code>FAILED</code> first. Implementations commonly drop an action from <code>actionStates</code> the moment it completes.</p>
+          <p>The consequence is that a fleet manager which lost a single QoS&nbsp;0 state message waits forever for work that is already done &mdash; a hang with no error anywhere. Checked by <code>actions.terminal_reported</code> (major) and <code>actions.no_regression</code> (minor).</p>
+        </li>
+        <li>
+          <h3><code>cancelOrder</code> is not really implemented</h3>
+          <p>This is the fleet manager's only clean abort path. Done correctly the vehicle stops, drops the remaining nodes and edges, fails every outstanding order action, and only then reports the <code>cancelOrder</code> action <code>FINISHED</code>.</p>
+          <p>Partial implementations acknowledge the action and keep driving, or stop but never report the terminal status. Either way an operator pressing &ldquo;abort&rdquo; gets no confirmation that anything happened. Checked by <code>instant.cancelOrder</code> (critical).</p>
+        </li>
+        <li>
+          <h3>A required field is omitted rather than sent empty</h3>
+          <p><code>errors</code>, <code>nodeStates</code>, <code>edgeStates</code> and <code>actionStates</code> are required on every state message. Omitting a key is not the same as sending an empty array, and a consumer written to the specification will fail on the missing key.</p>
+          <p>This is the single most common way a vehicle that &ldquo;works fine with our own software&rdquo; breaks a different fleet manager on the first message. Checked by <code>state.required_fields</code> (critical).</p>
+        </li>
+        <li>
+          <h3>The topic says one robot, the payload says another</h3>
+          <p><code>manufacturer</code> and <code>serialNumber</code> in the payload must equal the corresponding topic segments. When they are built from two different sources they drift &mdash; a serial number formatted differently, a manufacturer string with different capitalisation.</p>
+          <p>A fleet manager subscribing per vehicle then attributes one robot's telemetry to another, which is the kind of bug that looks like a physics problem for a week. Checked by <code>state.identity</code> (critical) and <code>connection.identity</code> (major).</p>
+        </li>
+        <li>
+          <h3>Retention is backwards</h3>
+          <p>The <code>connection</code> topic must be retained; <code>state</code> must not be. It is easy to get exactly wrong, and both directions hurt.</p>
+          <p>Without a retained connection message, a fleet manager that restarts sees <em>no vehicles at all</em> until each one happens to reconnect. With a retained state message, every reconnecting consumer is handed a stale pose &mdash; a robot that appears to have teleported, or frozen. Checked by <code>connection.retained</code> and <code>state.not_retained</code>.</p>
+        </li>
+        <li>
+          <h3>No last will, so a dead robot stays ONLINE</h3>
+          <p>The vehicle should register an MQTT last-will publishing <code>CONNECTIONBROKEN</code> on its own connection topic <em>before</em> connecting. Without it, a crashed or unplugged vehicle stays <code>ONLINE</code> on the wire until the fleet manager's own staleness timer fires.</p>
+          <p>That delay is exactly when a traffic manager is still routing other robots around a vehicle it believes is alive and about to move. Checked by <code>connection.lastwill</code> (minor &mdash; see the note on skips below, because a last will is registered inside the broker and cannot be observed by another client).</p>
+        </li>
+        <li>
+          <h3><code>headerId</code> is not per topic, or resets</h3>
+          <p>One counter per topic, incremented on every publish. Sharing a counter across topics, resetting it on reconnect, or reusing an id makes message-loss detection downstream impossible &mdash; which matters because state is normally published at QoS&nbsp;0 and loss is expected.</p>
+          <p>Checked by <code>state.header_id_monotonic</code> (major).</p>
+        </li>
+        <li>
+          <h3>Timestamps that are almost ISO-8601</h3>
+          <p>The specification wants UTC with a literal trailing <code>Z</code>. Local time, a naive timestamp with no zone, a <code>+00:00</code> offset, or an epoch number all break consumers that parse strictly &mdash; and all four occur in the wild.</p>
+          <p>Checked by <code>state.timestamp_format</code> (major), with <code>state.timestamp_monotonic</code> catching clocks that step backwards.</p>
+        </li>
+        <li>
+          <h3>An unsupported action is ignored, or reported FINISHED</h3>
+          <p>An <code>instantAction</code> the vehicle does not implement must be reported <code>FAILED</code>, with a <code>resultDescription</code> naming the type. Silently dropping it leaves master control waiting on an action that will never complete. Reporting <code>FINISHED</code> is worse: it claims work that never happened.</p>
+          <p>Checked by <code>instant.unknown_rejected</code> (major).</p>
+        </li>
+        <li>
+          <h3>The version segment is not <code>v2</code></h3>
+          <p>The second topic segment must be the literal <code>v</code> followed by the major version. Not <code>2</code>, not <code>2.1</code>, not <code>v2.1.0</code>. That segment is how a fleet manager subscribes to one protocol generation at a time.</p>
+          <p>Get it wrong and a compliant fleet manager's subscriptions simply never match &mdash; the vehicle looks completely absent, with no error on either side. Checked by <code>protocol.major_version_segment</code> (major) and <code>protocol.topic_scheme</code> (critical).</p>
+        </li>
+        <li>
+          <h3>No factsheet</h3>
+          <p>The factsheet is how a fleet manager learns your vehicle's footprint, speed limits, supported actions and protocol limits without a PDF and a phone call. It should be published retained at startup, at QoS&nbsp;1, and also on <code>factsheetRequest</code>.</p>
+          <p>It is the most commonly skipped topic in the entire specification, because nothing visibly breaks without it &mdash; until commissioning, when every parameter has to be transcribed by hand. Checked by <code>factsheet.published</code> plus five structural checks on its contents.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= THE CHECKS ================= -->
+  <section>
+    <div class="wrap">
+      <p class="kicker">The rule set</p>
+      <h2 id="checks">What the 52 checks cover</h2>
+      <p class="lede">This table is the tool's own catalogue &mdash; the same data <code>yantra-conform checks --json</code> prints, which needs no broker and no network. Severity is a weight in the score: <code>critical</code> 10, <code>major</code> 5, <code>minor</code> 2, <code>info</code> 0. Section references are to VDA 5050 v2.1.</p>
+
+      <div class="tbl-wrap">
+        <table class="checks">
+          <thead>
+            <tr><th style="width:22%">Check</th><th>What it verifies</th><th style="width:1%">Severity</th><th style="width:1%">Clause</th></tr>
+          </thead>
+          <tbody>
+        <tr class="cathead"><th colspan="4">Connection <span class="catcount">6 checks</span></th></tr>
+        <tr>
+          <td class="id">connection.published</td>
+          <td><strong>Connection topic is published</strong><br><span class="exp">The AGV publishes a connection message on &lt;interface&gt;/&lt;major&gt;/&lt;manufacturer&gt;/&lt;serial&gt;/connection.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§5.3</td>
+        </tr>
+        <tr>
+          <td class="id">connection.state_enum</td>
+          <td><strong>connectionState uses the defined vocabulary</strong><br><span class="exp">connectionState is exactly one of ONLINE, OFFLINE, CONNECTIONBROKEN.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§5.3</td>
+        </tr>
+        <tr>
+          <td class="id">connection.online</td>
+          <td><strong>ONLINE is announced</strong><br><span class="exp">The AGV announces ONLINE once its MQTT session is up.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§5.3</td>
+        </tr>
+        <tr>
+          <td class="id">connection.retained</td>
+          <td><strong>Connection message is retained</strong><br><span class="exp">The connection topic is published with the MQTT retain flag so a late-joining fleet manager immediately learns vehicle liveness.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§5.3</td>
+        </tr>
+        <tr>
+          <td class="id">connection.identity</td>
+          <td><strong>Connection header identity matches the topic</strong><br><span class="exp">manufacturer and serialNumber in the payload equal the corresponding topic segments.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§5.2, §5.4</td>
+        </tr>
+        <tr>
+          <td class="id">connection.lastwill</td>
+          <td><strong>CONNECTIONBROKEN is registered as a last-will</strong><br><span class="exp">The AGV registers an MQTT last-will publishing CONNECTIONBROKEN on its own connection topic, so an unexpected drop is visible immediately.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§5.3</td>
+        </tr>
+        <tr class="cathead"><th colspan="4">State <span class="catcount">18 checks</span></th></tr>
+        <tr>
+          <td class="id">state.published</td>
+          <td><strong>State topic is published</strong><br><span class="exp">The AGV publishes state messages continuously (at least on every significant change, and at its declared minStateInterval).</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.required_fields</td>
+          <td><strong>State carries every required field</strong><br><span class="exp">Every state message contains the required fields: actionStates, batteryState, driving, edgeStates, errors, lastNodeId, lastNodeSequenceId, nodeStates, operatingMode, orderId, orderUpdateId, safetyState.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.field_types</td>
+          <td><strong>State sub-objects are correctly typed</strong><br><span class="exp">batteryState, safetyState, agvPosition, actionStates[] and errors[] contain their required members with the spec&#x27;s types.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.recommended_fields</td>
+          <td><strong>State carries the practically-required optional fields</strong><br><span class="exp">agvPosition, velocity, paused and newBaseRequest are present. The spec marks them optional; every fleet manager needs them.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.header</td>
+          <td><strong>State carries a well-formed header</strong><br><span class="exp">headerId (integer), timestamp (string), version, manufacturer and serialNumber are present on every message.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§5.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.header_id_monotonic</td>
+          <td><strong>headerId increases monotonically</strong><br><span class="exp">headerId increases by at least 1 with every message published on the same topic, so a consumer can detect loss and reordering.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§5.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.timestamp_format</td>
+          <td><strong>timestamp is ISO-8601 UTC</strong><br><span class="exp">timestamp is ISO-8601 in UTC with a trailing &#x27;Z&#x27;, e.g. 2026-08-26T10:15:32.512Z.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§5.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.timestamp_monotonic</td>
+          <td><strong>timestamps do not go backwards</strong><br><span class="exp">Successive state messages carry non-decreasing timestamps.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§5.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.identity</td>
+          <td><strong>State header identity matches the topic</strong><br><span class="exp">manufacturer and serialNumber in the payload equal the corresponding topic segments.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§5.2, §5.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.serial_charset</td>
+          <td><strong>serialNumber uses the permitted charset</strong><br><span class="exp">serialNumber contains only characters legal in an MQTT topic segment (A-Z a-z 0-9 _ . : -).</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§5.2</td>
+        </tr>
+        <tr>
+          <td class="id">state.version_field</td>
+          <td><strong>version is a valid, in-scope protocol version</strong><br><span class="exp">version is &lt;major&gt;.&lt;minor&gt;.&lt;patch&gt; and its major matches the majorVersion topic segment.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§5.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.not_retained</td>
+          <td><strong>State is NOT retained</strong><br><span class="exp">The state topic is published without the retain flag: it is a live value, not a configuration fact.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§5.3</td>
+        </tr>
+        <tr>
+          <td class="id">state.agv_position</td>
+          <td><strong>agvPosition is well-formed</strong><br><span class="exp">agvPosition carries x, y, theta (normalized to [-pi, pi]), mapId and positionInitialized.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.battery_range</td>
+          <td><strong>batteryState is plausible</strong><br><span class="exp">batteryCharge is a percentage in 0..100 and charging is a boolean.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.errors_wellformed</td>
+          <td><strong>errors[] entries are well-formed</strong><br><span class="exp">Every errors[] entry has an errorType and an errorLevel of WARNING or FATAL.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.operating_mode</td>
+          <td><strong>operatingMode uses the defined vocabulary</strong><br><span class="exp">operatingMode is one of AUTOMATIC, SEMIAUTOMATIC, MANUAL, SERVICE, TEACHIN.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.safety_state</td>
+          <td><strong>safetyState is well-formed</strong><br><span class="exp">safetyState.eStop is one of AUTOACK, MANUAL, REMOTE, NONE and fieldViolation is a boolean.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.4</td>
+        </tr>
+        <tr>
+          <td class="id">state.sequence_ids</td>
+          <td><strong>nodeStates/edgeStates sequenceIds are numbered correctly</strong><br><span class="exp">sequenceIds ascend within each list, with nodes on even and edges on odd values.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§6.6</td>
+        </tr>
+        <tr class="cathead"><th colspan="4">Orders <span class="catcount">6 checks</span></th></tr>
+        <tr>
+          <td class="id">order.accept_new</td>
+          <td><strong>A new order is accepted</strong><br><span class="exp">After a valid order is published, the AGV adopts it and echoes its orderId in state.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§6.5</td>
+        </tr>
+        <tr>
+          <td class="id">order.accept_update</td>
+          <td><strong>An order update is accepted</strong><br><span class="exp">A higher orderUpdateId for the current orderId is adopted and echoed.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.5</td>
+        </tr>
+        <tr>
+          <td class="id">order.reject_stale</td>
+          <td><strong>A stale orderUpdateId does not rewind the AGV</strong><br><span class="exp">An orderUpdateId lower than or equal to the one in progress is rejected; the AGV must not adopt it.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§6.5</td>
+        </tr>
+        <tr>
+          <td class="id">order.reject_stale_reports_error</td>
+          <td><strong>A rejected order update is reported as an error</strong><br><span class="exp">Rejecting an order update raises an errors[] entry of type orderUpdateError so master control learns the update was dropped.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§6.5</td>
+        </tr>
+        <tr>
+          <td class="id">order.reject_invalid</td>
+          <td><strong>An unexecutable order is not adopted</strong><br><span class="exp">An order referencing nodes the AGV cannot reach is rejected: its orderId must not become the vehicle&#x27;s active order.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.5</td>
+        </tr>
+        <tr>
+          <td class="id">order.echo</td>
+          <td><strong>orderId/orderUpdateId are echoed with the right types</strong><br><span class="exp">state.orderId is the accepted order&#x27;s id as a string and state.orderUpdateId is that order&#x27;s update id as an integer.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.4, §6.5</td>
+        </tr>
+        <tr class="cathead"><th colspan="4">Action states <span class="catcount">5 checks</span></th></tr>
+        <tr>
+          <td class="id">actions.status_enum</td>
+          <td><strong>actionStatus uses the defined vocabulary</strong><br><span class="exp">Every actionStatus is one of WAITING, INITIALIZING, RUNNING, PAUSED, FINISHED, FAILED.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.9</td>
+        </tr>
+        <tr>
+          <td class="id">actions.required_fields</td>
+          <td><strong>actionStates entries carry actionId, actionType and actionStatus</strong><br><span class="exp">Every actionStates entry has an actionId (string), an actionStatus, and an actionType identifying what is running.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.9</td>
+        </tr>
+        <tr>
+          <td class="id">actions.terminal_reported</td>
+          <td><strong>Actions report a terminal status before disappearing</strong><br><span class="exp">An action that stops being reported must have reached FINISHED or FAILED first; actions never silently vanish from actionStates.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.9</td>
+        </tr>
+        <tr>
+          <td class="id">actions.unique_ids</td>
+          <td><strong>actionId appears at most once per state message</strong><br><span class="exp">Within one state message, each actionId appears in actionStates exactly once: the array is the current status of each action, not a log of status changes.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§6.9</td>
+        </tr>
+        <tr>
+          <td class="id">actions.no_regression</td>
+          <td><strong>Actions do not leave a terminal status</strong><br><span class="exp">Once an action reports FINISHED or FAILED it never reverts to a non-terminal status.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§6.9</td>
+        </tr>
+        <tr class="cathead"><th colspan="4">Instant actions <span class="catcount">5 checks</span></th></tr>
+        <tr>
+          <td class="id">instant.stateRequest</td>
+          <td><strong>stateRequest is answered</strong><br><span class="exp">A stateRequest instantAction is acknowledged in actionStates and reaches FINISHED.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.10</td>
+        </tr>
+        <tr>
+          <td class="id">instant.factsheetRequest</td>
+          <td><strong>factsheetRequest is answered</strong><br><span class="exp">A factsheetRequest instantAction is acknowledged and a factsheet message is published.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.10, §7</td>
+        </tr>
+        <tr>
+          <td class="id">instant.cancelOrder</td>
+          <td><strong>cancelOrder is honoured</strong><br><span class="exp">A cancelOrder instantAction is acknowledged and reaches FINISHED once the vehicle has stopped executing the order.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§6.10.2</td>
+        </tr>
+        <tr>
+          <td class="id">instant.initPosition</td>
+          <td><strong>initPosition is acknowledged</strong><br><span class="exp">An initPosition instantAction reaches a terminal status (FINISHED, or FAILED with a reason if the vehicle cannot accept it right now).</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.10</td>
+        </tr>
+        <tr>
+          <td class="id">instant.unknown_rejected</td>
+          <td><strong>An unsupported actionType is reported FAILED</strong><br><span class="exp">An instantAction the vehicle does not implement is reported FAILED, not ignored and not FINISHED.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§6.9, §6.10</td>
+        </tr>
+        <tr class="cathead"><th colspan="4">Factsheet <span class="catcount">6 checks</span></th></tr>
+        <tr>
+          <td class="id">factsheet.published</td>
+          <td><strong>Factsheet topic is published</strong><br><span class="exp">The AGV publishes a factsheet, either retained at startup or in response to factsheetRequest.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§7</td>
+        </tr>
+        <tr>
+          <td class="id">factsheet.required_blocks</td>
+          <td><strong>Factsheet contains every required block</strong><br><span class="exp">The factsheet contains typeSpecification, physicalParameters, protocolLimits, protocolFeatures, agvGeometry, loadSpecification.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§7</td>
+        </tr>
+        <tr>
+          <td class="id">factsheet.type_specification</td>
+          <td><strong>typeSpecification is complete and uses the defined vocabularies</strong><br><span class="exp">typeSpecification carries seriesName, agvKinematic, agvClass, maxLoadMass, localizationTypes and navigationTypes, with values drawn from the spec&#x27;s enumerations.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§7.1</td>
+        </tr>
+        <tr>
+          <td class="id">factsheet.physical_parameters</td>
+          <td><strong>physicalParameters is complete</strong><br><span class="exp">physicalParameters carries speedMin, speedMax, accelerationMax, decelerationMax, heightMax, width and length as numbers.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§7.2</td>
+        </tr>
+        <tr>
+          <td class="id">factsheet.header</td>
+          <td><strong>Factsheet carries a well-formed header</strong><br><span class="exp">The factsheet carries the standard five-field header and its identity matches the topic.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§5.4, §7</td>
+        </tr>
+        <tr>
+          <td class="id">factsheet.retained</td>
+          <td><strong>Factsheet is retained</strong><br><span class="exp">The factsheet is published with the retain flag: it is static capability data a late subscriber must be able to read without asking.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§5.3, §7</td>
+        </tr>
+        <tr class="cathead"><th colspan="4">Visualization <span class="catcount">1 check</span></th></tr>
+        <tr>
+          <td class="id">visualization.wellformed</td>
+          <td><strong>visualization messages are usable</strong><br><span class="exp">If the optional visualization topic is used, its messages carry the standard header plus agvPosition and/or velocity.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§5.3</td>
+        </tr>
+        <tr class="cathead"><th colspan="4">Protocol hygiene <span class="catcount">5 checks</span></th></tr>
+        <tr>
+          <td class="id">protocol.topic_scheme</td>
+          <td><strong>Topics follow the five-segment scheme</strong><br><span class="exp">Every topic is interfaceName/majorVersion/manufacturer/serialNumber/topic, with a known sub-topic name.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§5.2</td>
+        </tr>
+        <tr>
+          <td class="id">protocol.major_version_segment</td>
+          <td><strong>The majorVersion topic segment is &#x27;v&lt;major&gt;&#x27;</strong><br><span class="exp">The second topic segment is the literal &#x27;v&#x27; followed by the protocol major version, e.g. &#x27;v2&#x27;.</span></td>
+          <td><span class="sev major">major</span></td>
+          <td class="ref">§5.2</td>
+        </tr>
+        <tr>
+          <td class="id">protocol.version_consistency</td>
+          <td><strong>One protocol version across all topics</strong><br><span class="exp">state, connection and factsheet all report the same version string.</span></td>
+          <td><span class="sev minor">minor</span></td>
+          <td class="ref">§5.4</td>
+        </tr>
+        <tr>
+          <td class="id">protocol.json_valid</td>
+          <td><strong>Every payload is a JSON object</strong><br><span class="exp">Every message payload parses as a JSON object.</span></td>
+          <td><span class="sev critical">critical</span></td>
+          <td class="ref">§5.4</td>
+        </tr>
+        <tr>
+          <td class="id">protocol.supported_version</td>
+          <td><strong>Protocol version is in this tester&#x27;s scope</strong><br><span class="exp">The vehicle reports a 2.x protocol version, which is what this rule set grades.</span></td>
+          <td><span class="sev info">info</span></td>
+          <td class="ref">general</td>
+        </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p style="margin-top:16px">Two of these normally report <strong>not applicable</strong> rather than passing, and the report says so explicitly rather than quietly counting them in your favour: <code>connection.lastwill</code>, because a last will is registered inside the broker and is invisible to another MQTT client (verify it by pulling the vehicle's network cable and watching its connection topic), and <code>visualization.wellformed</code>, because the visualization topic is optional.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= RUNNING IT ================= -->
+  <section>
+    <div class="wrap" style="max-width:820px">
+      <p class="kicker">Usage</p>
+      <h2 id="run">Running it</h2>
+
+      <h3 style="margin-top:22px">Install</h3>
+      <p>Python 3.10 or newer, and nothing else. The <code>[mqtt]</code> extra pulls in <code>paho-mqtt</code>, which is needed <em>only</em> to talk to a broker &mdash; the rule set, replaying a capture and rendering a report are pure standard library.</p>
+      <pre><code><span class="dollar">$</span> git clone https://github.com/YOUR_GITHUB_USERNAME/yantrafleet.git
+<span class="dollar">$</span> cd yantrafleet
+<span class="dollar">$</span> pip install -e "tools/conformance[mqtt]"
+
+<span class="dollar">$</span> yantra-conform --version
+<span class="dollar">$</span> yantra-conform checks          <span class="cmt"># all 52 rules, no broker needed</span></code></pre>
+      <p>No entry point on your <code>PATH</code>? <code>python3 -m yantraconform</code> works identically everywhere below.</p>
+
+      <h3 style="margin-top:26px">The one command</h3>
+      <pre><code><span class="dollar">$</span> yantra-conform run --broker mqtt://YOUR-BROKER:1883 --html report.html</code></pre>
+      <p>Open <code>report.html</code> in any browser. That is the whole tool. With credentials or TLS, and with a non-default topic prefix:</p>
+      <pre><code><span class="dollar">$</span> yantra-conform run \
+    --broker mqtts://fleet.example.com:8883 \
+    --username fleetops --password '...' \
+    --interface myfleet --major v2 \
+    --html report.html</code></pre>
+
+      <h3 style="margin-top:26px">Is it safe against a live fleet?</h3>
+      <p>By default <strong>no</strong>, and the tool says so plainly, because it is an <em>active</em> tester. It publishes real <code>order</code> and <code>instantActions</code> messages: a <code>cancelOrder</code>, a <code>stateRequest</code>, a <code>factsheetRequest</code>, an <code>initPosition</code>, and four orders. It is deliberately conservative &mdash; it only ever dispatches a vehicle to a node that vehicle itself reported, and <code>initPosition</code> re-asserts the pose the vehicle already believes it has &mdash; but it <em>will</em> interrupt work in progress.</p>
+      <p>Test a vehicle on a test stand, scope the run to one serial, or go passive:</p>
+      <pre><code><span class="cmt"># publishes NOTHING; grades everything observable from the wire alone</span>
+<span class="dollar">$</span> yantra-conform run --broker mqtt://localhost:1883 --passive --html report.html
+
+<span class="cmt"># or scope an active run to a single vehicle</span>
+<span class="dollar">$</span> yantra-conform run --broker mqtt://localhost:1883 \
+    --manufacturer acme --serial AGV_01 --html report.html</code></pre>
+      <p><code>--passive</code> grades the state topic, headers, timestamps, identity, retention, topic hygiene and the factsheet, and reports the command-surface checks as <em>not applicable</em> rather than passing them on no evidence. It is the right mode for a first look at a fleet you do not own.</p>
+
+      <h3 style="margin-top:26px">As a CI gate</h3>
+      <p><code>--fail-under</code> sets a score floor. Exit code <code>1</code> means the score was below it, <code>2</code> means the run could not be performed at all (no broker, no vehicles, bad arguments), <code>0</code> means it passed.</p>
+      <pre><code><span class="dollar">$</span> yantra-conform run --broker mqtt://localhost:1883 \
+    --json report.json --html report.html \
+    --fail-under 90 --quiet
+
+<span class="cmt"># regression gate on a recorded capture, with no broker in CI at all</span>
+<span class="dollar">$</span> yantra-conform replay capture.json --fail-under 90 --quiet</code></pre>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= THE REPORT ================= -->
+  <section>
+    <div class="wrap" style="max-width:820px">
+      <p class="kicker">Output</p>
+      <h2 id="report">What the report actually gives you</h2>
+
+      <p>One self-contained HTML file you own, plus optional JSON. Every finding carries four things, because a red label on its own is not actionable:</p>
+
+      <div class="tbl-wrap">
+        <table class="matrix">
+          <thead><tr><th style="width:18%">Field</th><th>What it is</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Spec</strong></td><td>The clause, e.g. <code>VDA 5050 2.1 &sect;6.5</code> &mdash; so you can go read it rather than take the tool's word for it.</td></tr>
+            <tr><td><strong>Expected</strong></td><td>What the specification requires, in one line.</td></tr>
+            <tr><td><strong>Observed</strong></td><td>What your vehicle actually did, with counts and concrete examples &mdash; the failing action id, the offending timestamp, the topic.</td></tr>
+            <tr><td><strong>How to fix</strong></td><td>What to change in the firmware, in plain English. This is the field that makes the report forwardable to a vendor.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:26px">How the score works</h3>
+      <p><strong>Severity</strong> is a weight: <code>critical</code> 10, <code>major</code> 5, <code>minor</code> 2, <code>info</code> 0. <strong>Status</strong> is a multiplier: pass 1.0, warn 0.5, fail 0.0. Checks whose evidence was never observed are <code>skip</code> &mdash; excluded from <em>both</em> sides of the ratio rather than counted against you.</p>
+      <pre><code>score = 100 &times; &Sigma;(weight &times; credit) / &Sigma;(weight)</code></pre>
+      <p>Two caps then apply on top of the letter grade, because a weighted average alone lets a vehicle with one fatal defect still look like a B:</p>
+      <ul>
+        <li>any failed <strong>critical</strong> check caps the grade at <strong>F</strong>;</li>
+        <li>any failed <strong>major</strong> check caps the grade at <strong>B</strong>.</li>
+      </ul>
+      <p>The report always names which checks capped the grade, so nobody has to reverse-engineer why an 89 came out as a B.</p>
+
+      <h3 style="margin-top:26px">&ldquo;n/a&rdquo; is not a pass</h3>
+      <p>A <code>skip</code> means the tester never saw the evidence a check needs, and it always says why. A run full of skips is a run that did not exercise much &mdash; the report puts its warnings at the top for exactly that reason. Besides the two structural skips noted above, the <code>order.*</code> checks skip when <strong>another master control is dispatching the same vehicle</strong>: if a fleet manager hands the vehicle a new order while the tester's probe is in flight, the order being updated is no longer the order in progress and the result is genuinely unevaluable. The tester says that rather than guessing. To grade order handling properly, test a vehicle nothing else is driving.</p>
+
+      <h3 style="margin-top:26px">One defect, one finding</h3>
+      <p>A single defect should cost a vehicle once, not fifteen times. When the evidence a whole family of checks depends on is entirely absent, one check <em>fails</em> for the absence and the rest report <code>skip</code>: a vehicle that never publishes <code>state</code> fails <code>state.published</code> and skips the other state checks, rather than scoring a misleading zero on eighteen things that were never observed.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= CAPTURE / HANDOVER ================= -->
+  <section>
+    <div class="wrap" style="max-width:820px">
+      <p class="kicker">For everyone who cannot expose a broker</p>
+      <h2 id="capture">Hand over a capture instead of your broker</h2>
+
+      <p>This is the path for the common case, not the exotic one. A vendor's broker sits inside a customer's plant network. An integrator's sits behind a VPN and a change-control ticket. &ldquo;Give the tester access to production MQTT&rdquo; is frequently not a request anyone can approve, and it should not have to be.</p>
+
+      <p>So the tool separates <strong>collecting</strong> evidence, which needs the broker and takes about a minute, from <strong>grading</strong> it, which needs nothing at all.</p>
+
+      <p><strong>On your network</strong>, record the session:</p>
+      <pre><code><span class="dollar">$</span> yantra-conform run --broker mqtt://localhost:1883 \
+    --capture capture.json --html report.html</code></pre>
+
+      <p><strong>Read <code>capture.json</code> before you send it.</strong> It is plain, indented JSON. It contains exactly the MQTT messages that crossed the wire and the probes the tester sent &mdash; nothing else. No broker hostname or credentials, no environment, no files from your machine. Every byte in it came off your own network, and you can verify that with a text editor:</p>
+      <pre><code>{
+  "kind": "yantra-conform-capture",
+  "messages": [
+    {"t": 0.41, "topic": "uagv/v2/acme/AGV_01/state",
+     "payload": "{\"headerId\": 12, ...}", "qos": 0, "retain": false}
+  ]
+}</code></pre>
+
+      <p><strong>Anywhere else</strong> &mdash; a laptop with no network, your vendor's desk, a CI job &mdash; grade it offline, with no broker and without <code>paho-mqtt</code> installed at all:</p>
+      <pre><code><span class="dollar">$</span> yantra-conform replay capture.json --html report.html</code></pre>
+
+      <p>The replayed report is <strong>identical</strong> to the live one, check for check, string for string, including the order and instantAction findings. It is a re-grade of the same evidence, not a summary of it. Which means you can also re-grade an old capture against a newer rule set, to see what a stricter version of the tool would have said about a vehicle you accepted last year.</p>
+
+      <p>Practically, this gives three workflows that do not require anyone to trust anyone:</p>
+      <ul>
+        <li><strong>Buying robots.</strong> Ask the vendor for a capture from their test vehicle. Grade it yourself. No site visit, no broker access, no shared credentials.</li>
+        <li><strong>Selling robots.</strong> Ship a capture and its report with the vehicle, the way you would ship a calibration certificate. It is checkable rather than assertable.</li>
+        <li><strong>Arguing about a defect.</strong> A capture plus a check id plus a clause reference is a bug report that cannot be argued with in general terms.</li>
+      </ul>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= NO WEB VERSION ================= -->
+  <section>
+    <div class="wrap" style="max-width:780px">
+      <p class="kicker">Honest limitations</p>
+      <h2 id="no-web-version">Why there is no &ldquo;test my fleet&rdquo; button on this page</h2>
+
+      <p>Because a browser cannot open a raw MQTT/TCP connection. That is not a gap in this project; it is how browsers work. Nothing in a web page can talk to your broker unless you first stand up a websocket listener on it and hand a website your credentials &mdash; which is a strictly worse trade than running a command on your own machine.</p>
+
+      <p>So the split is drawn honestly:</p>
+      <ul>
+        <li><strong>Testing your fleet is a local command.</strong> It stays that way. <code>yantra-conform</code> runs on your machine, on your network, against your broker. Nothing about your fleet leaves your network unless you choose to send someone the report.</li>
+        <li><strong>Everything that is not testing your fleet works fine on the web</strong> &mdash; browsing the rule set (the table above), reading a sample report, and, because a capture is just a JSON file, grading a capture that somebody hands you.</li>
+      </ul>
+
+      <p>If you came here from the footer of a generated report: that report was produced by this tool, on somebody's own machine, from their own fleet's traffic. Nothing was uploaded anywhere to make it.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= FAQ ================= -->
+  <section>
+    <div class="wrap" style="max-width:780px">
+      <p class="kicker">FAQ</p>
+      <h2 id="faq">Questions people actually ask</h2>
+
+      <h3 style="margin-top:24px">Is it really free?</h3>
+      <p>Yes. MIT-licensed open-source software that ships inside the <a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">YantraFleet repository</a>. No account, no trial, no quota, no watermark on the report, no sales call. You can read every rule it applies in <code>tools/conformance/yantraconform/checks.py</code>.</p>
+
+      <h3 style="margin-top:20px">Can I test my robots from a browser?</h3>
+      <p>No, and no honest tool can &mdash; see <a href="#no-web-version">above</a>. A browser cannot open a raw MQTT connection.</p>
+
+      <h3 style="margin-top:20px">Is it safe to run against a production fleet?</h3>
+      <p>Not by default. It is an active tester and it will interrupt work in progress. Use a test stand, scope it to one vehicle, or use <code>--passive</code>, which publishes nothing at all.</p>
+
+      <h3 style="margin-top:20px">What if I cannot give an outside party broker access?</h3>
+      <p>Record a capture and hand that over instead. <a href="#capture">Full explanation above</a> &mdash; the capture is human-readable JSON containing only the MQTT traffic, and grading it needs no broker.</p>
+
+      <h3 style="margin-top:20px">Which version of VDA 5050 does it grade?</h3>
+      <p>Version 2.1. Each check names the clause it comes from. <code>protocol.supported_version</code> reports (as <code>info</code>) whether the protocol version a vehicle announces is within this tester's scope, so you are never silently graded against the wrong specification.</p>
+
+      <h3 style="margin-top:20px">Does it work with my broker / my topic prefix?</h3>
+      <p>Any MQTT broker, with or without TLS and credentials (<code>--broker mqtts://...</code>, <code>--username</code>, <code>--password</code>). The default topic prefix is <code>uagv</code>/<code>v2</code>; override with <code>--interface</code> and <code>--major</code>.</p>
+
+      <h3 style="margin-top:20px">Do I have to use YantraFleet to use this?</h3>
+      <p>No. The tester is a standalone command-line tool that talks to your broker. It does not need YantraFleet running, does not need a database, and does not care what fleet manager you use &mdash; including none at all.</p>
+
+      <h3 style="margin-top:20px">How is the tester itself tested?</h3>
+      <p>It grades a purpose-built non-compliant robot and this repository's real simulator. Every check in the catalogue has a test that makes it <strong>fail on purpose</strong>, and a meta-test fails the build if a check is ever added without one &mdash; a conformance tester that cannot be shown failing is worthless. That is 188 tests for the tester alone, on top of the platform's own suites.</p>
+
+      <h3 style="margin-top:20px">I think a check is wrong.</h3>
+      <p>Then it might be. Where this tool and the specification disagree, the specification wins. Open an issue with the clause and the payload, and the rule gets fixed &mdash; <a href="get-involved.html">here is how</a>.</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap" style="text-align:center">
+      <h2>Grade your fleet in about a minute.</h2>
+      <p class="muted" style="max-width:58ch;margin:0 auto">Clone the repo, install the tester, point it at your broker. If you would rather see the fleet-management side first, the live demo needs no signup either.</p>
+      <div class="actions" style="justify-content:center;margin-top:22px">
+        <a class="btn primary" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/tree/main/tools/conformance">Get the tester</a>
+        <a class="btn secondary" href="index.html#demo">Try the live fleet demo</a>
+        <a class="btn secondary" href="features.html">See what YantraFleet does</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <div class="fbrand">YantraFleet</div>
+        <p style="color:var(--muted);font-size:14px;max-width:38ch">Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. MIT licensed.</p>
+      </div>
+      <div>
+        <h4>Site</h4>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+          <li><a href="search.html">Search this site</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Tools</h4>
+        <ul>
+          <li><a href="vda-5050-conformance-test.html">VDA 5050 conformance test</a></li>
+          <li><a href="/console/">Fleet console</a></li>
+          <li><a href="/academy/">Operator academy</a></li>
+          <li><a href="/docs/">Documentation site</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository</a></li>
+          <li><a href="get-involved.html">Get involved / Issues</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/blob/main/LICENSE">License (MIT)</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="fine">YantraFleet is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection. VDA 5050 is a specification published by the VDA and VDMA; this project is independent of both and issues no certification.</p>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>

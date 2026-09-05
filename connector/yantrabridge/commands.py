@@ -32,6 +32,14 @@ retry on the next poll.
 
 All I/O is injectable (``httpx.MockTransport`` + any ``publish(topic,
 payload)`` callable), so unit tests run fully offline.
+
+v0.17, SECURITY: a bridge serves exactly one site. ``site`` (or
+``YANTRA_SITE_ID``) is REQUIRED — construction raises without one — and
+both the command poll and the robot lookup are filtered by it. Before
+v0.17 the filter was opt-in, which meant an unfiltered bridge holding a
+service key would happily publish an ``estop`` instantAction that an
+anonymous demo-sandbox visitor had queued against a real robot id. See
+supabase/0017_demo_command_scope.sql and docs/SECURITY.md.
 """
 
 from __future__ import annotations
@@ -60,6 +68,35 @@ VDA_VERSION = "2.1.0"
 
 _SERIAL_BAD = re.compile(r"[^A-Za-z0-9_.:]")
 _SEGMENT_BAD = re.compile(r"[/$]")
+
+#: Explicit, deliberate opt-out of the command site filter (v0.17).
+ANY_SITE = "*"
+
+_NO_SITE = (
+    "CommandPublisher: a site is required. This publisher turns approved "
+    "`commands` rows into VDA 5050 instantActions on real robots, and it "
+    "usually holds a key that bypasses RLS — without a site it would also "
+    "execute a command an anonymous demo-sandbox visitor queued (see "
+    "supabase/0009_demo_sandbox.sql and docs/SECURITY.md). Pass "
+    "`yantrabridge --site <SITE>`, or set YANTRA_SITE_ID=<SITE>, or — if "
+    "this bridge really must serve every site — pass --site '*' to opt out "
+    "deliberately."
+)
+
+
+def resolve_site(site: str | None = None) -> str:
+    """The one site whose approved commands this bridge may publish.
+
+    Precedence: explicit arg > ``YANTRA_SITE_ID``. There is NO default:
+    guessing a site would silently stop a multi-site deployment's other
+    bridges, and defaulting to "every site" is the bug this exists to fix.
+    Raises :class:`ValueError` when neither is set, so the failure lands at
+    startup with an actionable message instead of at the first estop.
+    """
+    resolved = (site or os.environ.get("YANTRA_SITE_ID") or "").strip()
+    if not resolved:
+        raise ValueError(_NO_SITE)
+    return resolved
 
 
 def _sanitize_serial(robot_id: str) -> str:
@@ -94,8 +131,12 @@ class CommandPublisher:
         Supabase project URL / anon key (env vars and embedded defaults
         as fallback, mirroring ``SupabaseSink``).
     site:
-        When set, only commands with that ``site_id`` are polled — a
-        bridge serves one facility's robots.
+        The one facility this bridge serves: only commands with that
+        ``site_id`` are polled, and only robots at that site are
+        routable. REQUIRED as of v0.17 — falls back to
+        ``YANTRA_SITE_ID`` and otherwise raises ``ValueError`` at
+        construction. ``"*"`` restores the pre-v0.17 unfiltered
+        behaviour, loudly and on purpose.
     transport:
         Optional ``httpx.BaseTransport`` (``httpx.MockTransport``) for
         offline tests.
@@ -113,8 +154,18 @@ class CommandPublisher:
         limit: int = 20,
     ) -> None:
         self._publish = mqtt_publish
-        self.site = site
+        self.site = resolve_site(site)
         self.limit = limit
+        self._warned_missing_site = False
+        if self.site == ANY_SITE:
+            log.warning(
+                "command gate: site filter DISABLED (--site '%s') — this "
+                "bridge will publish approved commands from EVERY site, "
+                "including an anonymous demo sandbox if 0009 is applied. "
+                "See docs/SECURITY.md.", ANY_SITE)
+        else:
+            log.info("command gate: only approved commands at site %r will "
+                     "be published", self.site)
         resolved_url = (url or os.environ.get("SUPABASE_URL")
                         or DEFAULT_SUPABASE_URL).rstrip("/")
         resolved_key = key or os.environ.get("SUPABASE_KEY") or DEFAULT_SUPABASE_KEY
@@ -140,18 +191,30 @@ class CommandPublisher:
     # -- publishing side (poll thread) --------------------------------------
 
     def poll(self) -> int:
-        """Publish new approved commands. Returns how many went out.
+        """Publish new approved commands **for this bridge's site**.
 
-        Never raises: backend/broker trouble is logged and retried on the
-        next poll — the bridge must not die because the gate is flaky.
+        Returns how many went out. Never raises: backend/broker trouble is
+        logged and retried on the next poll — the bridge must not die
+        because the gate is flaky.
+
+        v0.17, SECURITY: the ``site_id`` filter is mandatory (see
+        :func:`resolve_site`). An approved row is only ever an
+        instantAction on a real robot, and this publisher normally holds a
+        key that bypasses RLS, so an unfiltered poll would dispatch a
+        command an anonymous demo-sandbox visitor queued for a real
+        ``robot_id`` (supabase/0017_demo_command_scope.sql closes the
+        insert side; this closes the execute side). Three controls, all
+        independent: the query is filtered server-side, every returned row
+        is re-checked here, and :meth:`_manufacturer_for` will only resolve
+        a robot that is registered at this bridge's site.
         """
         params: dict[str, str] = {
             "status": "eq.approved",
             "order": "created_at.asc",
             "limit": str(self.limit),
-            "select": "id,robot_id,cmd",
+            "select": "id,robot_id,cmd,site_id",
         }
-        if self.site:
+        if self.site != ANY_SITE:
             params["site_id"] = f"eq.{self.site}"
         try:
             resp = self._client.get("/commands", params=params)
@@ -161,6 +224,7 @@ class CommandPublisher:
             log.warning("command poll failed: %s", exc)
             return 0
 
+        rows = [row for row in rows if self._site_ok(row)]
         published = 0
         for row in rows:
             cid = str(row.get("id") or "")
@@ -309,17 +373,56 @@ class CommandPublisher:
 
     # -- internals -----------------------------------------------------------
 
+    def _site_ok(self, row: dict[str, Any]) -> bool:
+        """Client-side half of the site gate — never trust the projection.
+
+        A row whose ``site_id`` disagrees with this bridge's site is dropped
+        and logged: getting here means the server-side filter was not
+        honoured (a stale PostgREST, a proxy that ate the query string, a
+        stand-in backend), which is exactly what the second control is for.
+
+        A row with NO ``site_id`` key is a backend that did not return the
+        column rather than a mismatch; it is still published, with a
+        one-time warning, so a bridge pointed at an older backend does not
+        silently stop. The server-side filter is the control there — and
+        :meth:`_manufacturer_for` still refuses to route a robot that is
+        not registered at this site.
+        """
+        if self.site == ANY_SITE:
+            return True
+        if "site_id" not in row:
+            if not self._warned_missing_site:
+                self._warned_missing_site = True
+                log.warning(
+                    "command poll: backend returned no site_id column — the "
+                    "server-side site filter (site_id=eq.%s) is the only "
+                    "control on this connection", self.site)
+            return True
+        if row.get("site_id") != self.site:
+            log.warning(
+                "command %s REFUSED: it belongs to site %r, this bridge "
+                "serves %r (the backend ignored the site filter)",
+                row.get("id"), row.get("site_id"), self.site)
+            return False
+        return True
+
     def _manufacturer_for(self, serial: str) -> str | None:
         """Manufacturer for a serial: state-message registry, then the
-        robots table (``vendor`` column), else None (caller retries)."""
+        robots table (``vendor`` column), else None (caller retries).
+
+        v0.17: the table lookup is site-scoped, so a command naming a robot
+        that is not registered at this bridge's site can never be routed
+        even if it somehow reached :meth:`poll`.
+        """
         with self._lock:
             known = self._manufacturers.get(serial)
         if known:
             return known
+        params = {"id": f"eq.{serial}", "select": "id,vendor", "limit": "1"}
+        if self.site != ANY_SITE:
+            params["site_id"] = f"eq.{self.site}"
         try:
-            resp = self._client.get(
-                "/robots", params={"id": f"eq.{serial}", "select": "id,vendor",
-                                   "limit": "1"})
+            resp = self._client.get("/robots", params=params)
             resp.raise_for_status()
             rows = resp.json() or []
         except Exception as exc:  # noqa: BLE001

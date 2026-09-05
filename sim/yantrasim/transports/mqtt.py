@@ -22,7 +22,11 @@ Incoming orders are queued the same way instantActions are and drained on
 the sim thread through :meth:`poll_orders`, which validates orderUpdateId
 (a stale/duplicate update to the current orderId is rejected; a new
 orderId always replaces whatever the robot was doing) and drives the
-robot's path/order_id/order_update_id via ``FleetSim.apply_order``.
+robot's path/order_id/order_update_id via ``FleetSim.apply_order``. The
+order flow has no ack topic, so a rejected UPDATE is reported the only way
+VDA 5050 2.1 6.5 allows -- an ``errors[]`` entry of errorType
+``orderUpdateError`` (WARNING) on the robot's next few state messages,
+staged by ``FleetSim.apply_order`` itself.
 Standard instantActions ``cancelOrder``, ``stateRequest``,
 ``factsheetRequest`` and ``initPosition`` are now handled too (previously
 every one of these fell through to "unsupported actionType" and FAILED):
@@ -70,7 +74,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .. import vda, world
-from ..sim import Robot, TickOutput
+from ..sim import Robot, TickOutput, attach_pending
 
 try:  # optional dependency
     import paho.mqtt.client as _paho
@@ -212,9 +216,17 @@ class MqttTransport:
         -> (ok, detail)`` -- the CLI wires this to ``FleetSim.apply_order``,
         mirroring how :meth:`poll_commands` wires ``apply_fn`` to
         ``yantrasim.commands.apply_command``. Returns how many order
-        messages were processed (accepted or rejected -- a rejection, e.g.
-        a stale ``orderUpdateId``, is logged but has no dedicated VDA ack
-        topic to report on, per spec order flow).
+        messages were processed (accepted or rejected).
+
+        Unlike an instantAction, an order gets NO ``actionStates`` ack --
+        which is precisely why a rejection cannot just be logged locally.
+        VDA 5050 2.1 6.5 reports it in band instead: ``FleetSim.apply_order``
+        stages an ``errors[]`` entry of errorType ``orderUpdateError``
+        (errorLevel WARNING) that rides the robot's next few state messages.
+        That is the vehicle's answer, so it is deliberately staged in the
+        sim core rather than here -- the transport does not know why a
+        rejection happened, and every transport owes master control the
+        same answer.
         """
         with self._lock:
             batch, self._incoming_orders = self._incoming_orders, []
@@ -227,8 +239,12 @@ class MqttTransport:
                 continue
             ok, detail = apply_order_fn(robot_id, order_id, order_update_id, nodes, actions)
             done += 1
-            log.info("order %s (%s) -> %s: %s",
-                     order_id, robot_id, "accepted" if ok else "rejected", detail)
+            if ok:
+                log.info("order %s (%s) -> accepted: %s",
+                         order_id, robot_id, detail)
+            else:
+                log.warning("order %s (%s) -> rejected: %s",
+                            order_id, robot_id, detail)
         return done
 
     def close(self) -> None:
@@ -323,8 +339,8 @@ class MqttTransport:
             entries = self._results.get(serial)
             if not entries:
                 return
-            state["actionStates"] = list(state.get("actionStates") or []) + [
-                dict(e[0]) for e in entries]
+            state["actionStates"] = vda.merge_action_states(
+                state.get("actionStates") or [], [dict(e[0]) for e in entries])
             for e in entries:
                 e[1] -= 1
             self._results[serial] = [e for e in entries if e[1] > 0]
@@ -345,6 +361,12 @@ class MqttTransport:
             return False, f"unknown robot serial {serial!r}"
         robot.header_id += 1
         state = vda.build_state(robot, header_id=robot.header_id, timestamp=_now_iso())
+        # This message must carry the same evidence a tick-published one
+        # would: the sim's staged terminal actionStates and errors[] (e.g.
+        # an orderUpdateError) as well as this transport's own command acks.
+        # Otherwise what master control learns depends on which of the two
+        # publishers got there first.
+        attach_pending(robot, state)
         self._attach_action_states(state)
         t = vda.topic(robot.vendor, robot.robot_id, "state")
         self.client.publish(t, json.dumps(state), qos=0, retain=False)

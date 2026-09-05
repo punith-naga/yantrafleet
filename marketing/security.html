@@ -9,13 +9,33 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>YantraFleet Security &amp; RBAC — Demo, Hardened, and Role-Based Modes</title>
-<meta name="description" content="How YantraFleet secures a production fleet deployment: three access-control modes, Postgres row-level security, service-role key separation, and a four-tier role hierarchy.">
+<meta name="description" content="How YantraFleet secures a fleet deployment: three access-control modes, Postgres row-level security, service-role key separation, four-tier RBAC.">
 <link rel="canonical" href="https://yantrafleet.example.com/security.html">
+<meta name="theme-color" content="#2563c9">
+<meta property="og:site_name" content="YantraFleet">
 <meta property="og:title" content="YantraFleet Security &amp; RBAC — Demo, Hardened, and Role-Based Modes">
 <meta property="og:description" content="How YantraFleet secures a production fleet deployment: three access-control modes, Postgres row-level security, service-role key separation, and a four-tier role hierarchy.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://yantrafleet.example.com/security.html">
+<meta property="og:image" content="https://yantrafleet.example.com/assets/og-yantrafleet.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="YantraFleet - open-source AMR fleet operations, VDA 5050 v2.1, MIT licensed.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="YantraFleet Security &amp; RBAC — Demo, Hardened, and Role-Based Modes">
+<meta name="twitter:description" content="How YantraFleet secures a fleet deployment: three access-control modes, Postgres row-level security, service-role key separation, four-tier RBAC.">
+<meta name="twitter:image" content="https://yantrafleet.example.com/assets/og-yantrafleet.png">
 <link rel="stylesheet" href="assets/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "YantraFleet", "item": "https://yantrafleet.example.com/index.html" },
+    { "@type": "ListItem", "position": 2, "name": "Security", "item": "https://yantrafleet.example.com/security.html" }
+  ]
+}
+</script>
 </head>
 <body>
 <a class="skiplink" href="#main">Skip to content</a>
@@ -28,6 +48,7 @@
       <a href="index.html">Home</a>
       <a href="about.html">About</a>
       <a href="features.html">Features</a>
+      <a href="vda-5050-conformance-test.html">VDA 5050 Test</a>
       <a class="on" href="security.html">Security</a>
       <a href="docs.html">Docs</a>
       <a href="get-involved.html">Get Involved</a>
@@ -116,8 +137,8 @@
       <p>The browser-safe anon/publishable key is only as dangerous as the active RLS policy allows — fully open in demo mode, nothing at all once hardened. The service-role key, which bypasses row-level security entirely, is never shipped to a browser — it is used only by server-side writers (the simulator, the detector, the connector, `yantraops`).</p>
       <p>Independent of which mode is active: every alert acknowledgement, every command request, and every approve/reject decision is attributed to a named person with a timestamp — a full audit trail out of the box, not a bolt-on feature.</p>
 
-      <p style="margin-top:26px"><a class="reslink" style="display:block" href="../docs/SECURITY.md">Read the full security documentation<span class="desc">docs/SECURITY.md — the complete threat model, key classes, RPC-by-RPC write paths, and the exact migration commands for each mode.</span></a></p>
-      <p><a class="reslink" style="display:block" href="../docs/COMPLIANCE.md">Compliance mappings<span class="desc">docs/COMPLIANCE.md — SOC 2, ISO 27001, EU AI Act, VDA 5050 conformance, ISA-18.2, and NIST CSF, with an honest gaps-to-close checklist.</span></a></p>
+      <p style="margin-top:26px"><a class="reslink" style="display:block" href="/docs/SECURITY.md">Read the full security documentation<span class="desc">docs/SECURITY.md — the complete threat model, key classes, RPC-by-RPC write paths, and the exact migration commands for each mode.</span></a></p>
+      <p><a class="reslink" style="display:block" href="/docs/COMPLIANCE.md">Compliance mappings<span class="desc">docs/COMPLIANCE.md — SOC 2, ISO 27001, EU AI Act, VDA 5050 conformance, ISA-18.2, and NIST CSF, with an honest gaps-to-close checklist.</span></a></p>
     </div>
   </section>
 
@@ -138,6 +159,16 @@
           <li><a href="features.html">Features</a></li>
           <li><a href="security.html">Security</a></li>
           <li><a href="changelog.html">Changelog</a></li>
+          <li><a href="search.html">Search this site</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Tools</h4>
+        <ul>
+          <li><a href="vda-5050-conformance-test.html">VDA 5050 conformance test</a></li>
+          <li><a href="/console/">Fleet console</a></li>
+          <li><a href="/academy/">Operator academy</a></li>
+          <li><a href="/docs/">Documentation site</a></li>
         </ul>
       </div>
       <div>

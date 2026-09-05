@@ -10,6 +10,13 @@ override with env vars SUPABASE_URL / SUPABASE_KEY or CLI flags.
 
 An injectable ``httpx.Client`` keeps every test offline
 (``httpx.MockTransport``) — supabase.co is never reached in CI.
+
+v0.17: :meth:`SupabaseTransport.poll_commands` is site-scoped. It runs
+only ``approved`` commands whose ``site_id`` matches this executor's own
+site (``site=`` / ``YANTRA_SITE_ID`` / ``BLR-DC1`` — the same resolution
+that stamps every row this transport writes), because the service key it
+usually carries bypasses RLS and would otherwise execute a command an
+anonymous demo-sandbox visitor queued. ``site="*"`` opts out loudly.
 """
 from __future__ import annotations
 
@@ -20,6 +27,8 @@ from typing import Any
 
 import httpx
 
+from yantracore import site_id as _default_site_id
+
 from ..sim import TickOutput
 from ..translate import alert_row, fleet_meta_row, robot_row, telemetry_row
 
@@ -28,6 +37,10 @@ log = logging.getLogger(__name__)
 DEFAULT_URL = "https://flwyvhsmgrrqpmhcqlzd.supabase.co"
 DEFAULT_KEY = "sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf"
 
+#: Explicit, deliberate opt-out of the command site filter. See
+#: :func:`resolve_site` and ``docs/SECURITY.md``.
+ANY_SITE = "*"
+
 
 def resolve_config(url: str | None = None, key: str | None = None) -> tuple[str, str]:
     """Precedence: explicit arg > env var > embedded default."""
@@ -35,6 +48,24 @@ def resolve_config(url: str | None = None, key: str | None = None) -> tuple[str,
         (url or os.environ.get("SUPABASE_URL") or DEFAULT_URL).rstrip("/"),
         key or os.environ.get("SUPABASE_KEY") or DEFAULT_KEY,
     )
+
+
+def resolve_site(site: str | None = None) -> str:
+    """The one site whose approved commands this executor may run.
+
+    Precedence: explicit arg > ``YANTRA_SITE_ID`` > ``BLR-DC1``, i.e.
+    exactly ``yantracore.site_id()`` — the SAME resolution
+    ``yantrasim.translate`` already uses to stamp ``site_id`` on every
+    row this transport writes. That is deliberate and is what makes the
+    filter safe to switch on by default: a simulator polls commands for
+    precisely the site it publishes into, so no existing deployment
+    stops executing commands because of it.
+
+    ``"*"`` disables the filter (pre-v0.17 behaviour). It has to be
+    typed out, and it is logged as a warning every time.
+    """
+    resolved = (site or "").strip() or _default_site_id()
+    return resolved
 
 
 class SupabaseTransport:
@@ -48,12 +79,24 @@ class SupabaseTransport:
         client: httpx.Client | None = None,
         timeout_s: float = 10.0,
         history_every: int = 3,
+        site: str | None = None,
     ) -> None:
         self.base_url, self.key = resolve_config(url, key)
         self.rest = f"{self.base_url}/rest/v1"
         self.writer_id = writer_id
         self.history_every = history_every
+        self.site = resolve_site(site)
+        self._warned_missing_site = False
         self._client = client or httpx.Client(timeout=timeout_s)
+        if self.site == ANY_SITE:
+            log.warning(
+                "command gate: site filter DISABLED (site='%s') — this "
+                "executor will run approved commands from EVERY site, "
+                "including an anonymous demo sandbox if 0009 is applied. "
+                "See docs/SECURITY.md.", ANY_SITE)
+        else:
+            log.info("command gate: only approved commands at site %r "
+                     "will be executed", self.site)
 
     # -- Transport protocol ------------------------------------------------
 
@@ -100,17 +143,29 @@ class SupabaseTransport:
     def poll_commands(self, apply_fn) -> int:
         """v0.2 human-in-the-loop gate, executor side.
 
-        Fetch ``approved`` commands, apply each via ``apply_fn(robot_id, cmd)
-        -> (ok, detail)``, and PATCH the row to ``executed`` / ``failed``
-        with the detail in ``note``. Returns how many were processed.
-        Network errors are logged and swallowed — the sim never dies
-        because the gate is unreachable.
+        Fetch ``approved`` commands **for this executor's site**, apply each
+        via ``apply_fn(robot_id, cmd) -> (ok, detail)``, and PATCH the row to
+        ``executed`` / ``failed`` with the detail in ``note``. Returns how
+        many were processed. Network errors are logged and swallowed — the
+        sim never dies because the gate is unreachable.
+
+        v0.17, SECURITY: the ``site_id`` filter is no longer optional. This
+        transport normally runs with the service key, which BYPASSES RLS, so
+        without a filter it would happily execute a row an anonymous demo
+        sandbox visitor queued for a real robot (see
+        supabase/0017_demo_command_scope.sql). Two independent controls:
+        the query is filtered server-side, and every row that comes back is
+        re-checked here before ``apply_fn`` is called. Set
+        ``site=ANY_SITE`` ("*") to opt out deliberately.
         """
+        params = {"status": "eq.approved", "order": "created_at.asc",
+                  "limit": "20", "select": "id,robot_id,cmd,site_id"}
+        if self.site != ANY_SITE:
+            params["site_id"] = f"eq.{self.site}"
         try:
             resp = self._client.get(
                 f"{self.rest}/commands",
-                params={"status": "eq.approved", "order": "created_at.asc",
-                        "limit": "20", "select": "id,robot_id,cmd"},
+                params=params,
                 headers=self._headers(),
             )
             resp.raise_for_status()
@@ -118,6 +173,7 @@ class SupabaseTransport:
         except Exception as exc:  # noqa: BLE001 - availability over purity
             log.warning("command poll failed: %s", exc)
             return 0
+        rows = [row for row in rows if self._site_ok(row)]
         done = 0
         for row in rows:
             ok, detail = apply_fn(row.get("robot_id", ""), row.get("cmd", ""))
@@ -136,6 +192,39 @@ class SupabaseTransport:
             log.info("command %s %s -> %s: %s", row.get("cmd"),
                      row.get("robot_id"), body["status"], detail)
         return done
+
+    def _site_ok(self, row: dict[str, Any]) -> bool:
+        """Client-side half of the site gate — never trust the projection.
+
+        A row whose ``site_id`` disagrees with this executor's site is
+        dropped and logged: reaching here means the server-side filter was
+        not honoured (a stale PostgREST, a proxy that dropped the query
+        string, a stand-in backend), which is precisely the situation the
+        second control exists for.
+
+        A row with NO ``site_id`` key at all is a backend that did not
+        return the column rather than a mismatch — those are still applied,
+        with a one-time warning, because refusing them would silently stop
+        an executor pointed at an older backend. The server-side filter is
+        the control in that case.
+        """
+        if self.site == ANY_SITE:
+            return True
+        if "site_id" not in row:
+            if not self._warned_missing_site:
+                self._warned_missing_site = True
+                log.warning(
+                    "command poll: backend returned no site_id column — the "
+                    "server-side site filter (site_id=eq.%s) is the only "
+                    "control on this connection", self.site)
+            return True
+        if row.get("site_id") != self.site:
+            log.warning(
+                "command %s REFUSED: it belongs to site %r, this executor "
+                "serves %r (the backend ignored the site filter)",
+                row.get("id"), row.get("site_id"), self.site)
+            return False
+        return True
 
     def close(self) -> None:
         self._client.close()

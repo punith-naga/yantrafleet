@@ -331,6 +331,98 @@ grep -q '/console/' "$HERE/custom-data.sh" \
     || fail "marketing/index.html missing"
 
 # ---------------------------------------------------------------------------
+# 19) Zero-signup demo sandbox door (v0.14). The nginx template is SHARED
+#     with the AWS kit, so these checks are deliberately duplicated on both
+#     sides: the two kits render the same file and either one shipping
+#     without the route leaves the marketing site's primary call to action
+#     pointing at a 404.
+# ---------------------------------------------------------------------------
+TEMPLATE="$REPO_ROOT/deploy/aws/nginx/yantrafleet.conf.template"
+grep -q 'location /api/demo/ {' "$TEMPLATE" \
+    && pass "shared nginx template has the /api/demo/ location (the Try-it button's endpoint)" \
+    || fail "shared nginx template is MISSING location /api/demo/ -- the Try-it button would 404"
+grep -q 'proxy_pass http://127.0.0.1:8088;' "$TEMPLATE" \
+    && pass "/api/demo/ proxies to the sandbox door on 127.0.0.1:8088" \
+    || fail "/api/demo/ does not proxy to 127.0.0.1:8088"
+
+# Rate limiting on an UNAUTHENTICATED POST that creates database rows. The
+# application has its own per-IP limiter; this is the cheap wall in front of
+# it so a flood never reaches Python at all.
+grep -q 'limit_req_zone \$binary_remote_addr zone=yantra_demo:' "$TEMPLATE" \
+    && pass "limit_req_zone yantra_demo declared for the anonymous demo POST" \
+    || fail "limit_req_zone yantra_demo MISSING -- /api/demo/session would have no edge rate limit"
+grep -A20 'location /api/demo/ {' "$TEMPLATE" | grep -qE '^\s+limit_req zone=yantra_demo' \
+    && pass "location /api/demo/ actually applies limit_req zone=yantra_demo" \
+    || fail "limit_req zone=yantra_demo declared but never applied to /api/demo/"
+# limit_req_zone is an http{}-context directive and sites-enabled/* is
+# included from inside http{} -- inside server{} it makes `nginx -t` fail and
+# the VM boots with no site at all. (Match the directive, not the word: the
+# file mentions it in prose comments inside server{} on purpose.)
+awk '/^server \{/{inside=1}
+     inside && /^[[:space:]]*limit_req_zone[[:space:]]/{found=1}
+     END{exit !found}' "$TEMPLATE" \
+    && fail "limit_req_zone is inside server{} -- http-context directive; nginx -t would fail on boot" \
+    || pass "limit_req_zone sits in http{} context, outside server{}"
+
+# The door's own /healthz carries operational counters and must stay on
+# loopback; /health on this box already belongs to the sarathi copilot.
+grep -q 'location /healthz' "$TEMPLATE" \
+    && fail "the sandbox door's /healthz is exposed publicly -- it must stay loopback-only" \
+    || pass "sandbox /healthz is not proxied (loopback-only; /health is sarathi's)"
+
+# custom-data.sh must install *.timer as well as *.service. Missing *.service
+# is loud; missing *.timer is silent -- the reaper lands on the VM and
+# nothing ever triggers it, so expired demo rows and orphaned simulator
+# processes accumulate forever.
+grep -q 'install -m 644 "\$APP_DIR"/deploy/aws/systemd/\*\.service' "$HERE/custom-data.sh" \
+    && pass "custom-data.sh installs the *.service units" \
+    || fail "custom-data.sh no longer installs *.service units"
+grep -q 'install -m 644 "\$APP_DIR"/deploy/aws/systemd/\*\.timer' "$HERE/custom-data.sh" \
+    && pass "custom-data.sh installs the *.timer units (the sandbox reaper is timer-driven)" \
+    || fail "custom-data.sh installs only *.service -- yantra-sandbox-reap.timer would never land"
+grep -E '^systemctl enable --now' "$HERE/custom-data.sh" | grep -q 'sandbox' \
+    && fail "custom-data.sh auto-enables the sandbox -- supabase/0009 must be applied deliberately first" \
+    || pass "custom-data.sh does not auto-enable yantra-sandbox (0009 is an opt-in)"
+
+# demo_reap_expired() is granted to authenticated/service_role and NEVER to
+# anon, so the reaper cannot reuse the door's anon key. An operator who does
+# not know that ends up with a reaper that 403s every minute forever.
+grep -q '/etc/yantrafleet-sandbox.env' "$HERE/custom-data.sh" \
+    && pass "custom-data.sh documents /etc/yantrafleet-sandbox.env for the reaper's service_role key" \
+    || fail "custom-data.sh never mentions /etc/yantrafleet-sandbox.env -- the reaper would 403 on demo_reap_expired()"
+grep -q 'chmod 640 /etc/yantrafleet-sandbox.env' "$HERE/custom-data.sh" \
+    && grep -q 'chown root:yantra /etc/yantrafleet-sandbox.env' "$HERE/custom-data.sh" \
+    && pass "custom-data.sh documents mode 640 root:yantra on the sandbox env file" \
+    || fail "custom-data.sh does not document 640 root:yantra on /etc/yantrafleet-sandbox.env"
+# ...and Azure-specific: that key must NOT be added to the EDIT ME block,
+# which is exactly what ends up in the VM's custom_data property forever.
+grep -qE '^SUPABASE_SERVICE|^SERVICE_ROLE' "$HERE/custom-data.sh" \
+    && fail "a service_role key variable appeared in custom-data.sh's EDIT ME block -- that lands in Azure's control plane in plaintext" \
+    || pass "no service_role key in custom-data.sh's EDIT ME block (it belongs in Key Vault or a root-written env file)"
+
+# Route strings the nginx block, the door and the marketing button must all
+# agree on.
+grep -q 'ROUTE_MINT = "/api/demo/session"' "$REPO_ROOT/ops/yantraops/sandbox_http.py" \
+    && pass "sandbox_http.py still serves /api/demo/session" \
+    || fail "sandbox_http.py's mint route moved -- nginx and marketing/index.html point at nothing"
+grep -q 'action="/api/demo/session"' "$REPO_ROOT/marketing/index.html" \
+    && pass "marketing/index.html posts to /api/demo/session with a real <form> (works with JS off)" \
+    || fail "marketing/index.html has no zero-JS <form> posting to /api/demo/session"
+
+# ---------------------------------------------------------------------------
+# 20) The conformance page's filename is hard-coded into every report
+#     yantra-conform generates (report_html.py TOOL_URL), so renaming the
+#     file silently breaks the footer link in every report already sitting
+#     in somebody's inbox.
+# ---------------------------------------------------------------------------
+[ -f "$REPO_ROOT/marketing/vda-5050-conformance-test.html" ] \
+    && pass "marketing/vda-5050-conformance-test.html exists (hard-coded in generated reports)" \
+    || fail "marketing/vda-5050-conformance-test.html missing -- generated reports link to it"
+grep -q 'vda-5050-conformance-test.html' "$REPO_ROOT/tools/conformance/yantraconform/report_html.py" \
+    && pass "report_html.py's footer link still matches that filename" \
+    || fail "report_html.py no longer links vda-5050-conformance-test.html (filename drifted)"
+
+# ---------------------------------------------------------------------------
 echo
 if [ "$FAILS" -eq 0 ]; then
     echo "validate.sh: all checks passed"

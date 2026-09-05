@@ -1,0 +1,232 @@
+<!doctype html>
+<!-- ================================================================
+  YantraFleet MARKETING SITE — site search
+  ================================================================
+  A real, working search over this site's own pages, so the
+  SearchAction in index.html's WebSite JSON-LD points at something
+  that exists rather than at a promise. Nine pages is small enough
+  that the index below is written by hand, in this file, next to the
+  code that uses it — no build step, no crawler, no JSON fetch.
+
+  WHEN YOU ADD A PAGE, add it here too. That is the same rule that
+  already applies to sitemap.xml and to the nav/footer lists in every
+  page; marketing/README.md lists all three in one place.
+
+  noindex,follow on purpose: a search-results page is thin content
+  that should never itself be in an index, but its links to the real
+  pages are worth following. It is deliberately NOT in sitemap.xml.
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Search — YantraFleet</title>
+<meta name="description" content="Search the YantraFleet site: features, security model, VDA 5050 conformance testing, documentation and release notes.">
+<meta name="robots" content="noindex,follow">
+<link rel="canonical" href="https://yantrafleet.example.com/search.html">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<a class="skiplink" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><span class="mark">Y</span> YantraFleet</a>
+    <button class="navtoggle" aria-expanded="false" aria-label="Toggle navigation">&#9776;</button>
+    <nav class="top">
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="features.html">Features</a>
+      <a href="vda-5050-conformance-test.html">VDA 5050 Test</a>
+      <a href="security.html">Security</a>
+      <a href="docs.html">Docs</a>
+      <a href="get-involved.html">Get Involved</a>
+      <a href="changelog.html">Changelog</a>
+      <a class="signin" href="/console/">Sign in</a>
+      <a class="cta" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" style="padding-bottom:24px">
+    <div class="wrap" style="max-width:780px">
+      <p class="kicker">Search</p>
+      <h1 style="max-width:20ch">Search this site.</h1>
+
+      <!-- A real GET form: with scripting off this still submits, the page
+           reloads with ?q=..., and the script-free fallback below renders
+           nothing — so the no-JS answer is the full page list, which is
+           still a useful answer for a nine-page site. -->
+      <form class="searchbox" method="get" action="search.html" role="search">
+        <label class="skiplink" for="q">Search terms</label>
+        <input type="search" id="q" name="q" placeholder="e.g. VDA 5050, RBAC, incident detection" autocomplete="off">
+        <button class="btn primary" type="submit">Search</button>
+      </form>
+
+      <ul class="results" id="results"></ul>
+      <p class="noresults" id="noresults" hidden></p>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <div class="fbrand">YantraFleet</div>
+        <p style="color:var(--muted);font-size:14px;max-width:38ch">Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. MIT licensed.</p>
+      </div>
+      <div>
+        <h4>Site</h4>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+          <li><a href="search.html">Search this site</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Tools</h4>
+        <ul>
+          <li><a href="vda-5050-conformance-test.html">VDA 5050 conformance test</a></li>
+          <li><a href="/console/">Fleet console</a></li>
+          <li><a href="/academy/">Operator academy</a></li>
+          <li><a href="/docs/">Documentation site</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository</a></li>
+          <li><a href="get-involved.html">Get involved / Issues</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/blob/main/LICENSE">License (MIT)</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="fine">YantraFleet is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection.</p>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+<script>
+// ---------------------------------------------------------------------------
+// The index. One entry per indexable page on this site. `keywords` carries
+// the words a visitor is likely to type that do not appear in the title or
+// the description, so matching stays honest instead of relying on a guess.
+// ---------------------------------------------------------------------------
+(function () {
+  "use strict";
+  var PAGES = [
+    { url: "index.html",
+      title: "Home — open-source AMR fleet operations",
+      desc: "What YantraFleet is: an MIT-licensed, self-hosted fleet-operations platform for multi-vendor AMR fleets, and a live demo that needs no signup.",
+      keywords: "amr agv robot fleet management vda 5050 mqtt supabase postgres open source self hosted demo sandbox try free" },
+    { url: "about.html",
+      title: "About — why YantraFleet exists",
+      desc: "The reasoning behind an open, inspectable alternative to closed vendor fleet dashboards.",
+      keywords: "why open source vendor lock-in mission philosophy licence mit" },
+    { url: "features.html",
+      title: "Features — every capability in detail",
+      desc: "Fleet console, human-approved commands, incident detection, predictive maintenance, notifications, AI copilot, RBAC, academy and the conformance tester.",
+      keywords: "console map alerts incidents replay approval audit detector maintenance rul battery motor temperature notifier webhook whatsapp twilio sarathi copilot rbac roles academy training connector simulator" },
+    { url: "vda-5050-conformance-test.html",
+      title: "VDA 5050 conformance test — 52 checks, free",
+      desc: "A free, open-source command-line conformance tester for VDA 5050 v2.1: 52 checks, a graded HTML report, capture-and-replay for brokers you cannot expose.",
+      keywords: "vda5050 vda 5050 conformance certification compliance test tester agv amr mqtt broker paho order instantactions cancelorder factsheet actionstates headerid retain last will capture replay report grade yantra-conform" },
+    { url: "security.html",
+      title: "Security & RBAC — demo, hardened and role-based modes",
+      desc: "Three access-control modes, Postgres row-level security, service-role key separation and a four-tier role hierarchy.",
+      keywords: "security rbac roles rls row level security hardening threat model audit trail service key anon key compliance" },
+    { url: "docs.html",
+      title: "Documentation",
+      desc: "Architecture reference, security and RBAC guide, Windows runbook, and cloud deployment guides.",
+      keywords: "docs documentation architecture runbook windows aws azure deploy install migrate" },
+    { url: "get-involved.html",
+      title: "Get involved — issues and contributions",
+      desc: "Report bugs, request features, or contribute code on GitHub.",
+      keywords: "contribute contributing github issues bug report pull request community help" },
+    { url: "changelog.html",
+      title: "Changelog — release notes",
+      desc: "Recent release notes, sourced from the repository's own CHANGELOG.md.",
+      keywords: "changelog releases versions history what's new updates" }
+  ];
+
+  var resultsEl = document.getElementById("results");
+  var emptyEl = document.getElementById("noresults");
+  var input = document.getElementById("q");
+  if (!resultsEl || !emptyEl || !input) return;
+
+  function score(page, terms) {
+    var title = page.title.toLowerCase();
+    var body = (page.desc + " " + page.keywords).toLowerCase();
+    var total = 0;
+    for (var i = 0; i < terms.length; i++) {
+      var t = terms[i];
+      if (!t) continue;
+      // Every term must appear somewhere, or this page is not a match.
+      if (title.indexOf(t) === -1 && body.indexOf(t) === -1) return 0;
+      total += (title.indexOf(t) !== -1) ? 3 : 1;
+    }
+    return total;
+  }
+
+  function render(query) {
+    var terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    resultsEl.innerHTML = "";
+    var hits = [];
+    var i;
+
+    if (terms.length === 0) {
+      hits = PAGES.slice();          // no query: just list the site
+    } else {
+      for (i = 0; i < PAGES.length; i++) {
+        var s = score(PAGES[i], terms);
+        if (s > 0) hits.push({ page: PAGES[i], score: s });
+      }
+      hits.sort(function (a, b) { return b.score - a.score; });
+      hits = hits.map(function (h) { return h.page; });
+    }
+
+    if (hits.length === 0) {
+      emptyEl.hidden = false;
+      emptyEl.textContent = "Nothing on this site matches “" + query
+        + "”. The full documentation lives at /docs/, and the source "
+        + "is on GitHub — both are searchable in ways this page is not.";
+      return;
+    }
+    emptyEl.hidden = true;
+
+    for (i = 0; i < hits.length; i++) {
+      var page = hits[i];
+      var li = document.createElement("li");
+      var a = document.createElement("a");
+      a.href = page.url;
+      a.appendChild(document.createTextNode(page.title));
+      var span = document.createElement("span");
+      span.className = "desc";
+      span.textContent = page.desc;
+      a.appendChild(span);
+      li.appendChild(a);
+      resultsEl.appendChild(li);
+    }
+  }
+
+  var initial = "";
+  try {
+    initial = new URLSearchParams(window.location.search).get("q") || "";
+  } catch (err) { initial = ""; }
+  input.value = initial;
+  if (initial) document.title = "Search: " + initial + " — YantraFleet";
+  render(initial);
+
+  // Filter as you type; the form still submits normally if scripting is
+  // partially blocked or the visitor hits Enter before this runs.
+  input.addEventListener("input", function () { render(input.value); });
+})();
+</script>
+</body>
+</html>

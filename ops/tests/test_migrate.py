@@ -178,6 +178,7 @@ OPT_IN_MIGRATIONS = (
     "0014_inbound_ops.sql",
     "0015_certification.sql",
     "0016_public_status.sql",
+    "0017_demo_command_scope.sql",
 )
 
 #: The baseline files a plain `migrate` run applies. Listed explicitly so a
@@ -256,5 +257,6 @@ def test_new_migrations_are_ordered_after_rbac():
     for name in ("0009_demo_sandbox.sql", "0010_share_links.sql",
                  "0011_replay.sql", "0012_utilization.sql",
                  "0013_maintenance_explain.sql", "0014_inbound_ops.sql",
-                 "0015_certification.sql", "0016_public_status.sql"):
+                 "0015_certification.sql", "0016_public_status.sql",
+                 "0017_demo_command_scope.sql"):
         assert names.index(name) > rbac

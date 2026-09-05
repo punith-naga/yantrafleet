@@ -69,9 +69,13 @@ def apply_command(sim: "FleetSim", robot_id: str, cmd: str) -> tuple[bool, str]:
         r.status = r.resume_status or "idle"
         # A held robot's stale path may reference its old task; restart clean.
         if r.status in ("moving", "working"):
+            # Discarding the held task abandons its action: report it
+            # terminal (VDA 5050 2.1 6.9) instead of dropping it silently.
+            sim._stage_failed_action(r, f"{robot_id} resumed; held task discarded")
             r.status = "idle"
             r.path = []
             r.task_kind = None
+            r.current_action_id = None
         return True, f"{robot_id} resumed"
 
     if cmd == "cancel_order":
@@ -79,6 +83,11 @@ def apply_command(sim: "FleetSim", robot_id: str, cmd: str) -> tuple[bool, str]:
             return False, f"{robot_id} is faulted; cannot cancel order"
         order_id = r.order_id or "(none)"
         had_order = bool(r.path) or r.status in ("moving", "working", "to_charger")
+        # VDA 5050 2.1 6.9 / 6.10.2: cancelling drives every action the order
+        # still owns to a terminal status (FAILED) BEFORE it stops being
+        # reported -- the cancelOrder instantAction's own FINISHED says the
+        # cancel was carried out, not what became of the work it stopped.
+        sim._stage_failed_action(r, f"order {order_id} cancelled")
         r.path = []
         r.task_kind = None
         r.task_mission = None
@@ -96,6 +105,9 @@ def apply_command(sim: "FleetSim", robot_id: str, cmd: str) -> tuple[bool, str]:
         return True, f"{robot_id} already charging"
     if r.status in ("paused", "estopped"):
         r.status = r.resume_status or "idle"
+    # Diverting abandons the task in flight -- terminalize its action (6.9).
+    sim._stage_failed_action(r, f"{robot_id} diverted to charger")
     sim._route_to(r, world.nearest_charger(r.node), "to_charger")
     r.task_kind = None
+    r.current_action_id = None
     return True, f"{robot_id} routed to charger {r.path[-1] if r.path else r.node}"

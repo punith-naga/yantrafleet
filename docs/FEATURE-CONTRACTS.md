@@ -1,7 +1,7 @@
-# YantraFleet — Feature Contracts (migrations 0009–0016)
+# YantraFleet — Feature Contracts (migrations 0009–0017)
 
 Every table, column, view and RPC added by `supabase/0009_*.sql` through
-`supabase/0016_*.sql`, with exact names, exact argument names and types,
+`supabase/0017_*.sql`, with exact names, exact argument names and types,
 exact return shapes, and which role may call each one.
 
 This file is the contract. If something is not written here, do not assume it.
@@ -22,12 +22,13 @@ This file is the contract. If something is not written here, do not assume it.
 * Timestamps are ISO-8601 strings with an offset (`timestamptz`).
   Arguments typed `timestamptz` accept an ISO-8601 string.
 * Fields documented as nullable really can be `null`; render for that.
-* **Apply order matters.** All eight migrations are `OPT-IN` (skipped by a
+* **Apply order matters.** All nine migrations are `OPT-IN` (skipped by a
   plain `yantraops migrate`; pass `--include-opt-in`). All of them require
   `0007_rbac.sql`; 0011–0016 additionally require `public.yf_can_read_site()`
   and `public.yf_is_service_role()`, which are defined in **0009**; 0016
-  requires `missions.completed_at`, defined in **0012**. In short: apply
-  0007 → 0008 → 0009 → … → 0016 in filename order.
+  requires `missions.completed_at`, defined in **0012**; **0017** rewrites
+  0009's demo insert/update policies and is a no-op without it. In short:
+  apply 0007 → 0008 → 0009 → … → 0017 in filename order.
 
 ### The shared site-read gate
 
@@ -138,6 +139,43 @@ must carry that `site_id`; an attempt to write any other site is rejected with
   * `alerts` — only `ack`
   * `commands` — only `status`, `decided_by`, `decided_at`, `note`, `executed_at`
 
+#### Robot scope on insert — `0017_demo_command_scope.sql`
+
+Pinning the row's `site_id` says nothing about the *other* columns, and
+`commands.robot_id`, `robot_telemetry.robot_id` and
+`maintenance_findings.robot_id` are bare `text` with no foreign key (0002 /
+0003 / 0004 predate 0005's `site_id`). 0017 adds the missing `WITH CHECK`
+terms to the anon demo INSERT policies:
+
+| table | extra condition on insert |
+|---|---|
+| `commands` | `status = 'pending'` **and** `decided_by`/`decided_at`/`executed_at` all `null` **and** `robot_id` names a `robots` row at the same `site_id` |
+| `robot_telemetry` | `robot_id` names a `robots` row at the same `site_id` |
+| `maintenance_findings` | `robot_id` names a `robots` row at the same `site_id` |
+
+`demo_sandbox_update` on `commands` carries the same robot-scope predicate in
+both `USING` and `WITH CHECK`, so a row forged under 0009 cannot be walked to
+`approved` either. A violation is `403 {"code": "42501"}`.
+
+**Unchanged, deliberately** (see [`SECURITY.md`](SECURITY.md)):
+`missions.robots` (the sandbox writer itself violates it today),
+`alerts.src` / `incidents.src` / `*.tlabel` (display labels, not references),
+and 0007's `rbac_commands_insert` for authenticated users.
+
+**A demo sandbox still demos the approval loop**: it inserts a `pending`
+command for one of its own robots and then PATCHes it to `approved` — the
+same two steps a human performs.
+
+#### Upsert onto another site's primary key
+
+`insert ... on conflict do update` evaluates the UPDATE policy's `USING`
+clause against the **existing** row, so a demo token aiming
+`?on_conflict=id` + `Prefer: resolution=merge-duplicates` at a real robot's
+id is refused with `42501 new row violates row-level security policy (USING
+expression)`. `resolution=ignore-duplicates` (`do nothing`) silently skips
+the row instead — no error, no change. A bare insert on a duplicate key
+raises `23505`.
+
 ### Helper functions
 
 | function | returns | who |
@@ -216,7 +254,31 @@ JSON array, newest first. **Tokens are deliberately omitted.**
   deterministic starter fleet (fixed battery/pos/health), so tests can assert
   exact values. The SQL randomises those fields.
 * `demo_reap_expired` in the fake accepts any non-anon caller; the SQL grants
-  it to `authenticated` and `service_role`.
+  it to `authenticated` and `service_role`. (Either way it needs no role —
+  see the minor finding in [`SECURITY.md`](SECURITY.md).)
+* A plain insert that duplicates a text primary key raises `23505` in the
+  SQL; the fake appends a second row with the same id. Not a write path a
+  demo token can exploit — `on conflict` is modelled correctly — but it is
+  the one ON CONFLICT-adjacent case the fake still gets wrong.
+
+### Approved-command executors are site-scoped (v0.17)
+
+The other half of 0017: an executor holds the service key, which **bypasses
+RLS**, so a site filter is the only thing standing between it and a
+`commands` row written by someone else's sandbox. Both pollers now require
+one.
+
+| | `yantrasim.transports.supabase.SupabaseTransport` | `yantrabridge.commands.CommandPublisher` |
+|---|---|---|
+| site resolution | `site=` → `YANTRA_SITE_ID` → `BLR-DC1` (i.e. `yantracore.site_id()`, the same value it stamps on every row it writes) | `site=` → `YANTRA_SITE_ID` → **`ValueError` at construction** |
+| query | `commands?status=eq.approved&site_id=eq.<site>&select=id,robot_id,cmd,site_id` | same |
+| after fetch | a row whose `site_id` disagrees is dropped and logged; a row with no `site_id` key is applied, warning once | same |
+| robot lookup | n/a | `robots?id=eq.<serial>&site_id=eq.<site>` |
+| opt out | `site="*"` (`ANY_SITE`), logged as a warning | `--site '*'`, logged as a warning |
+
+`yantrabridge` raises rather than guessing because guessing a site would
+silently stop a multi-site deployment's other bridges; `yantrasim` can
+default safely because its default already equals the site it writes to.
 
 ---
 

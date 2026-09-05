@@ -8,6 +8,48 @@
 # was configured, or the operator's DOMAIN_NAME when they set one — a real
 # server_name is what lets `certbot --nginx -d <domain>` find this block
 # automatically instead of failing to match anything.
+#
+# EVERY location below that an anonymous stranger can reach carries a
+# comment saying why it is safe to expose. If you add a location, add that
+# comment too — this file is the whole public attack surface of the box.
+
+# ---------------------------------------------------------------------------
+# Rate-limit zone for the anonymous demo door.
+#
+# This lives OUTSIDE server{} on purpose: limit_req_zone is an http-context
+# directive, and sites-enabled/* is included from inside http{}, so here is
+# where it belongs. Putting it inside server{} makes `nginx -t` fail.
+#
+# POST /api/demo/session is the only route on this box where a stranger with
+# no account creates database rows and forks a simulator process. yantraops
+# already enforces its own per-IP quota (yantra-sandbox.service ships
+# --rate 3 --rate-window 900, i.e. 3 mints per 15 minutes) plus a
+# concurrency ceiling (--max-inflight 2, --max-live 8). That limiter is good,
+# but it only runs *after* Python has accepted the socket, taken a thread and
+# read the request. This zone is the cheap outer wall in front of it.
+#
+# The numbers:
+#   rate=6r/m       one request per 10 seconds sustained, per client address.
+#                   Deliberately LOOSER than the application's 3-per-15-min so
+#                   nginx is never what rejects a legitimate first click, and
+#                   far tighter than anything a script would want. A visitor
+#                   who is behaving needs exactly one request.
+#   burst=3 nodelay a real person double-clicks the button, or clicks again
+#                   after a 429, or a form resubmit fires twice. Three spare
+#                   slots absorb that. `nodelay` serves the burst immediately
+#                   and rejects anything past it rather than *queueing* it —
+#                   queued requests hold a worker connection open, which is
+#                   precisely the resource a flood is trying to exhaust.
+#   10m             ~160,000 distinct addresses of zone state. nginx evicts
+#                   least-recently-used entries when it fills, so the limiter
+#                   cannot itself be grown into a memory DoS.
+#
+# NOTE ON $binary_remote_addr: that is the address nginx sees. Behind a CDN
+# or an L7 load balancer every visitor looks like one address and this zone
+# would throttle the whole world together — if you put something in front of
+# this box, key the zone on the real client header that thing sets instead.
+# ---------------------------------------------------------------------------
+limit_req_zone $binary_remote_addr zone=yantra_demo:10m rate=6r/m;
 
 server {
     listen 80 default_server;
@@ -28,6 +70,12 @@ server {
 
     # -- marketing site (static landing/about/features/etc, at the bare
     #    host root) -----------------------------------------------------
+    # ANONYMOUS: yes, by design — this is the public front door.
+    # Safe because it is static files and nothing else: `try_files` with a
+    # `=404` fallback serves only what exists under /opt/yantrafleet/marketing
+    # and never falls through to an interpreter. No directory autoindex, no
+    # PHP/CGI handler, no upload path. The pages carry no accounts, no forms
+    # that post anywhere but /api/demo/ below, and no tracking.
     root /opt/yantrafleet/marketing;
     index index.html;
 
@@ -39,6 +87,12 @@ server {
     #    the bare host as the public landing page; bare /console or
     #    /console/ still hands the app its backend config in the URL, same
     #    trick the old root redirect used) ----------------------------------
+    # ANONYMOUS: yes. Safe because the console is a static single-file app
+    # and the key it is handed here is the Supabase *publishable (anon)* key,
+    # which is meant to be in a browser. What that key can actually do is
+    # decided by row-level security in your Supabase project, not by this
+    # file — that is what supabase/0006 (hardened) and 0007 (RBAC) tighten.
+    # A box still in demo-open mode is open on purpose; see docs/SECURITY.md.
     location = /console {
         return 302 /console/index.html?supa=${SUPABASE_URL}&key=${SUPABASE_KEY}&site=${YANTRA_SITE_ID};
     }
@@ -51,6 +105,8 @@ server {
     }
 
     # -- academy (static training app) ------------------------------------
+    # ANONYMOUS: yes. Same reasoning as /console/ — static files plus the
+    # publishable anon key, with RLS deciding what that key may touch.
     # Bare /academy or /academy/ gets the same backend params as the console.
     location = /academy {
         return 302 /academy/index.html?supa=${SUPABASE_URL}&key=${SUPABASE_KEY}&site=${YANTRA_SITE_ID};
@@ -64,12 +120,88 @@ server {
     }
 
     # -- docs (static docs site) ------------------------------------------
+    # ANONYMOUS: yes. Static Markdown/HTML checked into the public repo —
+    # nothing here is secret, and `try_files ... =404` keeps it to files that
+    # actually exist under /opt/yantrafleet/docs.
     location /docs/ {
         root /opt/yantrafleet;
         try_files $uri $uri/ =404;
     }
 
+    # ANONYMOUS: yes — the same public Markdown as /docs/ above, served
+    # with a type a browser will render. nginx's default mime map has no
+    # entry for .md, so without this every link from the marketing site
+    # into docs/SECURITY.md et al comes back as application/octet-stream
+    # and the browser DOWNLOADS the file instead of showing it, which
+    # reads as a broken link. A regex location wins over the /docs/
+    # prefix location above, so this is the one that handles .md.
+    location ~ ^/docs/.*\.md$ {
+        root /opt/yantrafleet;
+        default_type text/plain;
+        charset utf-8;
+        try_files $uri =404;
+    }
+
+    # -- zero-signup demo sandbox door (yantraops sandbox-serve, loopback
+    #    127.0.0.1:8088 — see deploy/aws/systemd/yantra-sandbox.service) ---
+    # ANONYMOUS: yes, and it WRITES. This is the marketing page's
+    # "Try it with a live fleet" button. Why exposing it is safe:
+    #
+    #  * POST /api/demo/session reads NOTHING the caller sends. Not the
+    #    body, not the query string. The TTL, the fleet size, the site id
+    #    and the origin marker are all operator configuration fixed in
+    #    yantra-sandbox.service when the process starts, so a caller cannot
+    #    aim a mint at somebody else's site or ask for a bigger/longer one.
+    #    That is the whole class of bug this door is built not to have.
+    #  * The reply carries exactly the one session it just created — its
+    #    console URL, site id and expiry. There is no route that lists
+    #    sandboxes and no route that takes a token, so a stranger cannot
+    #    enumerate or rejoin anyone else's demo.
+    #  * Everything a sandbox can touch is confined by supabase/0009's
+    #    row-level security, expires on its own TTL, and is purged (rows
+    #    AND simulator processes) by yantra-sandbox-reap.timer.
+    #  * Two independent ceilings sit behind this: nginx's limit_req below,
+    #    and yantraops' own per-IP quota + max-inflight + max-live.
+    #  * It is OFF unless the operator deliberately turned it on. The unit
+    #    is installed but not enabled, because it needs supabase/0009
+    #    applied first. Until then this location answers 502, which is the
+    #    right answer for a box that never opted in.
+    #  * GET /api/demo/limits returns three integers and two booleans about
+    #    the deployment as a whole (enabled / live / max_live / available /
+    #    ttl_minutes). No per-visitor data exists in it to leak.
+    #
+    # DELIBERATELY NOT PROXIED: the door's own /healthz. It carries
+    # operational counters (minted, refused) that the public has no reason
+    # to see, and the public health name on this box is /health, which
+    # already belongs to the sarathi copilot below. Only the /api/demo/
+    # prefix is exposed, so /healthz stays loopback-only for systemd.
+    location /api/demo/ {
+        # See the limit_req_zone comment at the top of this file for why
+        # 6r/m + burst=3 nodelay, and why this sits in front of the
+        # application's own limiter rather than replacing it.
+        limit_req zone=yantra_demo burst=3 nodelay;
+        # Match the status the application itself returns when it refuses,
+        # so the marketing page needs one 429 branch, not two. (nginx's own
+        # 429 has no Retry-After; the page falls back to a sane default.)
+        limit_req_status 429;
+        # The door drains and discards the request body without parsing it.
+        # Refuse a big one out here rather than reading it into Python.
+        client_max_body_size 4k;
+        proxy_pass http://127.0.0.1:8088;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # -- sarathi copilot API (uvicorn on loopback) ------------------------
+    # ANONYMOUS: yes *unless* you set SARATHI_TOKEN in /etc/yantrafleet.env,
+    # which turns on bearer auth in the app itself. Left open, /ask answers
+    # questions grounded in this site's fleet data — the same data the
+    # console's anon key already reads — so an open /ask on a demo-open box
+    # exposes nothing the console did not. On a hardened or RBAC box, set
+    # SARATHI_TOKEN: the copilot is a read path into your fleet and it
+    # should not be more open than the console is.
     location /ask {
         proxy_pass http://127.0.0.1:8001;
         proxy_set_header Host $host;
@@ -79,6 +211,10 @@ server {
         proxy_read_timeout 120s;
     }
 
+    # ANONYMOUS: yes. The copilot's liveness endpoint — it reports whether
+    # the service is up, which answer tier it can reach, and whether bearer
+    # auth is switched on. No fleet data, no key material, no configuration
+    # values. Exposed on purpose so an uptime checker needs no credentials.
     location /health {
         proxy_pass http://127.0.0.1:8001;
         proxy_set_header Host $host;

@@ -266,6 +266,138 @@ RBAC policies, restores `demo_all`, and re-grants the revoked table
 privileges; a further commented block tears down the RBAC tables and
 functions entirely (destroying role assignments and academy data).
 
+## Running the demo sandbox (`0009_demo_sandbox.sql`) on your own project
+
+`0009` is the one migration that hands **anonymous internet visitors write
+access** to your database. Its threat model (in the file's header) is
+sound about *where a row can land*: every anon policy is
+`site_id = public.yf_demo_site()`, so a visitor's writes are pinned to one
+throwaway `DEMO-*` site and cannot touch, move or read a real one. If you
+self-host the "try it" button, read this section as well — it covers the
+class of problem that pinning the row's **site** does not address.
+
+### The gap 0017 closes: a row can name something it does not own
+
+A sandbox row lands in the sandbox's site, but four of the seven
+demo-writable tables carry a column that *names a robot* and has no
+foreign key behind it (0002/0003/0004 predate 0005's `site_id`):
+
+| Column | Consumed by | Was |
+|---|---|---|
+| `commands.robot_id` | approved-command executors (yantrasim, yantrabridge) | **critical** |
+| `robot_telemetry.robot_id` | detector, replay, utilization | poisoning |
+| `maintenance_findings.robot_id` | detector dedup, copilot | suppression |
+| `missions.robots[]` | console display only | noise |
+
+Before `0017_demo_command_scope.sql`, an anonymous visitor holding only
+the publishable key and a freshly minted demo token could POST
+
+```json
+{"robot_id": "AMR-01", "cmd": "estop", "status": "approved",
+ "requested_by": "demo-visitor", "site_id": "DEMO-…"}
+```
+
+— a **real** robot in a **real** site, with the human approval gate
+already satisfied, because 0009's insert policy checked `site_id` and
+nothing else, and its column-level grants narrow only UPDATE. The row
+stayed inside the demo site, so no real row was written or read. The
+exposure was downstream, in the executors that hold the service key and
+therefore bypass RLS: they polled `commands?status=eq.approved` and would
+have published a VDA 5050 `estop` instantAction to a serial derived from
+attacker-supplied text.
+
+Three independent layers now stand between a forged row and a robot:
+
+1. **`0017_demo_command_scope.sql`** — a demo insert into `commands`,
+   `robot_telemetry` or `maintenance_findings` must name a robot that
+   lives in the **same sandbox site**, and a demo `commands` row must be
+   inserted `pending` with no `decided_by` / `decided_at` /
+   `executed_at`. (The sandbox still demos the approval loop: it PATCHes
+   its own pending row to `approved`, which is what a human does.)
+2. **Both approved-command pollers are site-scoped and no longer
+   opt-in.** `yantrasim`'s `SupabaseTransport` polls only its own site
+   (`site=` / `YANTRA_SITE_ID` / `BLR-DC1` — the same resolution that
+   stamps every row it writes). `yantrabridge`'s `CommandPublisher`
+   **requires** a site: it raises at construction if neither `--site` nor
+   `YANTRA_SITE_ID` is set, rather than guessing. Both re-check every
+   returned row's `site_id` client-side, and the bridge's robot lookup is
+   site-scoped too. `--site '*'` is a deliberate, logged opt-out.
+3. **Site hygiene**: run the sandbox on a project that has no real fleet
+   in it if you possibly can. Layers 1 and 2 assume the demo and the real
+   fleet share a database; not sharing one removes the question.
+
+**If you ran 0009 before 0017**, rows forged under the old policy are
+still in the table (0017 stops them being created and stops them being
+walked forward, but does not delete them). Audit and clean up with:
+
+```sql
+-- demo rows that name a robot outside their own site
+select c.id, c.site_id, c.robot_id, c.status
+  from public.commands c
+ where c.site_id like 'DEMO-%'
+   and not exists (select 1 from public.robots r
+                    where r.id = c.robot_id and r.site_id = c.site_id);
+-- ...same shape for robot_telemetry and maintenance_findings.
+-- delete them, or just purge every sandbox:
+-- select public.demo_reap_expired(0);
+```
+
+### What 0017 deliberately leaves open
+
+- **`missions.robots`** is unchanged. The equivalent policy is written
+  out (commented) in 0017, but enabling it today breaks the sandbox
+  itself: `ops/yantraops/sandbox.py` builds its `FleetSim` and renames
+  the robots *afterwards*, while `FleetSim.__init__` has already captured
+  mission crews from the original ids — so a sandbox's `missions.robots`
+  genuinely reads `["AMR-01", …]`. Fix the writer, then enable the
+  policy. Nothing dispatches from that column.
+- **`alerts.src` / `incidents.src` / `*.tlabel`** stay free text. They
+  are display labels, not references (`src` is legitimately `'fleet'`),
+  and no executor routes on them. A sandbox visitor can therefore put any
+  string, including a real robot's id, in an alert *inside their own
+  sandbox*. If you run the notifier without `--site`, that string will
+  show up in your alert feed.
+- **A duplicate-key oracle.** `robots.id`, `alerts.id`, `incidents.id`,
+  `missions.id` and `maintenance_findings.id` are global text primary
+  keys. A demo visitor cannot hijack a real row through them —
+  `on conflict do update` is refused by the demo UPDATE policy's USING
+  clause, `do nothing` silently skips, and a bare insert raises `23505` —
+  but the *difference* between those outcomes tells them whether an id
+  exists somewhere in the database.
+- **Authenticated command requests are not robot-scoped.** 0007's
+  `rbac_commands_insert` checks the role and the row's site but, like
+  0009, not `robot_id`: an operator at site A can queue a command naming
+  a robot that lives at site B, stamped with site A. Requiring the robot
+  to already exist would reject a legitimate command for a robot that has
+  not reported in yet, so the database policy is unchanged and the
+  executors' site check (layer 2) is what closes it.
+- **`demo_reap_expired(p_grace_minutes int)` is granted to
+  `authenticated` with no role check.** Any signed-in user — including a
+  brand-new sign-up with no `user_roles` row — can call it and purge
+  every **already-expired** sandbox's rows. It cannot touch a live
+  sandbox (`expires_at < now()`), cannot touch a non-demo site
+  (`_yf_demo_purge_sites` raises), and cannot enumerate anything: it
+  returns counts. So this is a nuisance-grade denial of service against
+  other visitors' dead demos, not a data-loss or disclosure path — which
+  is why the published grant is left as-is. If you do not need a
+  non-admin reaper, `revoke execute on function
+  public.demo_reap_expired(int) from authenticated;` (0017 carries the
+  same line, commented). `demo_mint_session`'s opportunistic reap keeps
+  working: it is SECURITY DEFINER, so the privilege is checked against
+  its owner.
+- **Row-count abuse and the bearer-token model** are unchanged from
+  0009's own "RESIDUAL RISKS" note: read it too.
+
+### Turning the sandbox off
+
+```sql
+select public.admin_set_demo_limits(p_enabled => false);  -- admin only
+select public.demo_reap_expired(0);                        -- purge what is left
+```
+
+or run 0009's commented ROLLBACK block to remove the anon grants and
+policies entirely.
+
 ## EC2 (or any Linux host) notes
 
 - Keep secrets out of shell history and unit files. Put them in
