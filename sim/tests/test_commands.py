@@ -54,6 +54,34 @@ class TestApplyCommand:
         assert ok
         assert r.status in ("to_charger", "charging")
 
+    def test_cancel_order_clears_path_and_returns_to_idle(self):
+        sim = make_sim()
+        r = get(sim, "AMR-04")
+        ok, detail = sim.apply_order(
+            "AMR-04", "order-9", 0, ["n0_0", "n0_1", "n0_2"])
+        assert ok, detail
+        assert r.status == "moving" and r.path
+        ok, detail = apply_command(sim, "AMR-04", "cancel_order")
+        assert ok
+        assert "order-9" in detail
+        assert r.path == [] and r.status == "idle"
+
+    def test_cancel_order_with_no_active_order_is_a_no_op(self):
+        sim = make_sim()
+        r = get(sim, "AMR-05")
+        r.status = "idle"
+        r.path = []
+        ok, detail = apply_command(sim, "AMR-05", "cancel_order")
+        assert ok and "no active order" in detail
+
+    def test_cancel_order_refused_while_faulted(self):
+        sim = make_sim()
+        r = get(sim, "AMR-06")
+        r.status = "fault"
+        r.fault_kind = "estop"
+        ok, detail = apply_command(sim, "AMR-06", "cancel_order")
+        assert not ok and "faulted" in detail
+
     def test_bad_inputs_fail_softly(self):
         sim = make_sim()
         ok, why = apply_command(sim, "AMR-99", "pause")

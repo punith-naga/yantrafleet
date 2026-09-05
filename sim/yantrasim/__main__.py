@@ -76,6 +76,11 @@ def main(argv: list[str] | None = None) -> int:
             if hasattr(transport, "poll_commands"):
                 transport.poll_commands(
                     lambda rid, cmd: apply_command(sim, rid, cmd))
+            # v0.10: adopt inbound VDA 5050 orders (MQTT master control).
+            if hasattr(transport, "poll_orders"):
+                transport.poll_orders(
+                    lambda rid, oid, ouid, nodes, actions:
+                        sim.apply_order(rid, oid, ouid, nodes, actions))
             for e in out.events:
                 logging.getLogger("yantrasim").info(
                     "event %s (%s): %s", e.kind, e.sev, e.msg)

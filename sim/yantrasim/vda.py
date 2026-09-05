@@ -29,6 +29,10 @@ INTERFACE_NAME = "uagv"
 #: Full battery reach estimate in metres (for batteryState.reach).
 FULL_BATTERY_REACH_M = 6000.0
 
+#: Cruise speed ceiling reported in the factsheet (matches sim.SPEED_MPS
+#: with headroom; kept independent to avoid a vda<->sim import cycle).
+FACTSHEET_SPEED_MAX_MPS = 1.5
+
 # Fault kind -> VDA errorType / errorLevel / description / hint.
 FAULT_TYPES: dict[str, str] = {
     "localization": "localizationError",
@@ -185,6 +189,61 @@ def build_state(r: "Robot", header_id: int, timestamp: str) -> dict[str, Any]:
             "fieldViolation": r.fault_kind == "obstacle_blocked",
         },
         "actionStates": action_states,
+    }
+
+
+def build_factsheet(r: "Robot", header_id: int, timestamp: str) -> dict[str, Any]:
+    """Minimal VDA 5050 v2.1 factsheet payload (``.../factsheet`` topic).
+
+    Static per-vendor capability description answering ``factsheetRequest``
+    instantActions. Only the top-level sections the spec marks required are
+    populated, with placeholder-but-schema-shaped values — this simulator
+    has no real vendor datasheet to draw from.
+    """
+    serial = sanitize_serial(r.robot_id)
+    return {
+        "headerId": header_id,
+        "timestamp": timestamp,
+        "version": VDA_VERSION,
+        "manufacturer": r.vendor,
+        "serialNumber": serial,
+        "typeSpecification": {
+            "seriesName": f"{r.vendor}-yantrasim",
+            "agvKinematic": "DIFF",
+            "agvClass": "CARRIER",
+            "maxLoadMass": 500.0,
+            "localizationTypes": ["NATURAL"],
+            "navigationTypes": ["AUTONOMOUS"],
+        },
+        "physicalParameters": {
+            "speedMin": 0.0,
+            "speedMax": FACTSHEET_SPEED_MAX_MPS,
+            "accelerationMax": 0.5,
+            "decelerationMax": 0.5,
+            "heightMax": 0.4,
+            "width": 0.6,
+            "length": 0.9,
+        },
+        "protocolLimits": {
+            "maxStringLens": {"msgLen": 65535, "topicSerialLen": 200,
+                              "topicElemLen": 200, "idLen": 100},
+            "maxArrayLens": {"order.nodes": 100, "order.edges": 100,
+                             "order.actions": 20},
+            "timing": {"minOrderInterval": 0.5, "minStateInterval": 0.5},
+        },
+        "protocolFeatures": {
+            "optionalParameters": [],
+            "agvActions": [
+                {"actionType": t, "actionScopes": ["INSTANT"], "actionParameters": []}
+                for t in ("cancelOrder", "stateRequest", "factsheetRequest",
+                          "initPosition")
+            ] + [
+                {"actionType": t, "actionScopes": ["NODE"], "actionParameters": []}
+                for t in ("pick", "drop", "move", "inventory")
+            ],
+        },
+        "agvGeometry": {"wheelDefinitions": [], "envelopes2d": []},
+        "loadSpecification": {"loadPositions": [], "loadSets": []},
     }
 
 

@@ -105,6 +105,21 @@ def test_node_edge_states_alternate_sequence_ids(sim):
     raise AssertionError("no robot ever had a pending path")
 
 
+def test_factsheet_message():
+    fleet = FleetSim(seed=2)
+    r = fleet.robots[0]
+    fs = vda.build_factsheet(r, 1, "2026-08-26T10:00:00.000Z")
+    assert fs["serialNumber"] == vda.sanitize_serial(r.robot_id)
+    assert fs["manufacturer"] == r.vendor
+    assert fs["version"] == "2.1.0"
+    for section in ("typeSpecification", "physicalParameters", "protocolLimits",
+                    "protocolFeatures", "agvGeometry", "loadSpecification"):
+        assert section in fs
+    action_types = {a["actionType"] for a in fs["protocolFeatures"]["agvActions"]}
+    assert {"cancelOrder", "stateRequest", "factsheetRequest",
+            "initPosition"} <= action_types
+
+
 def test_connection_message():
     fleet = FleetSim(seed=2)
     r = fleet.robots[0]

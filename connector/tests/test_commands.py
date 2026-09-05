@@ -163,6 +163,72 @@ class TestPublishing:
         assert pub.poll() == 1          # retried
 
 
+class TestPublishOrder:
+    """The outbound half of the order contract: dispatch a mission as a
+    real VDA 5050 ``order`` message (poll()/handle_state() above cover the
+    instantActions request/response loop; this is the master-control ->
+    AGV direction that request/response loop was missing)."""
+
+    NODES = [
+        {"nodeId": "n0_0", "sequenceId": 0, "released": True, "actions": []},
+        {"nodeId": "n0_1", "sequenceId": 2, "released": True,
+         "actions": [{"actionId": "act-1", "actionType": "drop",
+                      "blockingType": "NONE", "actionParameters": []}]},
+    ]
+
+    def test_publish_order_shape_on_known_manufacturer(self) -> None:
+        backend, mqtt, pub = make()
+        pub.handle_state(STATE)  # learns AMR_01 -> nexomotion
+        ok = pub.publish_order("AMR_01", "order-1", self.NODES)
+        assert ok
+        topic, msg = mqtt.published[0]
+        assert topic == "uagv/v2/nexomotion/AMR_01/order"
+        assert msg["manufacturer"] == "nexomotion"
+        assert msg["serialNumber"] == "AMR_01"
+        assert msg["version"] == "2.1.0"
+        assert msg["orderId"] == "order-1"
+        assert msg["orderUpdateId"] == 0
+        assert msg["nodes"] == self.NODES
+        assert msg["edges"] == []
+        assert msg["headerId"] == 1 and msg["timestamp"]
+        # no commands-table row involved
+        assert backend.patches == []
+
+    def test_publish_order_header_id_increments_per_topic(self) -> None:
+        backend, mqtt, pub = make()
+        pub.handle_state(STATE)
+        pub.publish_order("AMR_01", "order-1", self.NODES)
+        pub.publish_order("AMR_01", "order-1", self.NODES, order_update_id=1)
+        headers = [msg["headerId"] for _, msg in mqtt.published]
+        assert headers == [1, 2]
+
+    def test_publish_order_raw_fleet_id_is_sanitized(self) -> None:
+        backend, mqtt, pub = make()
+        pub.handle_state(STATE)
+        assert pub.publish_order("AMR-01", "order-2", self.NODES)
+        topic, _ = mqtt.published[0]
+        assert topic == "uagv/v2/nexomotion/AMR_01/order"
+
+    def test_publish_order_unknown_manufacturer_returns_false(self) -> None:
+        backend, mqtt, pub = make()
+        ok = pub.publish_order("AMR_99", "order-3", self.NODES)
+        assert not ok
+        assert mqtt.published == []
+
+    def test_publish_order_manufacturer_falls_back_to_robots_table(self) -> None:
+        backend, mqtt, pub = make()
+        backend.robots.append({"id": "AMR_02", "vendor": "agilus"})
+        assert pub.publish_order("AMR_02", "order-4", self.NODES)
+        topic, _ = mqtt.published[0]
+        assert topic == "uagv/v2/agilus/AMR_02/order"
+
+    def test_publish_order_broker_failure_returns_false(self) -> None:
+        backend, mqtt, pub = make()
+        pub.handle_state(STATE)
+        mqtt.raise_on_publish = True
+        assert not pub.publish_order("AMR_01", "order-5", self.NODES)
+
+
 class TestActionStateAcks:
     def _published(self) -> tuple[FakeBackend, FakeMqtt, CommandPublisher]:
         backend, mqtt, pub = make()

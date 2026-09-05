@@ -10,6 +10,7 @@ import pytest
 from yantrabridge.translate import (
     AlertDeduper,
     Translator,
+    translate_connection,
     translate_state,
 )
 
@@ -205,6 +206,57 @@ class TestAlertDedup:
         alerts = AlertDeduper().process(make_state(
             batteryState={"batteryCharge": 8.0, "charging": False}))
         assert len(alerts) == 1 and alerts[0]["sev"] == "crit"
+
+
+# ---------------------------------------------------------------------------
+# translate_connection -> robots row (or None)
+# ---------------------------------------------------------------------------
+
+class TestTranslateConnection:
+    def test_offline_maps_to_fault_status_with_message(self) -> None:
+        row = translate_connection({
+            "serialNumber": "AGV-001", "connectionState": "OFFLINE",
+            "timestamp": "2026-08-26T10:16:00.000Z",
+        })
+        assert row == {
+            "id": "AGV-001",
+            "status": "fault",
+            "fault_msg": "MQTT connection closed (OFFLINE)",
+            "updated_at": "2026-08-26T10:16:00.000Z",
+        }
+
+    def test_connectionbroken_maps_to_fault_status(self) -> None:
+        row = translate_connection({
+            "serialNumber": "AGV-002", "connectionState": "CONNECTIONBROKEN",
+        })
+        assert row["status"] == "fault"
+        assert "CONNECTIONBROKEN" in row["fault_msg"] or "last-will" in row["fault_msg"]
+        assert row["updated_at"]  # defaulted, not empty
+
+    def test_online_returns_none(self) -> None:
+        assert translate_connection({
+            "serialNumber": "AGV-001", "connectionState": "ONLINE",
+        }) is None
+
+    def test_unknown_connection_state_returns_none(self) -> None:
+        assert translate_connection({
+            "serialNumber": "AGV-001", "connectionState": "SOMETHING_NEW",
+        }) is None
+
+    def test_missing_serial_raises(self) -> None:
+        with pytest.raises(ValueError):
+            translate_connection({"connectionState": "OFFLINE"})
+
+    def test_row_only_has_columns_the_schema_already_has(self) -> None:
+        # No new column invented -- upsert_robots must never be handed a
+        # key the live `robots` table (supabase/0001_init.sql) can't take.
+        row = translate_connection({
+            "serialNumber": "AGV-001", "connectionState": "OFFLINE",
+        })
+        assert set(row) <= {
+            "id", "vendor", "status", "battery", "pos", "speed", "task_kind",
+            "health", "motor_temp", "tasks_done", "fault_msg", "updated_at",
+        }
 
 
 # ---------------------------------------------------------------------------

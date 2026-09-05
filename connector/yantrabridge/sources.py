@@ -13,8 +13,12 @@ from typing import Any, Callable, Iterator
 
 #: Default VDA 5050 state-topic subscription (interfaceName/majorVersion/+/+/state).
 DEFAULT_STATE_TOPIC = "uagv/v2/+/+/state"
+#: Default VDA 5050 connection-topic subscription (retained ONLINE/OFFLINE/
+#: CONNECTIONBROKEN -- see translate.translate_connection).
+DEFAULT_CONNECTION_TOPIC = "uagv/v2/+/+/connection"
 
-_TOPIC_RE = re.compile(r"^[^/]+/v\d+/(?P<manufacturer>[^/]+)/(?P<serial>[^/]+)/state$")
+_TOPIC_RE = re.compile(
+    r"^[^/]+/v\d+/(?P<manufacturer>[^/]+)/(?P<serial>[^/]+)/(?:state|connection)$")
 
 
 def read_jsonl(path: str | Path) -> Iterator[dict[str, Any]]:
@@ -38,7 +42,8 @@ def read_jsonl(path: str | Path) -> Iterator[dict[str, Any]]:
 
 
 class MqttSource:
-    """Subscribe to VDA 5050 state topics and invoke a callback per message.
+    """Subscribe to VDA 5050 state (and, optionally, connection) topics and
+    invoke a callback per message.
 
     The topic path is authoritative for identity: if the payload's
     manufacturer/serialNumber disagree with (or lack) the topic segments,
@@ -52,6 +57,8 @@ class MqttSource:
         host: str = "localhost",
         port: int = 1883,
         topic: str = DEFAULT_STATE_TOPIC,
+        on_connection: Callable[[dict[str, Any]], None] | None = None,
+        connection_topic: str = DEFAULT_CONNECTION_TOPIC,
         client_id: str = "yantrabridge",
         username: str | None = None,
         password: str | None = None,
@@ -65,7 +72,9 @@ class MqttSource:
             ) from exc
 
         self._on_state = on_state
+        self._on_connection = on_connection
         self._host, self._port, self._topic = host, port, topic
+        self._connection_topic = connection_topic
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=client_id,
@@ -80,6 +89,12 @@ class MqttSource:
     def _handle_connect(self, client: Any, userdata: Any, flags: Any,
                         reason_code: Any, properties: Any = None) -> None:
         client.subscribe(self._topic, qos=0)
+        if self._on_connection is not None:
+            # connection: QoS 1 per spec (retained ONLINE/OFFLINE/
+            # CONNECTIONBROKEN -- a subscriber must see the last-known
+            # state immediately, including one set by a broker last-will
+            # that fired before this subscription existed).
+            client.subscribe(self._connection_topic, qos=1)
 
     def _handle_message(self, client: Any, userdata: Any, message: Any) -> None:
         try:
@@ -92,6 +107,14 @@ class MqttSource:
         if m:  # topic is authoritative for identity
             msg.setdefault("manufacturer", m.group("manufacturer"))
             msg.setdefault("serialNumber", m.group("serial"))
+        if message.topic.endswith("/connection"):
+            if self._on_connection is None:
+                return
+            try:
+                self._on_connection(msg)
+            except Exception as exc:  # never let one bad message kill the loop
+                print(f"[yantrabridge] error handling connection message: {exc}")
+            return
         try:
             self._on_state(msg)
         except Exception as exc:  # never let one bad message kill the loop

@@ -1,5 +1,6 @@
 """Simulation core behaviour: determinism, battery, charging, tasks, faults."""
 from yantrasim import sim as simmod
+from yantrasim import vda, world
 from yantrasim.sim import FleetSim
 from yantrasim.world import CHARGER_NODES, WAYPOINTS
 
@@ -76,6 +77,117 @@ def test_tasks_complete_over_time():
     fleet = FleetSim(seed=6)
     run_ticks(fleet, 120)
     assert sum(r.tasks_done for r in fleet.robots) > 5
+
+
+def test_finished_task_action_state_reported_then_expires():
+    """A completed task must report a terminal FINISHED actionStates entry
+    for a few state messages (TASK_ACTION_STATE_REPEATS), not just vanish
+    the instant status flips back to idle."""
+    fleet = FleetSim(seed=6)
+    working = None
+    for _ in range(30):
+        fleet.tick(dt_s=10.0, now=FIXED_NOW)
+        cand = [r for r in fleet.robots if r.status == "working"]
+        if cand:
+            working = cand[0]
+            break
+    assert working is not None, "no robot started working in 30 ticks"
+    action_type = working.task_kind
+    serial = vda.sanitize_serial(working.robot_id)
+    working.work_left_s = 0.001  # force completion on the very next tick
+
+    out = fleet.tick(dt_s=0.01, now=FIXED_NOW)
+    s = next(st for st in out.states if st["serialNumber"] == serial)
+    finished = [a for a in s["actionStates"] if a["actionStatus"] == "FINISHED"]
+    assert len(finished) == 1
+    assert finished[0]["actionType"] == action_type
+    action_id = finished[0]["actionId"]
+
+    # It keeps riding the next few state messages...
+    for _ in range(simmod.TASK_ACTION_STATE_REPEATS - 1):
+        out = fleet.tick(dt_s=10.0, now=FIXED_NOW)
+        s = next(st for st in out.states if st["serialNumber"] == serial)
+        assert any(a["actionId"] == action_id for a in s["actionStates"])
+
+    # ...then is dropped.
+    out = fleet.tick(dt_s=10.0, now=FIXED_NOW)
+    s = next(st for st in out.states if st["serialNumber"] == serial)
+    assert all(a["actionId"] != action_id for a in s["actionStates"])
+
+
+def test_apply_order_drives_robot_and_reports_progress():
+    """The core VDA 5050 master-control contract: an inbound order adopts
+    its orderId/orderUpdateId, drives the robot's path, and the order's own
+    action reaches a terminal FINISHED actionState under that same
+    actionId -- all observable purely from build_state() output."""
+    fleet = FleetSim(seed=11)
+    r = fleet.robots[0]
+    target = next(n for n in world.TASK_NODES if n != r.node)
+    path = list(world.shortest_path(r.node, target))
+
+    ok, detail = fleet.apply_order(
+        r.robot_id, "order-abc", 0, path,
+        actions=[{"actionId": "act-1", "actionType": "pick"}])
+    assert ok, detail
+    assert r.order_id == "order-abc"
+    assert r.order_update_id == 0
+    assert r.status == "moving"
+    assert r.path == path[1:]
+
+    for _ in range(400):
+        fleet.tick(dt_s=10.0, now=FIXED_NOW)
+        if r.status == "working":
+            break
+    assert r.node == target
+    assert r.task_kind == "pick"
+
+    for _ in range(5):
+        out = fleet.tick(dt_s=10.0, now=FIXED_NOW)
+        s = next(st for st in out.states
+                 if st["serialNumber"] == vda.sanitize_serial(r.robot_id))
+        assert s["orderId"] == "order-abc"
+        assert s["orderUpdateId"] == 0
+        finished = [a for a in s["actionStates"] if a["actionId"] == "act-1"]
+        if finished:
+            assert finished[0]["actionStatus"] == "FINISHED"
+            assert finished[0]["actionType"] == "pick"
+            return
+    raise AssertionError("order action never reached a terminal actionState")
+
+
+def test_apply_order_rejects_stale_order_update_id():
+    fleet = FleetSim(seed=12)
+    r = fleet.robots[1]
+    target = next(n for n in world.TASK_NODES if n != r.node)
+    path = list(world.shortest_path(r.node, target))
+
+    ok, _ = fleet.apply_order(r.robot_id, "order-1", 2, path)
+    assert ok
+    ok, detail = fleet.apply_order(r.robot_id, "order-1", 1, path)  # stale: lower
+    assert not ok and "stale" in detail
+    ok, detail = fleet.apply_order(r.robot_id, "order-1", 2, path)  # stale: equal
+    assert not ok and "stale" in detail
+    ok, detail = fleet.apply_order(r.robot_id, "order-1", 3, path)  # valid update
+    assert ok, detail
+    # a brand new orderId always replaces whatever was running, regardless
+    # of the previous order's last orderUpdateId.
+    ok, detail = fleet.apply_order(r.robot_id, "order-2", 0, path)
+    assert ok, detail
+    assert r.order_id == "order-2"
+
+
+def test_apply_order_unknown_robot_fails_softly():
+    fleet = FleetSim(seed=13)
+    ok, detail = fleet.apply_order("AMR-99", "order-x", 0, ["n0_0"])
+    assert not ok and "unknown robot" in detail
+
+
+def test_apply_order_refused_while_held_or_faulted():
+    fleet = FleetSim(seed=14)
+    r = fleet.robots[2]
+    r.status = "estopped"
+    ok, detail = fleet.apply_order(r.robot_id, "order-y", 0, [r.node])
+    assert not ok and "estopped" in detail
 
 
 def test_scripted_localization_fault_on_amr07():

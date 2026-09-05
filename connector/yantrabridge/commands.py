@@ -211,6 +211,65 @@ class CommandPublisher:
             log.info("command %s (%s %s) published on %s", cid, cmd, serial, topic)
         return published
 
+    # -- publishing side: VDA 5050 orders (master-control dispatch) ---------
+
+    def publish_order(
+        self,
+        robot_id: str,
+        order_id: str,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]] | None = None,
+        *,
+        order_update_id: int = 0,
+    ) -> bool:
+        """Publish one VDA 5050 v2.1 ``order`` message to a robot's topic.
+
+        This is the outbound half of the order contract that closes the
+        core VDA 5050 gap: a caller with a mission to dispatch (a console
+        action, a scheduler) builds ``nodes``/``edges`` in VDA node/edge
+        shape -- each node at least ``{"nodeId", "sequenceId", "released",
+        "actions": [...]}`` -- and this publishes them as one order on
+        ``uagv/v2/<manufacturer>/<serialNumber>/order``. Unlike an
+        instantActions command there is no ``commands`` table row to poll
+        or ack here: a caller tracks progress/completion the same way any
+        VDA consumer does, by watching the resulting state messages'
+        ``orderId``/``orderUpdateId``/``nodeStates``/``edgeStates``/
+        ``actionStates`` (translate.translate_state already surfaces
+        these).
+
+        Returns whether the message was actually published (``False`` when
+        the robot's manufacturer cannot yet be resolved -- same
+        retry-by-caller contract ``poll()`` uses for an unrouteable
+        command; never raises).
+        """
+        serial = _sanitize_serial(robot_id)
+        manufacturer = self._manufacturer_for(serial)
+        if manufacturer is None:
+            log.warning("order %s: unknown manufacturer for robot %s",
+                        order_id, serial)
+            return False
+        topic = "/".join((INTERFACE_NAME, VDA_MAJOR,
+                          _sanitize_segment(manufacturer), serial, "order"))
+        self._header_ids[topic] = self._header_ids.get(topic, 0) + 1
+        payload = json.dumps({
+            "headerId": self._header_ids[topic],
+            "timestamp": _now_iso(),
+            "version": VDA_VERSION,
+            "manufacturer": manufacturer,
+            "serialNumber": serial,
+            "orderId": order_id,
+            "orderUpdateId": order_update_id,
+            "nodes": nodes,
+            "edges": edges or [],
+        })
+        try:
+            self._publish(topic, payload)
+        except Exception as exc:  # noqa: BLE001 - availability over purity
+            log.warning("order %s: publish failed: %s", order_id, exc)
+            return False
+        log.info("order %s (%s) published on %s", order_id, serial, topic)
+        return True
+
     # -- ack side (state-message thread) ------------------------------------
 
     def handle_state(self, msg: dict[str, Any]) -> None:

@@ -64,6 +64,12 @@ RANDOM_FAULT_P = 0.003        # per-robot, per-tick probability of a random faul
 FAULT_TICKS_RANGE = (4, 10)   # random fault duration (ticks)
 AMBIENT_TEMP = 34.0           # motor temp floor (deg C)
 
+#: How many consecutive state messages carry a just-finished task's terminal
+#: actionState before it is dropped (mirrors transports.mqtt.ACTION_STATE_REPEATS
+#: for instantActions -- same rationale: survive a lost QoS-0 state message
+#: while bounding memory).
+TASK_ACTION_STATE_REPEATS = 3
+
 
 @dataclass
 class Event:
@@ -138,6 +144,14 @@ class Robot:
     order_seq: int = 0              # per-robot order counter
     header_id: int = 0              # per-topic (state) headerId counter
     last_node_sequence_id: int = 0
+    # actionId of the in-flight task action (order-supplied, else a
+    # generated "a-<serial>-<n>" id) -- carried so its terminal actionState
+    # reports the same id the order/instantAction actually used.
+    current_action_id: str | None = None
+    #: [[actionState dict, publishes-remaining], ...] staged terminal
+    #: actionStates (e.g. a just-finished task) awaiting a few state
+    #: messages before being dropped -- see TASK_ACTION_STATE_REPEATS.
+    pending_action_states: list = field(default_factory=list)
 
     @property
     def localized(self) -> bool:
@@ -208,7 +222,9 @@ class FleetSim:
         extras: dict[str, dict[str, Any]] = {}
         for r in self.robots:
             r.header_id += 1
-            states.append(vda.build_state(r, header_id=r.header_id, timestamp=ts))
+            state = vda.build_state(r, header_id=r.header_id, timestamp=ts)
+            self._attach_pending_action_states(r, state)
+            states.append(state)
             extras[r.robot_id] = {
                 "robot_id": r.robot_id,
                 "task_kind": r.task_kind,
@@ -299,7 +315,9 @@ class FleetSim:
             r.work_left_s -= dt
             if r.work_left_s <= 0:
                 r.tasks_done += 1
+                self._stage_finished_action(r)
                 r.task_kind = None
+                r.current_action_id = None
                 r.status = "idle"
                 self._credit_mission_task(r)
             return
@@ -350,6 +368,81 @@ class FleetSim:
                     m.started_time_s = self.sim_time_s
         self._route_to(r, target, "moving")
 
+    def find_robot(self, robot_id: str) -> Robot | None:
+        for r in self.robots:
+            if r.robot_id == robot_id:
+                return r
+        return None
+
+    # -- inbound VDA 5050 orders --------------------------------------------
+
+    def apply_order(
+        self,
+        robot_id: str,
+        order_id: str,
+        order_update_id: int,
+        nodes: list[str],
+        actions: list[dict[str, Any]] | None = None,
+    ) -> tuple[bool, str]:
+        """Adopt an inbound VDA 5050 ``order`` (master-control dispatch).
+
+        ``nodes`` is the ordered list of nodeIds the order wants the AGV to
+        visit next (this simulator has no base/horizon split, so the whole
+        list is treated as released). ``actions`` are the order's node/edge
+        actions; only the first one with an ``actionType`` is modeled, as
+        the task the robot executes once it reaches the final node (this
+        simulator's task model is "one action at the destination", same as
+        the internally-generated pick/drop/move/inventory tasks).
+
+        Per VDA 5050 5.1/6.1: a new ``orderId`` is always accepted (it
+        replaces whatever the robot was doing); an update to the *current*
+        ``orderId`` is accepted only when ``orderUpdateId`` is strictly
+        greater than the last one applied -- a stale/duplicate update is
+        rejected so redelivery or an out-of-order master control message
+        can never rewind progress.
+        """
+        r = self.find_robot(robot_id)
+        if r is None:
+            return False, f"unknown robot {robot_id!r}"
+        if not order_id:
+            return False, "order has no orderId"
+        if r.order_id == order_id and order_update_id <= r.order_update_id:
+            return False, (
+                f"stale orderUpdateId {order_update_id} for order "
+                f"{order_id!r} (have {r.order_update_id})")
+        if r.status in ("fault", "paused", "estopped"):
+            return False, f"{robot_id} cannot accept an order while {r.status}"
+
+        path = [n for n in nodes if n in world.WAYPOINTS]
+        if nodes and not path:
+            return False, "order has no nodes valid on this map"
+        if path and path[0] == r.node:
+            path = path[1:]  # order restates the robot's current position
+
+        final_action: dict[str, Any] | None = None
+        for a in (actions or []):
+            if isinstance(a, dict) and a.get("actionType"):
+                final_action = a
+                break
+
+        r.path = path
+        r.leg_progress_m = 0.0
+        r.order_id = order_id
+        r.order_update_id = order_update_id
+        r.last_node_sequence_id = 0
+        r.task_mission = None
+        r.mission_id = None  # an externally-dispatched order leaves the mission pool
+        if final_action is not None:
+            r.task_kind = str(final_action.get("actionType"))
+            r.current_action_id = str(final_action.get("actionId") or "") or None
+        else:
+            r.task_kind = None
+            r.current_action_id = None
+        r.status = "moving"
+        if not r.path:
+            self._arrive(r)
+        return True, f"{robot_id} accepted order {order_id!r} ({len(path)} node(s))"
+
     def _route_to(self, r: Robot, target: str, status: str) -> None:
         path = world.shortest_path(r.node, target)
         r.path = list(path[1:])  # exclude current node
@@ -396,10 +489,42 @@ class FleetSim:
         if r.status == "to_charger":
             r.status = "charging"
         elif r.status == "moving":
-            r.status = "working"
-            r.work_left_s = WORK_SECONDS
+            if r.task_kind is not None:
+                r.status = "working"
+                r.work_left_s = WORK_SECONDS
+            else:  # order-driven move with no action to execute at the goal
+                r.status = "idle"
         else:  # routed while idle with zero-length path
             r.status = "idle"
+
+    def _stage_finished_action(self, r: Robot) -> None:
+        """Queue a terminal FINISHED actionState for the task just completed.
+
+        Mirrors ``transports.mqtt.MqttTransport._results``: the entry rides
+        the next few state messages (see TASK_ACTION_STATE_REPEATS) so a
+        consumer watching actionStates actually observes completion, rather
+        than the action simply vanishing the moment status flips to idle.
+        """
+        if r.task_kind is None:
+            return
+        action_id = r.current_action_id or (
+            f"a-{vda.sanitize_serial(r.robot_id)}-{r.tasks_done}")
+        r.pending_action_states.append([{
+            "actionId": action_id,
+            "actionType": r.task_kind,
+            "actionStatus": "FINISHED",
+        }, TASK_ACTION_STATE_REPEATS])
+
+    @staticmethod
+    def _attach_pending_action_states(r: Robot, state: dict[str, Any]) -> None:
+        """Append ``r``'s staged terminal actionStates to one outgoing state."""
+        if not r.pending_action_states:
+            return
+        state["actionStates"] = list(state.get("actionStates") or []) + [
+            dict(entry[0]) for entry in r.pending_action_states]
+        for entry in r.pending_action_states:
+            entry[1] -= 1
+        r.pending_action_states = [e for e in r.pending_action_states if e[1] > 0]
 
     # -- missions (v0.5) ---------------------------------------------------
 

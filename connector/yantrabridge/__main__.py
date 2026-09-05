@@ -38,7 +38,11 @@ from typing import Any
 
 from yantrabridge.sink import SupabaseSink
 from yantrabridge.sources import DEFAULT_STATE_TOPIC, MqttSource, read_jsonl
-from yantrabridge.translate import BATTERY_ALERT_THRESHOLD, Translator
+from yantrabridge.translate import (
+    BATTERY_ALERT_THRESHOLD,
+    Translator,
+    translate_connection,
+)
 
 
 def _print_rows(title: str, rows: list[dict[str, Any]]) -> None:
@@ -247,11 +251,25 @@ def run_mqtt(args: argparse.Namespace) -> int:
             print(f"[{robot['id']}] status={robot['status']} "
                   f"alerts+={counts['alerts']}")
 
+    def on_connection(msg: dict[str, Any]) -> None:
+        row = translate_connection(msg)
+        if row is None:  # ONLINE, or an unrecognized connectionState
+            return
+        _stamp_site([row], args.site)
+        if args.dry_run:
+            _print_rows("robot (connection)", [row])
+        else:
+            assert sink is not None
+            sink.upsert_robots([row])
+            print(f"[{row['id']}] connection={msg.get('connectionState')} "
+                  f"-> status={row['status']}")
+
     source = MqttSource(
         on_state,
         host=args.mqtt_host,
         port=args.mqtt_port,
         topic=args.mqtt_topic,
+        on_connection=on_connection,
         username=args.mqtt_username,
         password=args.mqtt_password,
     )

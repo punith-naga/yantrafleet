@@ -205,6 +205,49 @@ def translate_state(msg: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# connection-topic translation (ONLINE / OFFLINE / CONNECTIONBROKEN)
+# ---------------------------------------------------------------------------
+
+#: connectionState -> human fault_msg. ONLINE is intentionally absent: once
+#: a vehicle is back on the network its next ``state`` message re-derives
+#: the correct status on its own, so there is nothing to force here.
+_CONNECTION_FAULT_MSG: dict[str, str] = {
+    "OFFLINE": "MQTT connection closed (OFFLINE)",
+    "CONNECTIONBROKEN": "MQTT connection lost unexpectedly (broker last-will)",
+}
+
+
+def translate_connection(msg: dict[str, Any]) -> dict[str, Any] | None:
+    """Translate one VDA 5050 v2.1 ``connection`` message into a ``robots``
+    upsert row, or ``None`` when there is nothing to write.
+
+    The ``robots.status`` column is constrained to the canonical vocabulary
+    (active/idle/charging/paused/estop/degraded/fault) -- there is no
+    'offline' value, so this deliberately does not invent a new column or
+    status: OFFLINE and CONNECTIONBROKEN (delivered via the broker's
+    last-will the instant a vehicle's session drops) both map onto the
+    existing 'fault' status with a distinguishing ``fault_msg``, which is
+    already how a dead/faulted vehicle surfaces on the dashboard today.
+    ONLINE returns ``None`` -- resuming state messages self-correct the row.
+
+    Raises ``ValueError`` when the message has no serialNumber, matching
+    :func:`translate_state`.
+    """
+    serial = msg.get("serialNumber")
+    if not serial:
+        raise ValueError("connection message has no serialNumber")
+    fault_msg = _CONNECTION_FAULT_MSG.get(str(msg.get("connectionState") or "").upper())
+    if fault_msg is None:
+        return None
+    return {
+        "id": str(serial),
+        "status": "fault",
+        "fault_msg": fault_msg,
+        "updated_at": msg.get("timestamp") or _now_iso(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Alert generation with dedup
 # ---------------------------------------------------------------------------
 

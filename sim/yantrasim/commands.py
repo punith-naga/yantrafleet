@@ -6,7 +6,11 @@ applies them to the world, and reports ``executed`` / ``failed``. This is
 the sim-side half of the human-in-the-loop gate — a real robot adapter
 implements the same four verbs against the vendor API.
 
-Verbs: ``pause`` | ``resume`` | ``charge`` | ``estop``.
+Verbs: ``pause`` | ``resume`` | ``charge`` | ``estop`` | ``cancel_order``.
+``cancel_order`` is the sim-side handler for the VDA 5050 standard
+``cancelOrder`` instantAction (see ``transports.mqtt.ACTION_VERBS``): it is
+not exposed through the ``commands`` table gate (only reachable via MQTT
+instantActions), but shares the same apply/report contract.
 """
 from __future__ import annotations
 
@@ -17,7 +21,7 @@ from . import world
 if TYPE_CHECKING:  # pragma: no cover
     from .sim import FleetSim, Robot
 
-VERBS = ("pause", "resume", "charge", "estop")
+VERBS = ("pause", "resume", "charge", "estop", "cancel_order")
 
 #: statuses an operator may pause from (not faults, not already held)
 _PAUSABLE = ("idle", "moving", "working", "to_charger", "charging")
@@ -69,6 +73,21 @@ def apply_command(sim: "FleetSim", robot_id: str, cmd: str) -> tuple[bool, str]:
             r.path = []
             r.task_kind = None
         return True, f"{robot_id} resumed"
+
+    if cmd == "cancel_order":
+        if r.status == "fault":
+            return False, f"{robot_id} is faulted; cannot cancel order"
+        order_id = r.order_id or "(none)"
+        had_order = bool(r.path) or r.status in ("moving", "working", "to_charger")
+        r.path = []
+        r.task_kind = None
+        r.task_mission = None
+        r.current_action_id = None
+        if r.status in ("moving", "working", "to_charger"):
+            r.status = "idle"
+        if not had_order:
+            return True, f"{robot_id} had no active order to cancel"
+        return True, f"{robot_id} order {order_id} cancelled"
 
     # cmd == "charge"
     if r.status == "fault":

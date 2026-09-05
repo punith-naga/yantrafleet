@@ -55,10 +55,11 @@ def robot_states(fake, serial):
 def test_subscribes_each_robots_instant_actions_topic():
     fleet, fake, _ = make()
     topics = [t for t, _ in fake.subscribed]
-    assert len(topics) == 10
+    assert len(topics) == 20  # instantActions + order, per robot
     for r in fleet.robots:
         assert vda.topic(r.vendor, r.robot_id, "instantActions") in topics
-    assert all(q == 0 for _, q in fake.subscribed)  # instantActions QoS 0
+        assert vda.topic(r.vendor, r.robot_id, "order") in topics
+    assert all(q == 0 for _, q in fake.subscribed)  # both QoS 0 per spec
 
 
 def test_pause_action_applied_via_poll_commands():
