@@ -66,6 +66,10 @@ Open [`user-data.sh`](user-data.sh) in a text editor and fill in the
   API. Use the **publishable (anon)** key; it ends up in the browser URL
   by design. Never put the `service_role` key here.
 * `YANTRA_SITE_ID` — e.g. `BLR-DC1`.
+* Optionally `DOMAIN_NAME` + `CERTBOT_EMAIL` — set both to get HTTPS
+  automatically at first boot (see step 2's security group rule and the
+  DNS note right after it). Leave both blank to stay on plain HTTP for now
+  and add it later via the hardening checklist.
 * Optionally `GEMINI_API_KEY` (copilot LLM answers) and `SARATHI_TOKEN`
   (bearer auth on `/ask`).
 * Optionally the notifier fan-out block — `WEBHOOK_URL` (Slack/Discord
@@ -95,11 +99,23 @@ Keep the edited file handy — you paste the whole thing in step 2.
 6. **Network settings** -> Edit -> Security group rules:
    * Rule 1: **SSH**, port 22, Source = **My IP**.
    * Rule 2: **HTTP**, port 80, Source = **0.0.0.0/0** (Anywhere-IPv4).
+   * Rule 3: **HTTPS**, port 443, Source = **0.0.0.0/0** — needed if you
+     filled in `DOMAIN_NAME`/`CERTBOT_EMAIL` in step 1, or plan to add
+     HTTPS by hand later. Harmless to open even if you never use it: nginx
+     has nothing listening on 443 until certbot runs.
    * Nothing else — the copilot port 8001 stays loopback-only on the box.
 7. **Configure storage**: `20` GiB, **gp3**.
 8. **Advanced details** -> scroll to the bottom -> **User data**: paste
    the entire contents of your edited `user-data.sh`.
 9. **Launch instance**.
+
+> Using `DOMAIN_NAME`? Point its DNS A/AAAA record at the Elastic
+> IP/public IP you plan to use *before* launching (or launch first, grab
+> the public IP, then create the DNS record and reboot the instance to
+> re-run cloud-init — see "Updating to a new version" below for the
+> re-run command). Let's Encrypt validates over the network at boot time,
+> so if DNS isn't live yet, certbot just warns and leaves the site on
+> plain HTTP instead of failing the whole install.
 
 ## Step 3 — Wait ~5 minutes, then open the console
 
@@ -144,6 +160,20 @@ curl -s http://127.0.0.1/health
 `systemctl status` should show `yantra-detect`, `yantra-notify` and
 `yantra-sarathi` as `active (running)` (and `yantra-sim` as inactive
 unless you enabled it).
+
+**If you used a private repo, revoke that PAT now.** Unlike the Azure kit
+(which pulls secrets from Key Vault at boot so nothing sensitive sits in
+the instance's stored user-data), this AWS kit is console-only with no
+vault to fetch from — so the token you embedded in `REPO_URL` is sitting
+in this instance's user-data for as long as the instance exists, readable
+by anyone with `ec2:DescribeInstanceAttribute` on your account, and it
+also persists in `/opt/yantrafleet/.git/config`'s stored remote URL on the
+box itself. Since you scoped it to this one repo, read-only, in step 0,
+revoking it costs nothing right now — you only need a token again when
+you next `git pull` (see "Updating to a new version" below, which creates
+a fresh short-lived one for exactly that, instead of leaving a standing
+one). GitHub -> Settings -> Developer settings -> Personal access tokens
+-> Fine-grained tokens -> find it -> **Delete**.
 
 ## Step 5 — turn on every functionality
 
@@ -211,8 +241,27 @@ Expect `mode: demo` before step 5's RBAC migrations, `mode: rbac` after.
 
 ## Updating to a new version
 
+If your repo is public, or you kept a token on the box, a plain pull works:
+
 ```bash
 sudo -u yantra git -C /opt/yantrafleet pull
+```
+
+If you revoked the PAT after first boot (recommended — see step 4), the
+stored `origin` remote has no credential anymore. Rather than putting a
+long-lived token back, create a fresh **fine-grained, read-only,
+single-repo** token, use it for one pull, then let it expire/delete it:
+
+```bash
+sudo -u yantra git -C /opt/yantrafleet pull \
+    "https://<NEW_TOKEN>@github.com/<you>/yantrafleet.git" main
+```
+
+That pulls straight from the URL you pass without touching the stored
+`origin` remote at all, so nothing new is left sitting in `.git/config`
+once it's done. Either way, finish with:
+
+```bash
 sudo -u yantra INSTALL_VENV_DIR=/opt/yantrafleet/.venv bash /opt/yantrafleet/install.sh
 sudo systemctl restart yantra-detect yantra-notify yantra-sarathi
 # add yantra-sim to that list only if you enabled the demo simulator
@@ -236,12 +285,15 @@ Stop the instance when idle and you pay only for the disk and the IP.
 
 ## Hardening checklist (before showing this to the internet for real)
 
-- [ ] **HTTPS**: point a DNS name at the IP, then
-      `sudo apt install certbot python3-certbot-nginx && sudo certbot --nginx`
-      — certbot rewrites the nginx site for TLS and auto-renews.
-- [ ] **Restrict port 80** (or 443 after certbot) in the security group
-      to your office/VPN CIDR instead of 0.0.0.0/0 if the console is
-      internal-only.
+- [ ] **HTTPS**: if you set `DOMAIN_NAME` + `CERTBOT_EMAIL` in step 1,
+      this already happened at boot — check
+      `grep certbot /var/log/yantrafleet-install.log` if you're not sure
+      it succeeded. Otherwise, point a DNS name at the IP and run:
+      `sudo apt install certbot python3-certbot-nginx && sudo certbot --nginx --non-interactive --agree-tos -m you@example.com -d your-domain.example.com --redirect`
+      — certbot rewrites the nginx site for TLS and auto-renews via its
+      own `certbot.timer` (installed with the package, no cron needed).
+- [ ] **Restrict port 80/443** in the security group to your office/VPN
+      CIDR instead of 0.0.0.0/0 if the console is internal-only.
 - [ ] **Set `SARATHI_TOKEN`** in `/etc/yantrafleet.env` (then
       `sudo systemctl restart yantra-sarathi`) so `/ask` requires a
       bearer token — otherwise anyone reaching the page can query the
@@ -250,9 +302,10 @@ Stop the instance when idle and you pay only for the disk and the IP.
       Supabase project so the anon key in the page URL can only do what
       the console needs.
 - [ ] **Rotate keys** on a schedule: the Supabase anon key (dashboard ->
-      Settings -> API -> roll), the GitHub token used in `REPO_URL`
-      (delete it after first boot if you don't plan to `git pull` — or
-      swap the remote to a fresh read-only token), and `GEMINI_API_KEY`.
+      Settings -> API -> roll), the GitHub token used in `REPO_URL` (see
+      "revoke that PAT now" in step 4 and "Updating to a new version"
+      above — there should be no standing token to rotate at all once
+      you've done that), and `GEMINI_API_KEY`.
       After rotating, update `/etc/yantrafleet.env` +
       `/etc/nginx/sites-available/yantrafleet` (the key appears in the
       302 redirect) and restart services / reload nginx.

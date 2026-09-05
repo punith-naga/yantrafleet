@@ -29,16 +29,17 @@ TEMPLATE="$HERE/nginx/yantrafleet.conf.template"
 export SUPABASE_URL="https://dummy.supabase.co"
 export SUPABASE_KEY="dummy-anon-key"
 export YANTRA_SITE_ID="TEST-SITE"
+export NGINX_SERVER_NAME="example.test"
 
 if command -v envsubst >/dev/null 2>&1; then
-    RENDERED="$(envsubst '${SUPABASE_URL} ${SUPABASE_KEY} ${YANTRA_SITE_ID}' < "$TEMPLATE")"
+    RENDERED="$(envsubst '${SUPABASE_URL} ${SUPABASE_KEY} ${YANTRA_SITE_ID} ${NGINX_SERVER_NAME}' < "$TEMPLATE")"
     pass "envsubst dry-run of nginx template"
 else
     # envsubst (gettext-base) missing locally — same substitution in python.
     RENDERED="$(python3 - "$TEMPLATE" <<'PY'
 import os, sys
 text = open(sys.argv[1]).read()
-for var in ("SUPABASE_URL", "SUPABASE_KEY", "YANTRA_SITE_ID"):
+for var in ("SUPABASE_URL", "SUPABASE_KEY", "YANTRA_SITE_ID", "NGINX_SERVER_NAME"):
     text = text.replace("${%s}" % var, os.environ[var])
 print(text)
 PY
@@ -49,9 +50,12 @@ fi
 echo "$RENDERED" | grep -q 'supa=https://dummy.supabase.co&key=dummy-anon-key&site=TEST-SITE' \
     && pass "302 redirect carries supa/key/site" \
     || fail "302 redirect missing substituted supa/key/site"
-echo "$RENDERED" | grep -q '${SUPABASE\|${YANTRA' \
+echo "$RENDERED" | grep -q '${SUPABASE\|${YANTRA\|${NGINX' \
     && fail "unsubstituted \${...} placeholders remain in rendered nginx conf" \
     || pass "no leftover \${...} placeholders"
+echo "$RENDERED" | grep -q 'server_name example.test;' \
+    && pass "server_name carries the substituted NGINX_SERVER_NAME (needed for certbot --nginx -d <domain> to find this block)" \
+    || fail "server_name did not pick up NGINX_SERVER_NAME"
 # nginx's own runtime variables must survive substitution untouched
 for nvar in '$uri' '$host' '$remote_addr' '$scheme'; do
     echo "$RENDERED" | grep -qF "$nvar" \
@@ -127,6 +131,25 @@ fi
 grep -q -- '--host 127.0.0.1 --port 8001' "$HERE/systemd/yantra-sarathi.service" \
     && pass "yantra-sarathi binds 127.0.0.1:8001" \
     || fail "yantra-sarathi does not bind 127.0.0.1:8001"
+
+# ---------------------------------------------------------------------------
+# HTTPS automation: user-data.sh must gate certbot on both DOMAIN_NAME and
+# CERTBOT_EMAIL, use --non-interactive so boot never hangs waiting on a
+# prompt, and not treat a certbot failure as fatal (DNS not being live yet
+# is an expected, recoverable case, not a boot-breaking one).
+# ---------------------------------------------------------------------------
+grep -q 'certbot --nginx' "$HERE/user-data.sh" \
+    && pass "user-data.sh runs certbot's nginx plugin" \
+    || fail "user-data.sh is missing the certbot automation step"
+grep -q -- '--non-interactive' "$HERE/user-data.sh" \
+    && pass "certbot invocation is --non-interactive (won't hang cloud-init on a prompt)" \
+    || fail "certbot invocation is missing --non-interactive"
+grep -qE 'if \[ -n "\$DOMAIN_NAME" \] && \[ -n "\$CERTBOT_EMAIL" \]' "$HERE/user-data.sh" \
+    && pass "certbot only runs when both DOMAIN_NAME and CERTBOT_EMAIL are set" \
+    || fail "certbot gating condition regressed -- could run with only one of DOMAIN_NAME/CERTBOT_EMAIL set"
+grep -q 'NGINX_SERVER_NAME' "$HERE/user-data.sh" \
+    && pass "user-data.sh computes and exports NGINX_SERVER_NAME for envsubst" \
+    || fail "user-data.sh does not set NGINX_SERVER_NAME"
 
 # ---------------------------------------------------------------------------
 # 5) regression check: user-data.sh must be pure ASCII. Same reasoning as

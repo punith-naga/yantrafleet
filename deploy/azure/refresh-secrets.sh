@@ -117,6 +117,12 @@ SUPABASE_KEY="$(kv_get_secret supabase-key "$KV_TOKEN")" || {
     exit 1
 }
 
+# REPO_URL (Key Vault secret "repo-url") is deliberately NOT refreshed
+# here: it's only consumed once, at clone/pull time, by custom-data.sh and
+# the "Updating to a new version" flow in README.md -- none of the
+# services this script restarts read it, so there's nothing to feed it to.
+# A rotated repo-url takes effect the next time you pull, not on refresh.
+#
 # Everything else is optional - same "leave it empty to skip that channel"
 # behavior as custom-data.sh: a fetch failure just leaves it blank instead
 # of failing the whole refresh.

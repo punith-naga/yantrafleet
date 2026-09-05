@@ -27,9 +27,9 @@ done
 #    stay in lockstep — same env vars, same env-file write) since this is
 #    a deliberate fork of user-data.sh rather than a shared template.
 # ---------------------------------------------------------------------------
-for var in REPO_URL SUPABASE_URL SUPABASE_KEY YANTRA_SITE_ID GEMINI_API_KEY \
-           SARATHI_TOKEN WEBHOOK_URL YANTRA_WEBHOOK_SECRET TWILIO_SID \
-           TWILIO_TOKEN TWILIO_FROM TWILIO_TO; do
+for var in REPO_URL SUPABASE_URL SUPABASE_KEY YANTRA_SITE_ID DOMAIN_NAME \
+           CERTBOT_EMAIL GEMINI_API_KEY SARATHI_TOKEN WEBHOOK_URL \
+           YANTRA_WEBHOOK_SECRET TWILIO_SID TWILIO_TOKEN TWILIO_FROM TWILIO_TO; do
     grep -q "^${var}=" "$HERE/custom-data.sh" \
         && pass "custom-data.sh declares $var" \
         || fail "custom-data.sh missing $var"
@@ -165,7 +165,7 @@ grep -q '^KEYVAULT_NAME=' "$HERE/custom-data.sh" \
 #    so this fails if that logic regresses, rather than trusting deploy.sh's
 #    own claim that it does this.
 # ---------------------------------------------------------------------------
-KV_SECRET_VARS="SUPABASE_URL SUPABASE_KEY GEMINI_API_KEY SARATHI_TOKEN WEBHOOK_URL YANTRA_WEBHOOK_SECRET TWILIO_SID TWILIO_TOKEN TWILIO_FROM TWILIO_TO"
+KV_SECRET_VARS="REPO_URL SUPABASE_URL SUPABASE_KEY GEMINI_API_KEY SARATHI_TOKEN WEBHOOK_URL YANTRA_WEBHOOK_SECRET TWILIO_SID TWILIO_TOKEN TWILIO_FROM TWILIO_TO"
 
 TMP_BLANKED="$(mktemp)"
 cp "$HERE/custom-data.sh" "$TMP_BLANKED"
@@ -187,16 +187,18 @@ for VAR in $KV_SECRET_VARS; do
     grep -q "^${VAR}=\"\"\$" "$TMP_BLANKED" || BLANK_OK="false"
 done
 if [ "$BLANK_OK" = "true" ]; then
-    pass "blanking logic clears all 10 secret vars in a temp custom-data copy"
+    pass "blanking logic clears all 11 secret vars (incl. REPO_URL) in a temp custom-data copy"
 else
-    fail "blanking logic did not blank all 10 secret var assignment lines"
+    fail "blanking logic did not blank all 11 secret var assignment lines"
 fi
 grep -q '^KEYVAULT_NAME="test-kv-1234"' "$TMP_BLANKED" \
     && pass "blanking logic injects the resolved KEYVAULT_NAME into the temp custom-data copy" \
     || fail "blanking logic did not inject KEYVAULT_NAME (VM would boot unable to find its own vault)"
-grep -q '^REPO_URL="https://github.com/YOUR_GITHUB_USERNAME' "$TMP_BLANKED" \
-    && pass "blanking logic leaves REPO_URL untouched (out of scope -- not one of the 10 vars moved to Key Vault)" \
-    || fail "blanking logic touched REPO_URL, which is out of scope for the Key Vault move"
+if printf '%s' "$KV_SECRET_VARS" | grep -qw 'DOMAIN_NAME\|CERTBOT_EMAIL'; then
+    fail "DOMAIN_NAME/CERTBOT_EMAIL ended up in the Key Vault secret-var list -- they aren't secrets"
+else
+    pass "DOMAIN_NAME/CERTBOT_EMAIL are correctly excluded from the Key Vault secret-var list"
+fi
 rm -f "$TMP_BLANKED"
 
 # deploy.sh must default to passing custom-data.sh through unmodified when
@@ -225,7 +227,7 @@ grep -q '169.254.169.254/metadata/identity/oauth2/token' "$HERE/custom-data.sh" 
 #     silently stays blank forever after a fresh deploy, even though the
 #     value is sitting in the vault.
 # ---------------------------------------------------------------------------
-for secret in supabase-url supabase-key gemini-api-key sarathi-token webhook-url \
+for secret in repo-url supabase-url supabase-key gemini-api-key sarathi-token webhook-url \
               yantra-webhook-secret twilio-sid twilio-token twilio-from twilio-to; do
     grep -q "kv_get_secret ${secret}" "$HERE/custom-data.sh" \
         && pass "custom-data.sh fetches Key Vault secret '$secret'" \
@@ -267,6 +269,45 @@ grep -q -- '--assign-identity' "$HERE/deploy.sh" \
 grep -q 'refresh-secrets.sh' "$HERE/custom-data.sh" \
     && pass "custom-data.sh installs refresh-secrets.sh onto the VM" \
     || fail "custom-data.sh no longer installs refresh-secrets.sh (operators would lose the ability to rotate secrets without recreating the VM)"
+
+# ---------------------------------------------------------------------------
+# 15) HTTPS automation: custom-data.sh must gate certbot on both DOMAIN_NAME
+#     and CERTBOT_EMAIL, use --non-interactive so boot never hangs waiting
+#     on a prompt, and not treat a certbot failure as fatal (DNS not being
+#     live yet is an expected, recoverable case, not a boot-breaking one).
+# ---------------------------------------------------------------------------
+grep -q 'certbot --nginx' "$HERE/custom-data.sh" \
+    && pass "custom-data.sh runs certbot's nginx plugin" \
+    || fail "custom-data.sh is missing the certbot automation step"
+grep -q -- '--non-interactive' "$HERE/custom-data.sh" \
+    && pass "certbot invocation is --non-interactive (won't hang cloud-init on a prompt)" \
+    || fail "certbot invocation is missing --non-interactive"
+grep -qE 'if \[ -n "\$DOMAIN_NAME" \] && \[ -n "\$CERTBOT_EMAIL" \]' "$HERE/custom-data.sh" \
+    && pass "certbot only runs when both DOMAIN_NAME and CERTBOT_EMAIL are set" \
+    || fail "certbot gating condition regressed -- could run with only one of DOMAIN_NAME/CERTBOT_EMAIL set"
+grep -B2 'certbot --nginx' "$HERE/custom-data.sh" | grep -q '^set -euo pipefail$' \
+    && fail "set -e would make a certbot failure fatal -- must be wrapped in an if/then" \
+    || pass "certbot call is guarded so a failure (e.g. DNS not live yet) doesn't fail the whole boot"
+
+# ---------------------------------------------------------------------------
+# 16) nginx template must take a real server_name so certbot's nginx plugin
+#     can find the right block to fit with -d <domain> -- "server_name _;"
+#     alone (nginx's catch-all) isn't guaranteed to match a specific -d.
+# ---------------------------------------------------------------------------
+grep -q 'server_name \${NGINX_SERVER_NAME}' "$REPO_ROOT/deploy/aws/nginx/yantrafleet.conf.template" \
+    && pass "shared nginx template's server_name is substitutable (NGINX_SERVER_NAME)" \
+    || fail "shared nginx template still hardcodes server_name _ -- certbot -d <domain> may not match"
+grep -q 'NGINX_SERVER_NAME' "$HERE/custom-data.sh" \
+    && pass "custom-data.sh computes and exports NGINX_SERVER_NAME for envsubst" \
+    || fail "custom-data.sh does not set NGINX_SERVER_NAME"
+
+# ---------------------------------------------------------------------------
+# 17) deploy.sh must open 443 alongside 80 -- otherwise even a successful
+#     certbot run leaves the box unreachable over HTTPS from outside.
+# ---------------------------------------------------------------------------
+grep -q -- '--port 443' "$HERE/deploy.sh" \
+    && pass "deploy.sh opens port 443 (needed once certbot issues a cert)" \
+    || fail "deploy.sh does not open port 443"
 
 # ---------------------------------------------------------------------------
 echo

@@ -55,11 +55,18 @@ kit:
 
 * `REPO_URL` — your GitHub repo (`punith-naga/yantrafleet` — use a
   `https://<token>@github.com/...` URL if it's private; the same
-  fine-grained, read-only, short-lived token pattern from the AWS guide
-  applies here).
+  fine-grained, read-only token pattern from the AWS guide applies here).
+  Unlike AWS, you don't need to worry about revoking it afterward: with
+  `USE_KEYVAULT=true` (the default), `deploy.sh` uploads this whole value
+  to Key Vault and the VM never sees it in its stored `custom_data` — see
+  "Secrets in Key Vault, not in custom_data, by default" below.
 * `SUPABASE_URL` / `SUPABASE_KEY` — your Supabase project's publishable
   key.
 * `YANTRA_SITE_ID` — e.g. `BLR-DC1`.
+* Optionally `DOMAIN_NAME` + `CERTBOT_EMAIL` — set both to get HTTPS
+  automatically at first boot (point the domain's DNS at the VM's public
+  IP before it boots; `deploy.sh` already opens port 443 for you). These
+  aren't secrets, so they stay in this file even with Key Vault on.
 * Optionally `GEMINI_API_KEY`, `SARATHI_TOKEN`, and the notifier block
   (`WEBHOOK_URL` / `TWILIO_*`) — leave blank to skip.
 
@@ -75,7 +82,8 @@ via `bash ./deploy.sh` if `./deploy.sh` isn't recognized.)
 
 This creates one resource group (`yantrafleet-rg`), one Ubuntu 24.04 VM
 (`Standard_B2s` — 2 vCPU / 4 GiB, in `centralindia` by default), opens
-port 80, and prints the public IP. Override any default inline, e.g.:
+ports 80 and 443, and prints the public IP. Override any default inline,
+e.g.:
 
 ```bash
 LOCATION=westindia SIZE=Standard_B2s ./deploy.sh
@@ -107,31 +115,39 @@ few seconds cloud-init needs them at first boot. That's a much bigger
 blast radius than "leaked once during provisioning" -- it's "leaked for
 as long as the VM resource exists."
 
-As of this commit, `deploy.sh` fixes that for the credential-shaped
-values by default: `SUPABASE_URL`, `SUPABASE_KEY`, `GEMINI_API_KEY`,
+`deploy.sh` fixes that for the credential-shaped values by default:
+`REPO_URL`, `SUPABASE_URL`, `SUPABASE_KEY`, `GEMINI_API_KEY`,
 `SARATHI_TOKEN`, `WEBHOOK_URL`, `YANTRA_WEBHOOK_SECRET`, `TWILIO_SID`,
 `TWILIO_TOKEN`, `TWILIO_FROM`, and `TWILIO_TO` go into an Azure Key Vault
 instead, and the VM fetches them at boot using its own managed identity
-(no credential of any kind embedded anywhere for this). `REPO_URL` and
-`YANTRA_SITE_ID` are unaffected -- `REPO_URL` optionally carries its own
-short-lived PAT, which is a separate concern already covered in Step 2
-above, and `YANTRA_SITE_ID` isn't a secret to begin with.
+(no credential of any kind embedded anywhere for this). `REPO_URL` is
+included precisely because it's credential-shaped too -- a private repo's
+URL embeds a GitHub PAT (`https://<token>@github.com/...`), which sat in
+`custom_data` in plaintext just like the other ten before this fix.
+`DOMAIN_NAME`, `CERTBOT_EMAIL`, and `YANTRA_SITE_ID` are the only EDIT ME
+values left out of Key Vault -- none of the three are secrets.
 
 You still fill in the same "EDIT ME" block the same way in Step 2 --
 nothing changes about how you author `custom-data.sh`. What changed is
 what `deploy.sh` does with those values afterward: it creates (or reuses)
-a Key Vault named after your VM, uploads the 10 credential values there,
-blanks those same 10 lines out of the copy of `custom-data.sh` it actually
+a Key Vault named after your VM, uploads the 11 credential values there,
+blanks those same 11 lines out of the copy of `custom-data.sh` it actually
 hands to Azure, and leaves cloud-init to pull the real values back from
 the vault during boot instead of finding them sitting in `custom_data`.
 By the time `az vm create` returns, the VM resource's `custom_data`
-never had the credential values in it at all.
+never had the credential values in it at all -- including `REPO_URL`, so
+(unlike the AWS kit) there's no "revoke your PAT after first boot" step
+here: it was never in the VM's stored `custom_data` to begin with. It
+does still end up in `/opt/yantrafleet/.git/config`'s remote URL on the
+box itself once cloned, same as any git checkout of a private repo with
+an embedded-credential URL -- that requires root shell access on the VM
+to read, a much higher bar than "anyone with Reader on the VM resource."
 
 This is automatic. You do not need to create a Key Vault, assign a role,
 or do anything differently -- `deploy.sh` handles vault creation, granting
 itself "Key Vault Secrets Officer" so it's allowed to upload secrets into
 an RBAC-mode vault, granting the VM's managed identity "Key Vault Secrets
-User" so it can read them back at boot, and uploading the 10 values, all
+User" so it can read them back at boot, and uploading the 11 values, all
 as part of the normal `./deploy.sh` run from Step 3. It costs nothing
 extra to notice -- the script just takes a little longer than before
 (mostly RBAC propagation, which can lag a minute or two even for the
@@ -147,9 +163,12 @@ USE_KEYVAULT=false ./deploy.sh
 
 With this set, behavior is exactly what it was before this change:
 `custom-data.sh` is passed to `az vm create --custom-data` unmodified, no
-Key Vault is created, no role assignments happen, and the 10 credential
-values sit in `custom_data` in plaintext same as always. Reach for this
-when:
+Key Vault is created, no role assignments happen, and the 11 credential
+values (including `REPO_URL`) sit in `custom_data` in plaintext same as
+always -- in this mode, treat `REPO_URL`'s PAT the same way the AWS guide
+does: fine-grained, read-only, single-repo, and revoked once you're done
+with first boot if you don't plan to `git pull` again soon. Reach for
+`USE_KEYVAULT=false` when:
 
 * your subscription doesn't have permission to create Key Vaults or role
   assignments (a locked-down corporate or trial subscription, for
@@ -161,7 +180,7 @@ when:
 
 Everything else about the deploy is identical either way -- same VM, same
 services, same console URL. `USE_KEYVAULT=false` only changes where the
-10 credential values are stored.
+11 credential values are stored.
 
 ### Rotating a secret later
 
@@ -194,15 +213,27 @@ ssh yantra@<PUBLIC_IP>
 sudo /opt/yantrafleet/refresh-secrets.sh
 ```
 
-That re-fetches all 10 values from Key Vault via the same IMDS + managed
-identity path cloud-init used at first boot, rewrites
-`/etc/yantrafleet.env` (leaving `YANTRA_SITE_ID` untouched -- it isn't
-part of the Key Vault flow), and restarts `yantra-detect`, `yantra-notify`,
-and `yantra-sarathi` so the new values take effect immediately. If you
-deployed with `USE_KEYVAULT=false`, this script has nothing to refresh
-from and will refuse to run with a clear error -- rotate by editing
-`custom-data.sh` and recreating the VM in that case, same as before this
-change existed.
+That re-fetches the 10 values the running services actually read from Key
+Vault via the same IMDS + managed identity path cloud-init used at first
+boot, rewrites `/etc/yantrafleet.env` (leaving `YANTRA_SITE_ID` untouched
+-- it isn't part of the Key Vault flow), and restarts `yantra-detect`,
+`yantra-notify`, and `yantra-sarathi` so the new values take effect
+immediately. If you deployed with `USE_KEYVAULT=false`, this script has
+nothing to refresh from and will refuse to run with a clear error --
+rotate by editing `custom-data.sh` and recreating the VM in that case,
+same as before this change existed.
+
+`REPO_URL` (Key Vault secret `repo-url`) is the eleventh value and is
+**not** part of this refresh -- none of the three services above read it,
+only `git clone`/`git pull` do. Rotating it in Key Vault only matters the
+next time you update the box:
+
+```bash
+az keyvault secret set --vault-name <your-vault-name> \
+  --name repo-url --value "https://<new-token>@github.com/<you>/yantrafleet.git"
+ssh yantra@<PUBLIC_IP>
+sudo -u yantra git -C /opt/yantrafleet pull "https://<new-token>@github.com/<you>/yantrafleet.git" main
+```
 
 ## Turning on every functionality
 
@@ -284,10 +315,13 @@ az group delete --name yantrafleet-rg --yes --no-wait
 
 ## Hardening checklist
 
-Same list as the AWS kit: HTTPS via certbot, restrict inbound rules to
-your IP if it's not meant to be public (`az vm open-port` above opened
-80 to everyone — narrow it with `az network nsg rule update` if needed),
-set `SARATHI_TOKEN`, apply `0006_harden.sql`, rotate keys on a schedule.
+Same list as the AWS kit: HTTPS (already done at boot if you set
+`DOMAIN_NAME`/`CERTBOT_EMAIL` in Step 2, otherwise run certbot by hand the
+same way AWS's guide describes), restrict inbound rules to your IP if
+it's not meant to be public (`deploy.sh` opened 80 and 443 to everyone —
+narrow with `az network nsg rule update` if needed), set `SARATHI_TOKEN`,
+apply `0006_harden.sql`, rotate keys on a schedule (see "Rotating a
+secret later" above for `REPO_URL` specifically).
 
 ## Files in this kit
 

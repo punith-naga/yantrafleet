@@ -31,6 +31,17 @@ SUPABASE_KEY="YOUR_SUPABASE_PUBLISHABLE_ANON_KEY"
 # 3) Which site this deployment serves (stamped on rows, filters alerts).
 YANTRA_SITE_ID="BLR-DC1"
 
+# 3b) Optional. Set BOTH to get HTTPS automatically at first boot instead
+#     of the manual certbot step in the hardening checklist. DOMAIN_NAME
+#     must already have a DNS A/AAAA record pointing at this instance's
+#     public IP *before* it boots (Let's Encrypt validates over the
+#     network) - if it doesn't yet, leave these blank and run the same
+#     certbot command by hand once DNS is live (see README "Hardening
+#     checklist"). CERTBOT_EMAIL is used only for Let's Encrypt renewal/
+#     expiry notices, never shown publicly.
+DOMAIN_NAME=""
+CERTBOT_EMAIL=""
+
 # 4) Optional. GEMINI_API_KEY enables the sarathi copilot's LLM tiers
 #    (leave empty for the offline tier). SARATHI_TOKEN, when set, makes
 #    /ask require "Authorization: Bearer <token>" - recommended once the
@@ -153,8 +164,9 @@ systemctl enable --now yantra-detect yantra-notify yantra-sarathi
 # 7) nginx: console + academy + docs + copilot proxy
 # ---------------------------------------------------------------------------
 echo "== templating nginx site"
-export SUPABASE_URL SUPABASE_KEY YANTRA_SITE_ID
-envsubst '${SUPABASE_URL} ${SUPABASE_KEY} ${YANTRA_SITE_ID}' \
+NGINX_SERVER_NAME="${DOMAIN_NAME:-_}"
+export SUPABASE_URL SUPABASE_KEY YANTRA_SITE_ID NGINX_SERVER_NAME
+envsubst '${SUPABASE_URL} ${SUPABASE_KEY} ${YANTRA_SITE_ID} ${NGINX_SERVER_NAME}' \
     < "$APP_DIR/deploy/aws/nginx/yantrafleet.conf.template" \
     > /etc/nginx/sites-available/yantrafleet
 ln -sf /etc/nginx/sites-available/yantrafleet /etc/nginx/sites-enabled/yantrafleet
@@ -163,5 +175,37 @@ nginx -t
 systemctl enable --now nginx
 systemctl reload nginx
 
+# ---------------------------------------------------------------------------
+# 8) HTTPS via Let's Encrypt (only when both DOMAIN_NAME and CERTBOT_EMAIL
+#    are set in step 1, and DOMAIN_NAME's DNS already points at this
+#    instance's public IP -- same prerequisite the hardening checklist's
+#    manual certbot step always had; this just runs it automatically at
+#    boot instead of requiring a copy/paste command afterwards. A failure
+#    here (usually DNS not propagated yet) is a WARN, not a fatal error --
+#    the site keeps serving plain HTTP and the same command can be re-run
+#    by hand once DNS is live.
+# ---------------------------------------------------------------------------
+if [ -n "$DOMAIN_NAME" ] && [ -n "$CERTBOT_EMAIL" ]; then
+    echo "== requesting a Let's Encrypt certificate for $DOMAIN_NAME"
+    apt-get install -y certbot python3-certbot-nginx
+    if certbot --nginx --non-interactive --agree-tos -m "$CERTBOT_EMAIL" \
+            -d "$DOMAIN_NAME" --redirect; then
+        echo "== HTTPS live at https://$DOMAIN_NAME/ (certbot.timer handles renewal)"
+    else
+        echo "WARN: certbot failed for $DOMAIN_NAME -- most likely its DNS" >&2
+        echo "A/AAAA record isn't pointing at this instance's public IP yet." >&2
+        echo "The site is still reachable over plain HTTP. Fix DNS, then re-run:" >&2
+        echo "  sudo certbot --nginx -d $DOMAIN_NAME -m $CERTBOT_EMAIL --redirect" >&2
+    fi
+elif [ -n "$DOMAIN_NAME" ] || [ -n "$CERTBOT_EMAIL" ]; then
+    echo "WARN: DOMAIN_NAME and CERTBOT_EMAIL must both be set to enable" >&2
+    echo "automatic HTTPS -- only one was provided, so skipping certbot." >&2
+    echo "(the site is fine over plain HTTP; fill in both to enable this)" >&2
+fi
+
 echo "== yantrafleet user-data done: $(date -Is)"
-echo "== open http://<this instance's public IP>/ in a browser"
+if [ -n "$DOMAIN_NAME" ]; then
+    echo "== open http://$DOMAIN_NAME/ (or https:// once certbot succeeds) in a browser"
+else
+    echo "== open http://<this instance's public IP>/ in a browser"
+fi

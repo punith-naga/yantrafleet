@@ -47,14 +47,17 @@ IMAGE="${IMAGE:-Canonical:ubuntu-24_04-lts:server:latest}"
 SIZE="${SIZE:-Standard_B2s}"       # 2 vCPU / 4 GiB — comfortably runs all services
 DISK_SIZE_GB="${DISK_SIZE_GB:-30}"
 
-# USE_KEYVAULT: when true (the default), the 10 credential-shaped vars in
-# custom-data.sh's EDIT ME block (SUPABASE_URL/KEY, GEMINI_API_KEY,
-# SARATHI_TOKEN, WEBHOOK_URL, YANTRA_WEBHOOK_SECRET, TWILIO_*) get uploaded
-# to an Azure Key Vault instead of being handed to Azure as plaintext
-# custom-data -- custom_data on a VM resource sits in Azure's control plane
-# forever (readable via Portal/API/ARM export by anyone with Reader on the
-# VM), not just briefly at boot, so leaving secrets in it is a standing
-# leak, not a one-time risk. The VM fetches them back at boot via its own
+# USE_KEYVAULT: when true (the default), the 11 credential-shaped vars in
+# custom-data.sh's EDIT ME block (REPO_URL, SUPABASE_URL/KEY,
+# GEMINI_API_KEY, SARATHI_TOKEN, WEBHOOK_URL, YANTRA_WEBHOOK_SECRET,
+# TWILIO_*) get uploaded to an Azure Key Vault instead of being handed to
+# Azure as plaintext custom-data -- custom_data on a VM resource sits in
+# Azure's control plane forever (readable via Portal/API/ARM export by
+# anyone with Reader on the VM), not just briefly at boot, so leaving
+# secrets in it is a standing leak, not a one-time risk. REPO_URL counts
+# here too: for a private repo it embeds a GitHub PAT
+# (https://<token>@github.com/...), which is exactly as credential-shaped
+# as the other ten. The VM fetches them all back at boot via its own
 # managed identity (see custom-data.sh). Set USE_KEYVAULT=false for today's
 # exact behaviour instead (custom-data.sh passed through verbatim, no
 # vault/identity/role-assignment work at all) -- e.g. a subscription
@@ -226,9 +229,10 @@ if [ "$USE_KEYVAULT" = "true" ]; then
     }
 
     echo "== uploading secrets to '$KEYVAULT_NAME'"
-    KV_VARS="SUPABASE_URL SUPABASE_KEY GEMINI_API_KEY SARATHI_TOKEN WEBHOOK_URL YANTRA_WEBHOOK_SECRET TWILIO_SID TWILIO_TOKEN TWILIO_FROM TWILIO_TO"
+    KV_VARS="REPO_URL SUPABASE_URL SUPABASE_KEY GEMINI_API_KEY SARATHI_TOKEN WEBHOOK_URL YANTRA_WEBHOOK_SECRET TWILIO_SID TWILIO_TOKEN TWILIO_FROM TWILIO_TO"
     for VAR in $KV_VARS; do
         case "$VAR" in
+            REPO_URL) SECRET_NAME="repo-url" ;;
             SUPABASE_URL) SECRET_NAME="supabase-url" ;;
             SUPABASE_KEY) SECRET_NAME="supabase-key" ;;
             GEMINI_API_KEY) SECRET_NAME="gemini-api-key" ;;
@@ -340,7 +344,14 @@ echo "== VM created in '$VM_LOCATION'"
 echo "== opening port 80 (nginx / the console)"
 az vm open-port --resource-group "$RG" --name "$VM_NAME" --port 80 --priority 900 -o table
 
+echo "== opening port 443 (HTTPS -- harmless if you never set DOMAIN_NAME/CERTBOT_EMAIL; nginx has nothing listening on it until certbot runs)"
+az vm open-port --resource-group "$RG" --name "$VM_NAME" --port 443 --priority 901 -o table
+
 IP="$(az vm show -d --resource-group "$RG" --name "$VM_NAME" --query publicIps -o tsv)"
+
+# DOMAIN_NAME is never a Key Vault secret (see custom-data.sh) -- it's
+# always readable straight off custom-data.sh regardless of USE_KEYVAULT.
+DOMAIN_NAME_SET="$(grep -oP '^DOMAIN_NAME="\K[^"]*' custom-data.sh || true)"
 
 cat <<EOF
 
@@ -348,6 +359,14 @@ cat <<EOF
    give it 3-5 minutes, then open:
 
      http://$IP/
+EOF
+if [ -n "$DOMAIN_NAME_SET" ]; then
+    cat <<EOF
+   (or http://$DOMAIN_NAME_SET/ / https://$DOMAIN_NAME_SET/ once certbot
+   finishes, if its DNS already points at $IP)
+EOF
+fi
+cat <<EOF
 
    SSH in to watch progress or debug:
 

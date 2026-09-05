@@ -1,14 +1,18 @@
 # YantraFleet nginx site — TEMPLATE.
 #
-# ${SUPABASE_URL} / ${SUPABASE_KEY} / ${YANTRA_SITE_ID} are substituted by
-# envsubst during install (see user-data.sh step 7); every other $variable
-# is native nginx and must survive substitution untouched — that is why
-# user-data passes envsubst an explicit variable list.
+# ${SUPABASE_URL} / ${SUPABASE_KEY} / ${YANTRA_SITE_ID} / ${NGINX_SERVER_NAME}
+# are substituted by envsubst during install (see user-data.sh step 7);
+# every other $variable is native nginx and must survive substitution
+# untouched — that is why user-data passes envsubst an explicit variable
+# list. NGINX_SERVER_NAME is "_" (nginx's catch-all name) when no domain
+# was configured, or the operator's DOMAIN_NAME when they set one — a real
+# server_name is what lets `certbot --nginx -d <domain>` find this block
+# automatically instead of failing to match anything.
 
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
-    server_name _;
+    server_name ${NGINX_SERVER_NAME};
 
     # -- compression -------------------------------------------------------
     gzip on;

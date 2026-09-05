@@ -19,15 +19,23 @@
 # below), clones the repo to /opt/yantrafleet, creates a venv via
 # install.sh, writes /etc/yantrafleet.env, installs
 # /opt/yantrafleet/refresh-secrets.sh for later rotation, installs the
-# yantra-* systemd services, and templates + enables the nginx site that
-# serves the console and proxies the sarathi copilot API.
+# yantra-* systemd services, templates + enables the nginx site that
+# serves the console and proxies the sarathi copilot API, and -- when
+# DOMAIN_NAME + CERTBOT_EMAIL are set -- requests a Let's Encrypt cert via
+# certbot's nginx plugin so the site comes up on HTTPS from first boot.
 
 # ============================= === EDIT ME === =============================
 # 1) Your repo. For a PRIVATE GitHub repo, create a fine-grained personal
 #    access token (github.com -> Settings -> Developer settings -> Tokens,
 #    repo scope "Contents: read-only") and embed it in the URL:
 #      REPO_URL="https://<YOUR_TOKEN>@github.com/<you>/yantrafleet.git"
-#    For a public repo the plain https URL is enough.
+#    For a public repo the plain https URL is enough. When USE_KEYVAULT=true
+#    (the default), deploy.sh uploads this whole value -- token included --
+#    to Key Vault as "repo-url" and blanks this line before it ever reaches
+#    Azure's control plane, same treatment as SUPABASE_URL/KEY below; the VM
+#    fetches it back at boot. See supabase/README.md's "Going to production"
+#    note -- REPO_URL is credential-shaped exactly like the others once a
+#    private repo is in play, it just wasn't originally treated as one.
 REPO_URL="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet.git"
 
 # 2) Your Supabase project (dashboard -> Settings -> API). Use the
@@ -38,6 +46,18 @@ SUPABASE_KEY="YOUR_SUPABASE_PUBLISHABLE_ANON_KEY"
 
 # 3) Which site this deployment serves (stamped on rows, filters alerts).
 YANTRA_SITE_ID="BLR-DC1"
+
+# 3b) Optional. Set BOTH to get HTTPS automatically at first boot instead
+#     of the manual certbot step in the hardening checklist. DOMAIN_NAME
+#     must already have a DNS A/AAAA record pointing at this VM's public IP
+#     *before* it boots (Let's Encrypt validates over the network) - if it
+#     doesn't yet, leave these blank and run the same certbot command by
+#     hand once DNS is live (see README "Hardening checklist"). These are
+#     not secrets, so they stay in this EDIT ME block even when
+#     USE_KEYVAULT=true - only the 11 credential-shaped vars below go
+#     through Key Vault.
+DOMAIN_NAME=""
+CERTBOT_EMAIL=""
 
 # 4) Optional. GEMINI_API_KEY enables the sarathi copilot's LLM tiers
 #    (leave empty for the offline tier). SARATHI_TOKEN, when set, makes
@@ -167,8 +187,14 @@ if [ -n "$KEYVAULT_NAME" ]; then
         exit 1
     }
 
-    # SUPABASE_URL/SUPABASE_KEY are required - the console and copilot API
-    # can't run without them, same as today's placeholder guard above.
+    # REPO_URL/SUPABASE_URL/SUPABASE_KEY are required - there's no repo to
+    # clone or backend to talk to without them, same as today's placeholder
+    # guard above.
+    REPO_URL="$(kv_get_secret repo-url "$KV_TOKEN")" || {
+        echo "ERROR: could not fetch secret 'repo-url' from Key Vault" \
+             "$KEYVAULT_NAME after $KV_MAX_ATTEMPTS attempts." >&2
+        exit 1
+    }
     SUPABASE_URL="$(kv_get_secret supabase-url "$KV_TOKEN")" || {
         echo "ERROR: could not fetch secret 'supabase-url' from Key Vault" \
              "$KEYVAULT_NAME after $KV_MAX_ATTEMPTS attempts." >&2
@@ -279,8 +305,9 @@ systemctl enable --now yantra-detect yantra-notify yantra-sarathi
 # 9) nginx: console + academy + docs + copilot proxy (shared template)
 # ---------------------------------------------------------------------------
 echo "== templating nginx site"
-export SUPABASE_URL SUPABASE_KEY YANTRA_SITE_ID
-envsubst '${SUPABASE_URL} ${SUPABASE_KEY} ${YANTRA_SITE_ID}' \
+NGINX_SERVER_NAME="${DOMAIN_NAME:-_}"
+export SUPABASE_URL SUPABASE_KEY YANTRA_SITE_ID NGINX_SERVER_NAME
+envsubst '${SUPABASE_URL} ${SUPABASE_KEY} ${YANTRA_SITE_ID} ${NGINX_SERVER_NAME}' \
     < "$APP_DIR/deploy/aws/nginx/yantrafleet.conf.template" \
     > /etc/nginx/sites-available/yantrafleet
 ln -sf /etc/nginx/sites-available/yantrafleet /etc/nginx/sites-enabled/yantrafleet
@@ -289,5 +316,37 @@ nginx -t
 systemctl enable --now nginx
 systemctl reload nginx
 
+# ---------------------------------------------------------------------------
+# 10) HTTPS via Let's Encrypt (only when both DOMAIN_NAME and CERTBOT_EMAIL
+#     are set in the EDIT ME block, and DOMAIN_NAME's DNS already points at
+#     this VM's public IP -- same prerequisite the hardening checklist's
+#     manual certbot step always had; this just runs it automatically at
+#     boot instead of requiring a copy/paste command afterwards. A failure
+#     here (usually DNS not propagated yet) is a WARN, not fatal -- the
+#     site keeps serving plain HTTP and the same command can be re-run by
+#     hand once DNS is live.
+# ---------------------------------------------------------------------------
+if [ -n "$DOMAIN_NAME" ] && [ -n "$CERTBOT_EMAIL" ]; then
+    echo "== requesting a Let's Encrypt certificate for $DOMAIN_NAME"
+    apt-get install -y certbot python3-certbot-nginx
+    if certbot --nginx --non-interactive --agree-tos -m "$CERTBOT_EMAIL" \
+            -d "$DOMAIN_NAME" --redirect; then
+        echo "== HTTPS live at https://$DOMAIN_NAME/ (certbot.timer handles renewal)"
+    else
+        echo "WARN: certbot failed for $DOMAIN_NAME -- most likely its DNS" >&2
+        echo "A/AAAA record isn't pointing at this VM's public IP yet." >&2
+        echo "The site is still reachable over plain HTTP. Fix DNS, then re-run:" >&2
+        echo "  sudo certbot --nginx -d $DOMAIN_NAME -m $CERTBOT_EMAIL --redirect" >&2
+    fi
+elif [ -n "$DOMAIN_NAME" ] || [ -n "$CERTBOT_EMAIL" ]; then
+    echo "WARN: DOMAIN_NAME and CERTBOT_EMAIL must both be set to enable" >&2
+    echo "automatic HTTPS -- only one was provided, so skipping certbot." >&2
+    echo "(the site is fine over plain HTTP; fill in both to enable this)" >&2
+fi
+
 echo "== yantrafleet custom-data done: $(date -Is)"
-echo "== open http://<this VM's public IP>/ in a browser"
+if [ -n "$DOMAIN_NAME" ]; then
+    echo "== open http://$DOMAIN_NAME/ (or https:// once certbot succeeds) in a browser"
+else
+    echo "== open http://<this VM's public IP>/ in a browser"
+fi
