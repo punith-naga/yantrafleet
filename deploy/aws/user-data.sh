@@ -205,7 +205,9 @@ fi
 
 echo "== yantrafleet user-data done: $(date -Is)"
 if [ -n "$DOMAIN_NAME" ]; then
-    echo "== open http://$DOMAIN_NAME/ (or https:// once certbot succeeds) in a browser"
+    echo "== marketing site: http://$DOMAIN_NAME/ (or https:// once certbot succeeds)"
+    echo "== console: http://$DOMAIN_NAME/console/"
 else
-    echo "== open http://<this instance's public IP>/ in a browser"
+    echo "== marketing site: http://<this instance's public IP>/"
+    echo "== console: http://<this instance's public IP>/console/"
 fi

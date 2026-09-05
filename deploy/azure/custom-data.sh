@@ -346,7 +346,9 @@ fi
 
 echo "== yantrafleet custom-data done: $(date -Is)"
 if [ -n "$DOMAIN_NAME" ]; then
-    echo "== open http://$DOMAIN_NAME/ (or https:// once certbot succeeds) in a browser"
+    echo "== marketing site: http://$DOMAIN_NAME/ (or https:// once certbot succeeds)"
+    echo "== console: http://$DOMAIN_NAME/console/"
 else
-    echo "== open http://<this VM's public IP>/ in a browser"
+    echo "== marketing site: http://<this VM's public IP>/"
+    echo "== console: http://<this VM's public IP>/console/"
 fi

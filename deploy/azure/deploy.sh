@@ -358,12 +358,14 @@ cat <<EOF
 == VM created. Cloud-init is now installing YantraFleet on first boot —
    give it 3-5 minutes, then open:
 
-     http://$IP/
+     http://$IP/            (marketing site / landing page)
+     http://$IP/console/    (the fleet console)
 EOF
 if [ -n "$DOMAIN_NAME_SET" ]; then
     cat <<EOF
    (or http://$DOMAIN_NAME_SET/ / https://$DOMAIN_NAME_SET/ once certbot
-   finishes, if its DNS already points at $IP)
+   finishes, if its DNS already points at $IP -- console is at /console/
+   there too)
 EOF
 fi
 cat <<EOF

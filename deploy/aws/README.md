@@ -1,15 +1,16 @@
 # Deploying YantraFleet on AWS (console only — no CLI, no Terraform)
 
 This guide takes you from "repo on my laptop" to "fleet console on
-`http://<public-ip>/`" using nothing but the AWS web console and one
-copy-pasted script. Budget ~20 minutes, of which ~5 are waiting for the
-instance to install itself.
+`http://<public-ip>/console/`" using nothing but the AWS web console and
+one copy-pasted script. Budget ~20 minutes, of which ~5 are waiting for
+the instance to install itself.
 
 What you end up with, on a single small EC2 instance:
 
 | Piece            | Where it runs                              |
 |------------------|--------------------------------------------|
-| Console (UI)     | nginx serving `/opt/yantrafleet/console` at `http://<public-ip>/` |
+| Marketing site (landing/about/etc) | nginx serving `/opt/yantrafleet/marketing` at `http://<public-ip>/` |
+| Console (UI)     | nginx serving `/opt/yantrafleet/console` at `http://<public-ip>/console/` |
 | Academy (training) | nginx serving `/opt/yantrafleet/academy` at `http://<public-ip>/academy/` |
 | Docs site        | nginx serving `/opt/yantrafleet/docs` at `http://<public-ip>/docs/` |
 | Copilot API      | `yantra-sarathi` (uvicorn on 127.0.0.1:8001, proxied at `/ask` + `/health`) |
@@ -119,20 +120,21 @@ Keep the edited file handy — you paste the whole thing in step 2.
 
 ## Step 3 — Wait ~5 minutes, then open the console
 
-Find the instance's **Public IPv4 address** on its EC2 detail page and
-open:
+Find the instance's **Public IPv4 address** on its EC2 detail page. The
+bare host is the public marketing/landing site:
 
 ```
 http://<PUBLIC_IP>/
 ```
 
-nginx 302-redirects `/` to
-`/index.html?supa=<your-supabase>&key=<anon-key>&site=<site-id>`, so the
-console is already pointed at your backend. The operator academy lives at
+The console lives at `http://<PUBLIC_IP>/console/` — nginx 302-redirects
+bare `/console` to
+`/console/index.html?supa=<your-supabase>&key=<anon-key>&site=<site-id>`,
+so it's already pointed at your backend. The operator academy lives at
 `http://<PUBLIC_IP>/academy/` (same redirect trick, same backend params)
-and the docs site at `http://<PUBLIC_IP>/docs/`. If the page doesn't load
-yet, the install is probably still running — give it another minute or
-two (a fresh apt + pip install takes a while on a t3.small).
+and the docs site at `http://<PUBLIC_IP>/docs/`. If nothing loads yet,
+the install is probably still running — give it another minute or two (a
+fresh apt + pip install takes a while on a t3.small).
 
 No robots on screen? That's expected until something writes rows: either
 real robots via the connector, or the demo simulator

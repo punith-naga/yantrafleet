@@ -26,17 +26,27 @@ server {
     add_header X-Frame-Options SAMEORIGIN always;
     add_header Referrer-Policy no-referrer-when-downgrade always;
 
-    # -- console (static single-file app) ---------------------------------
-    root /opt/yantrafleet/console;
+    # -- marketing site (static landing/about/features/etc, at the bare
+    #    host root) -----------------------------------------------------
+    root /opt/yantrafleet/marketing;
     index index.html;
 
-    # Landing on the bare host: hand the console its backend config in the
-    # URL (the app reads ?supa/?key/?site via URLSearchParams).
-    location = / {
-        return 302 /index.html?supa=${SUPABASE_URL}&key=${SUPABASE_KEY}&site=${YANTRA_SITE_ID};
+    location / {
+        try_files $uri $uri/ =404;
     }
 
-    location / {
+    # -- console (moved off / to /console/ so the marketing site can own
+    #    the bare host as the public landing page; bare /console or
+    #    /console/ still hands the app its backend config in the URL, same
+    #    trick the old root redirect used) ----------------------------------
+    location = /console {
+        return 302 /console/index.html?supa=${SUPABASE_URL}&key=${SUPABASE_KEY}&site=${YANTRA_SITE_ID};
+    }
+    location = /console/ {
+        return 302 /console/index.html?supa=${SUPABASE_URL}&key=${SUPABASE_KEY}&site=${YANTRA_SITE_ID};
+    }
+    location /console/ {
+        root /opt/yantrafleet;
         try_files $uri $uri/ =404;
     }
 

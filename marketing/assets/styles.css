@@ -155,3 +155,8 @@ footer.site .fine{color:var(--dim); font-size:12.5px; margin-top:26px}
 
 .skiplink{position:absolute; left:-999px; top:0; background:var(--ink); color:#fff; padding:10px 16px; border-radius:0 0 8px 0}
 .skiplink:focus{left:0}
+
+/* "Sign in" link in the top nav: points at /console/ (the fleet console is
+   served beside this site, see deploy/aws/nginx/yantrafleet.conf.template) */
+nav.top a.signin{font-weight:700; border:1.5px solid var(--ink); padding:6px 14px; border-radius:999px}
+nav.top a.signin:hover{background:var(--ink); color:#fff; text-decoration:none}

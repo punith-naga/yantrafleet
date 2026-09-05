@@ -47,9 +47,19 @@ PY
     pass "nginx template dry-run (python fallback; envsubst not installed here)"
 fi
 
-echo "$RENDERED" | grep -q 'supa=https://dummy.supabase.co&key=dummy-anon-key&site=TEST-SITE' \
-    && pass "302 redirect carries supa/key/site" \
-    || fail "302 redirect missing substituted supa/key/site"
+# marketing site owns the bare host root; console moved to /console/
+echo "$RENDERED" | grep -q 'root /opt/yantrafleet/marketing;' \
+    && pass "server root is the marketing site (/ = landing page)" \
+    || fail "server root is not /opt/yantrafleet/marketing"
+echo "$RENDERED" | grep -q '302 /console/index.html?supa=https://dummy.supabase.co&key=dummy-anon-key&site=TEST-SITE' \
+    && pass "console 302 redirect (/console/) carries supa/key/site" \
+    || fail "console 302 redirect missing substituted supa/key/site"
+echo "$RENDERED" | grep -q 'location /console/ {' \
+    && pass "nginx location /console/ present" \
+    || fail "nginx location /console/ missing"
+echo "$RENDERED" | grep -q 'return 302 /index.html' \
+    && fail "stale root-level console redirect still present (would shadow the marketing site)" \
+    || pass "no stale root-level console redirect"
 echo "$RENDERED" | grep -q '${SUPABASE\|${YANTRA\|${NGINX' \
     && fail "unsubstituted \${...} placeholders remain in rendered nginx conf" \
     || pass "no leftover \${...} placeholders"

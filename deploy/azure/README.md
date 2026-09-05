@@ -14,7 +14,8 @@ What you end up with — identical to the AWS kit, same VM, same services:
 
 | Piece            | Where it runs                              |
 |------------------|--------------------------------------------|
-| Console (UI)     | nginx serving `/opt/yantrafleet/console` at `http://<public-ip>/` |
+| Marketing site   | nginx serving `/opt/yantrafleet/marketing` at `http://<public-ip>/` (public landing page) |
+| Console (UI)     | nginx serving `/opt/yantrafleet/console` at `http://<public-ip>/console/` |
 | Academy (training) | nginx serving `/opt/yantrafleet/academy` at `http://<public-ip>/academy/` |
 | Docs site        | nginx serving `/opt/yantrafleet/docs` at `http://<public-ip>/docs/` |
 | Copilot API      | `yantra-sarathi` (uvicorn on 127.0.0.1:8001, proxied at `/ask` + `/health`) |
@@ -89,11 +90,13 @@ e.g.:
 LOCATION=westindia SIZE=Standard_B2s ./deploy.sh
 ```
 
-## Step 4 — wait ~5 minutes, then open the console
+## Step 4 — wait ~5 minutes, then open the site
 
-The script prints the public IP directly. Same redirect trick as AWS:
-`http://<PUBLIC_IP>/` 302s to the console with your Supabase params
-already attached; `/academy/` and `/docs/` work the same way.
+The script prints the public IP directly. `http://<PUBLIC_IP>/` is the
+public marketing/landing site. The fleet console lives at
+`http://<PUBLIC_IP>/console/` — same redirect trick as AWS: bare
+`/console/` 302s to the app with your Supabase params already attached;
+`/academy/` and `/docs/` work the same way.
 
 ```bash
 ssh yantra@<PUBLIC_IP>

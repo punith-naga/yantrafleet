@@ -310,6 +310,27 @@ grep -q -- '--port 443' "$HERE/deploy.sh" \
     || fail "deploy.sh does not open port 443"
 
 # ---------------------------------------------------------------------------
+# 18) URL layout: the marketing site owns the bare host (/), the console
+#     lives at /console/. deploy.sh's closing help text and custom-data's
+#     final echo must point people at the right places.
+# ---------------------------------------------------------------------------
+grep -q 'root /opt/yantrafleet/marketing;' "$REPO_ROOT/deploy/aws/nginx/yantrafleet.conf.template" \
+    && pass "shared nginx template serves marketing/ at the host root" \
+    || fail "shared nginx template does not root the marketing site at /"
+grep -q 'location /console/' "$REPO_ROOT/deploy/aws/nginx/yantrafleet.conf.template" \
+    && pass "shared nginx template has the /console/ location" \
+    || fail "shared nginx template is missing location /console/"
+grep -q 'http://\$IP/console/' "$HERE/deploy.sh" \
+    && pass "deploy.sh closing text points at /console/ for the console" \
+    || fail "deploy.sh closing text does not mention /console/"
+grep -q '/console/' "$HERE/custom-data.sh" \
+    && pass "custom-data.sh final echo mentions /console/" \
+    || fail "custom-data.sh final echo does not mention /console/"
+[ -f "$REPO_ROOT/marketing/index.html" ] \
+    && pass "marketing/index.html exists (nginx root would 404 otherwise)" \
+    || fail "marketing/index.html missing"
+
+# ---------------------------------------------------------------------------
 echo
 if [ "$FAILS" -eq 0 ]; then
     echo "validate.sh: all checks passed"
