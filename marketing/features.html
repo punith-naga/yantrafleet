@@ -1,0 +1,172 @@
+<!doctype html>
+<!-- ================================================================
+  YantraFleet MARKETING SITE — Features
+  See index.html for placeholder-replacement and sourcing notes.
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YantraFleet Features — Incident Detection, Predictive Maintenance, RBAC</title>
+<meta name="description" content="A detailed look at YantraFleet's fleet console, human-in-the-loop command approval, automatic incident detection, predictive maintenance heuristics, and role-based access control.">
+<link rel="canonical" href="https://yantrafleet.example.com/features.html">
+<meta property="og:title" content="YantraFleet Features — Incident Detection, Predictive Maintenance, RBAC">
+<meta property="og:description" content="A detailed look at YantraFleet's fleet console, human-in-the-loop command approval, automatic incident detection, predictive maintenance heuristics, and role-based access control.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yantrafleet.example.com/features.html">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<a class="skiplink" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><span class="mark">Y</span> YantraFleet</a>
+    <button class="navtoggle" aria-expanded="false" aria-label="Toggle navigation">☰</button>
+    <nav class="top">
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a class="on" href="features.html">Features</a>
+      <a href="security.html">Security</a>
+      <a href="docs.html">Docs</a>
+      <a href="get-involved.html">Get Involved</a>
+      <a href="changelog.html">Changelog</a>
+      <a class="cta" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" style="padding-bottom:20px">
+    <div class="wrap">
+      <p class="kicker">Features</p>
+      <h1 style="max-width:22ch">Five services, one shared source of truth.</h1>
+      <p class="lede">Every component below reads and writes the same Postgres (Supabase) schema — the console, the detector, the maintenance engine, the notifier, and the copilot are never looking at different data.</p>
+    </div>
+  </section>
+
+  <section class="tight">
+    <div class="wrap" style="max-width:780px">
+
+      <h2>Live fleet console</h2>
+      <p>A single-file web console (<code>console/index.html</code>, no build step) with a live map, per-robot detail panel, an alerts feed, an incidents view with recorded-telemetry replay, a mission board, and a command palette. It's what an operator watches all day — and it's exactly one static HTML file you can open directly or serve from any web server.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2>Human-in-the-loop command approval</h2>
+      <p>Robot commands — pause, send-to-charge, e-stop — never execute directly from the console. They're inserted as <code>pending</code> rows in a <code>commands</code> table. An operator with the right role approves or rejects each one from an "Pending approvals" queue, and the simulator (or a real robot connector) only acts once a command is approved. Every request records who asked, and every decision records who decided and when — a full audit trail, not a fire-and-forget button.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2>Automatic incident detection</h2>
+      <p>The detector (<code>detector/</code>, package <code>yantradetect</code>) polls the <code>robots</code> table and maintains an <code>incidents</code> table using patterns borrowed from production alerting systems:</p>
+      <ul>
+        <li><strong>PagerDuty-style dedup</strong> — one open incident per robot, with deterministic <code>INC-XXXX</code> ids so a retried write is idempotent rather than creating a duplicate.</li>
+        <li><strong>Prometheus-style pending/clear windows</strong> — a fault has to persist before an incident opens, and clear before it resolves, so single noisy samples don't flap the incident list.</li>
+        <li><strong>Flap-window re-opening</strong> — a robot that clears and re-faults quickly re-opens the same incident with a flap count instead of spawning a new one.</li>
+        <li><strong>Stale auto-resolve</strong> — incidents with no corroborating signal for long enough close themselves.</li>
+      </ul>
+      <p>Recorded telemetry around an incident can be replayed in the console — map, scrubber, and charts driven from the robot's actual samples at that time, not a scripted demo.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2>Predictive maintenance</h2>
+      <p>The detector's maintenance mode (<code>--maintenance</code>) reads a rolling <code>robot_telemetry</code> window per robot and runs three independent heuristics:</p>
+      <div class="grid">
+        <div class="card">
+          <h3>Drive-motor temperature trend</h3>
+          <p>A sustained linear rise in motor temperature (≥1.5&nbsp;°C/hr, with a fit strong enough to trust, over enough samples) flags the drive motor before it overheats.</p>
+        </div>
+        <div class="card">
+          <h3>Battery drain rate</h3>
+          <p>A robot draining battery per active-minute at 1.5× or more of the fleet's median is flagged for a battery health check.</p>
+        </div>
+        <div class="card">
+          <h3>Drivetrain speed decline</h3>
+          <p>A robot whose late-window active speed has fallen 15% or more versus its early-window speed is flagged for a drivetrain inspection.</p>
+        </div>
+      </div>
+      <p style="margin-top:16px">Each finding carries a human-readable explanation, an estimated remaining-useful-life, and a confidence score — and clears itself (rather than silently vanishing) once the underlying trend resolves.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2>Real alert delivery</h2>
+      <p>The notifier (<code>notifier/</code>, package <code>yantranotify</code>) polls unacknowledged critical/serious alerts and open incidents and pushes them out through the console, a generic webhook, or WhatsApp (via Twilio) — with per-event dedup so the same event doesn't spam a channel repeatedly.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2>Sarathi, the AI copilot</h2>
+      <p>Ask questions about your fleet in plain language. Sarathi answers are grounded in your fleet's live data with cited sources, and degrade gracefully through tiers: <code>grounded</code> (LLM plus live tool calls) → <code>llm_only</code> → <code>offline</code> (template-based answers, no LLM key required at all). It always works — it just gets smarter with a key.</p>
+
+      <hr class="rule" style="margin:26px 0">
+
+      <h2 id="rbac">Role-based access control</h2>
+      <p>YantraFleet ships demo-open by default (one shared key, zero setup) so you can evaluate it immediately. For production, an opt-in migration enables full RBAC: four hierarchical roles, scoped per site, enforced in Postgres itself — not just in application code.</p>
+      <div class="tbl-wrap">
+        <table class="matrix">
+          <thead>
+            <tr><th>Capability</th><th>operator</th><th>engineer</th><th>manager</th><th>admin</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>View fleet data at own site (robots, alerts, incidents, missions, telemetry, findings, commands)</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓ (all sites)</td></tr>
+            <tr><td>Acknowledge alerts</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+            <tr><td>Request commands (as themselves)</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+            <tr><td>Connector management / telemetry export</td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+            <tr><td>Approve / reject commands</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+            <tr><td>Manage user roles</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Command approval, in particular, goes through a dedicated <code>SECURITY DEFINER</code> database function rather than a direct table write — a hand-crafted API request can't bypass it. See <a href="security.html">Security</a> and <a href="../docs/SECURITY.md">docs/SECURITY.md</a> for the full model, including exactly which enforcement is done in the database versus the application layer.</p>
+
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap" style="text-align:center">
+      <h2>Read the source, run the demo.</h2>
+      <p class="muted">Every feature above is in the repository — nothing here is aspirational.</p>
+      <div class="actions" style="justify-content:center;margin-top:20px">
+        <a class="btn primary" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+        <a class="btn secondary" href="docs.html">Read the docs</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <div class="fbrand">YantraFleet</div>
+        <p style="color:var(--muted);font-size:14px;max-width:38ch">Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. MIT licensed.</p>
+      </div>
+      <div>
+        <h4>Site</h4>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository</a></li>
+          <li><a href="get-involved.html">Get involved / Issues</a></li>
+          <li><a href="../LICENSE">License (MIT)</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="fine">YantraFleet is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection.</p>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>

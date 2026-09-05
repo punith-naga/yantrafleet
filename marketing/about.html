@@ -1,0 +1,135 @@
+<!doctype html>
+<!-- ================================================================
+  YantraFleet MARKETING SITE — About
+  See index.html for the placeholder-replacement notes (domain +
+  GitHub URL) and sourcing notes; the same apply on every page here.
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>About YantraFleet — Open-Source Robot Fleet Operations</title>
+<meta name="description" content="Why YantraFleet exists: an MIT-licensed, VDA 5050-based fleet-operations platform built so teams can run and inspect their own AMR fleet software instead of depending on a closed vendor dashboard.">
+<link rel="canonical" href="https://yantrafleet.example.com/about.html">
+<meta property="og:title" content="About YantraFleet — Open-Source Robot Fleet Operations">
+<meta property="og:description" content="Why YantraFleet exists: an MIT-licensed, VDA 5050-based fleet-operations platform built so teams can run and inspect their own AMR fleet software instead of depending on a closed vendor dashboard.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yantrafleet.example.com/about.html">
+<link rel="stylesheet" href="assets/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "AboutPage",
+  "name": "About YantraFleet",
+  "url": "https://yantrafleet.example.com/about.html",
+  "mainEntity": {
+    "@type": "SoftwareApplication",
+    "name": "YantraFleet",
+    "applicationCategory": "BusinessApplication",
+    "softwareVersion": "0.12.1",
+    "license": "https://opensource.org/licenses/MIT",
+    "codeRepository": "https://github.com/YOUR_GITHUB_USERNAME/yantrafleet"
+  }
+}
+</script>
+</head>
+<body>
+<a class="skiplink" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><span class="mark">Y</span> YantraFleet</a>
+    <button class="navtoggle" aria-expanded="false" aria-label="Toggle navigation">☰</button>
+    <nav class="top">
+      <a href="index.html">Home</a>
+      <a class="on" href="about.html">About</a>
+      <a href="features.html">Features</a>
+      <a href="security.html">Security</a>
+      <a href="docs.html">Docs</a>
+      <a href="get-involved.html">Get Involved</a>
+      <a href="changelog.html">Changelog</a>
+      <a class="cta" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" style="padding-bottom:20px">
+    <div class="wrap">
+      <p class="kicker">About</p>
+      <h1 style="max-width:22ch">Built as infrastructure, not a product demo.</h1>
+    </div>
+  </section>
+
+  <section class="tight">
+    <div class="wrap" style="max-width:760px">
+      <p>YantraFleet is an open-source, MIT-licensed fleet-operations platform for autonomous mobile robots (AMRs) — the software layer that sits between robots on the floor and the humans responsible for them.</p>
+
+      <p>Robots increasingly speak a shared, vendor-neutral language: <strong>VDA 5050</strong>, an open protocol for AMR-to-fleet-management communication. YantraFleet exists to give teams a real, working operations layer on top of that protocol — one they can run themselves, inspect, and modify — rather than depending on a single vendor's closed dashboard.</p>
+
+      <p>The platform is composed of independent, testable components that share one Postgres schema: a VDA 5050 connector, a deterministic warehouse simulator (so you can evaluate the whole system without a single physical robot), a single-file web console, an incident detector, a predictive-maintenance engine, a notification service, and an AI copilot ("Sarathi") that answers fleet questions grounded in the fleet's own live data. Every component ships with its own offline, no-network test suite — 10 suites, 500+ tests, all passing — because an operations platform that manages physical machines has to be trustworthy first.</p>
+
+      <p>YantraFleet also treats access control as a first-class feature rather than an afterthought: it ships open for quick evaluation, with a documented, migration-driven path to a hardened, role-based-access-control posture for production use — because a platform that can send commands to real robots needs a real permission model when it matters.</p>
+
+      <p>The project is MIT licensed and developed in the open. The code, the architecture documentation, the security posture, and the test reports are all in the repository — nothing here is marketing-only.</p>
+
+      <p class="pullquote">Multi-vendor AMR fleets need an operations layer that speaks the open protocol they already use, that you can run on your own infrastructure, and that you can actually read the source code of. That's what YantraFleet is.</p>
+
+      <h2 style="margin-top:34px">Links</h2>
+      <ul class="linklist" style="max-width:none">
+        <li><a class="reslink" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View the source on GitHub<span class="desc">The full codebase — every component, every test suite.</span></a></li>
+        <li><a class="reslink" href="../docs/ARCHITECTURE.md">Read the architecture reference<span class="desc">docs/ARCHITECTURE.md — what was built and how.</span></a></li>
+        <li><a class="reslink" href="../docs/SECURITY.md">Read the security &amp; RBAC model<span class="desc">docs/SECURITY.md — demo, hardened, and role-based modes.</span></a></li>
+        <li><a class="reslink" href="../LICENSE">License<span class="desc">MIT — see the LICENSE file in the repo root.</span></a></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap" style="text-align:center">
+      <h2>See it running for yourself.</h2>
+      <p class="muted">Three commands, a bundled simulator, no cloud account required.</p>
+      <div class="actions" style="justify-content:center;margin-top:20px">
+        <a class="btn primary" href="index.html#main">Back to the quickstart</a>
+        <a class="btn secondary" href="features.html">Explore the features</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <div class="fbrand">YantraFleet</div>
+        <p style="color:var(--muted);font-size:14px;max-width:38ch">Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. MIT licensed.</p>
+      </div>
+      <div>
+        <h4>Site</h4>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository</a></li>
+          <li><a href="get-involved.html">Get involved / Issues</a></li>
+          <li><a href="../LICENSE">License (MIT)</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="fine">YantraFleet is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection.</p>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>

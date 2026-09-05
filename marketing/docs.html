@@ -1,0 +1,117 @@
+<!doctype html>
+<!-- ================================================================
+  YantraFleet MARKETING SITE — Docs (link-out page)
+  Per the content brief: don't rebuild documentation content here —
+  link out to the real docs already in the repo (docs/, deploy/).
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YantraFleet Documentation</title>
+<meta name="description" content="Architecture reference, security and RBAC guide, Windows runbook, and cloud deployment guides for YantraFleet, the open-source AMR fleet-operations platform.">
+<link rel="canonical" href="https://yantrafleet.example.com/docs.html">
+<meta property="og:title" content="YantraFleet Documentation">
+<meta property="og:description" content="Architecture reference, security and RBAC guide, Windows runbook, and cloud deployment guides for YantraFleet, the open-source AMR fleet-operations platform.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yantrafleet.example.com/docs.html">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<a class="skiplink" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><span class="mark">Y</span> YantraFleet</a>
+    <button class="navtoggle" aria-expanded="false" aria-label="Toggle navigation">☰</button>
+    <nav class="top">
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="features.html">Features</a>
+      <a href="security.html">Security</a>
+      <a class="on" href="docs.html">Docs</a>
+      <a href="get-involved.html">Get Involved</a>
+      <a href="changelog.html">Changelog</a>
+      <a class="cta" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" style="padding-bottom:20px">
+    <div class="wrap">
+      <p class="kicker">Documentation</p>
+      <h1 style="max-width:24ch">Everything here links to the real docs — nothing is duplicated.</h1>
+      <p class="lede">This marketing site doesn't maintain its own copy of the documentation. Every link below goes to the actual reference material in the repository, which deploys alongside this site at <code>/docs/</code>.</p>
+    </div>
+  </section>
+
+  <section class="tight">
+    <div class="wrap" style="max-width:780px">
+
+      <h2>Start here</h2>
+      <ul class="linklist">
+        <li><a class="reslink" href="../docs/index.html">Documentation overview &amp; FAQ<span class="desc">docs/index.html — the project's own docs landing page: architecture summary, quickstart, FAQ.</span></a></li>
+        <li><a class="reslink" href="../docs/ARCHITECTURE.md">Architecture reference<span class="desc">docs/ARCHITECTURE.md — the comprehensive "what we built and how" document.</span></a></li>
+      </ul>
+
+      <h2 style="margin-top:34px">Security &amp; compliance</h2>
+      <ul class="linklist">
+        <li><a class="reslink" href="../docs/SECURITY.md">Security &amp; RBAC guide<span class="desc">docs/SECURITY.md — demo, hardened, and role-based modes; key classes; RPC-by-RPC write paths.</span></a></li>
+        <li><a class="reslink" href="../docs/COMPLIANCE.md">Compliance mappings<span class="desc">docs/COMPLIANCE.md — SOC 2, ISO 27001, EU AI Act, VDA 5050 conformance, ISA-18.2, NIST CSF.</span></a></li>
+      </ul>
+
+      <h2 style="margin-top:34px">Running it</h2>
+      <ul class="linklist">
+        <li><a class="reslink" href="../docs/RUNBOOK-WINDOWS.md">Windows runbook<span class="desc">docs/RUNBOOK-WINDOWS.md — install.ps1 and the PowerShell operating procedure.</span></a></li>
+        <li><a class="reslink" href="../deploy/aws/README.md">Deploy to AWS EC2<span class="desc">deploy/aws/README.md — single-instance deployment walkthrough, systemd units, nginx template.</span></a></li>
+        <li><a class="reslink" href="../deploy/azure/README.md">Deploy to Azure<span class="desc">deploy/azure/README.md — the Azure equivalent deployment path.</span></a></li>
+      </ul>
+
+      <h2 style="margin-top:34px">Source &amp; contributing</h2>
+      <ul class="linklist">
+        <li><a class="reslink" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository<span class="desc">The full source code for every component.</span></a></li>
+        <li><a class="reslink" href="../CONTRIBUTING.md">Contributing guide<span class="desc">CONTRIBUTING.md — setup, project rules, and the offline test-suite matrix.</span></a></li>
+        <li><a class="reslink" href="../CHANGELOG.md">Full changelog<span class="desc">CHANGELOG.md — complete version history. A lightly reformatted recent excerpt is on the <a href="changelog.html">Changelog page</a>.</span></a></li>
+      </ul>
+
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <div class="fbrand">YantraFleet</div>
+        <p style="color:var(--muted);font-size:14px;max-width:38ch">Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. MIT licensed.</p>
+      </div>
+      <div>
+        <h4>Site</h4>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository</a></li>
+          <li><a href="get-involved.html">Get involved / Issues</a></li>
+          <li><a href="../LICENSE">License (MIT)</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="fine">YantraFleet is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection.</p>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>

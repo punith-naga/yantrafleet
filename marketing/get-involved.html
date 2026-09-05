@@ -1,0 +1,107 @@
+<!doctype html>
+<!-- ================================================================
+  YantraFleet MARKETING SITE — Get Involved (replaces a "Contact" page)
+  No lead-gen form: this links to GitHub Issues and CONTRIBUTING.md,
+  which are real and functional, per the content brief.
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contribute to YantraFleet</title>
+<meta name="description" content="Report bugs, request features, or contribute code to YantraFleet on GitHub. Open source, MIT licensed, developed in the open.">
+<link rel="canonical" href="https://yantrafleet.example.com/get-involved.html">
+<meta property="og:title" content="Contribute to YantraFleet">
+<meta property="og:description" content="Report bugs, request features, or contribute code to YantraFleet on GitHub. Open source, MIT licensed, developed in the open.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yantrafleet.example.com/get-involved.html">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<a class="skiplink" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><span class="mark">Y</span> YantraFleet</a>
+    <button class="navtoggle" aria-expanded="false" aria-label="Toggle navigation">☰</button>
+    <nav class="top">
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="features.html">Features</a>
+      <a href="security.html">Security</a>
+      <a href="docs.html">Docs</a>
+      <a class="on" href="get-involved.html">Get Involved</a>
+      <a href="changelog.html">Changelog</a>
+      <a class="cta" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" style="padding-bottom:20px">
+    <div class="wrap">
+      <p class="kicker">Get involved</p>
+      <h1 style="max-width:22ch">No contact form. Just the repository.</h1>
+      <p class="lede">YantraFleet doesn't have a sales team or a support queue — it has a GitHub repository. Bugs, feature requests, and contributions all go through the same place the code lives.</p>
+    </div>
+  </section>
+
+  <section class="tight">
+    <div class="wrap" style="max-width:780px">
+
+      <ul class="linklist">
+        <li><a class="reslink" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/issues">Report a bug or request a feature<span class="desc">GitHub Issues — search first, then open a new issue with repro steps or a clear use case.</span></a></li>
+        <li><a class="reslink" href="../CONTRIBUTING.md">Contribute code<span class="desc">CONTRIBUTING.md — dev setup, the project's testing rules, and the full offline test-suite matrix.</span></a></li>
+        <li><a class="reslink" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">Browse the source<span class="desc">The GitHub repository — every component, every commit.</span></a></li>
+        <li><a class="reslink" href="../LICENSE">Read the license<span class="desc">MIT — use it, fork it, ship it, modify it.</span></a></li>
+      </ul>
+
+      <h2 style="margin-top:34px">Project rules, in short</h2>
+      <p>From <a href="../CONTRIBUTING.md">CONTRIBUTING.md</a>, so you know what a pull request is held to:</p>
+      <ul>
+        <li>Every change ships with offline tests — nothing touches the network (the e2e suite talks only to an in-process fake PostgREST on <code>127.0.0.1</code>).</li>
+        <li>Robot statuses use the canonical vocabulary in <code>core/yantracore</code> — never a new ad-hoc spelling.</li>
+        <li>Robot-affecting actions always go through the <code>commands</code> approval-gate table, never a direct state write.</li>
+        <li>Schema changes are new, numbered, idempotent SQL files in <code>supabase/</code> — an already-applied migration is never edited in place.</li>
+      </ul>
+
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <div class="fbrand">YantraFleet</div>
+        <p style="color:var(--muted);font-size:14px;max-width:38ch">Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. MIT licensed.</p>
+      </div>
+      <div>
+        <h4>Site</h4>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository</a></li>
+          <li><a href="get-involved.html">Get involved / Issues</a></li>
+          <li><a href="../LICENSE">License (MIT)</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="fine">YantraFleet is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection.</p>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>

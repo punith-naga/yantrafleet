@@ -1,0 +1,134 @@
+<!doctype html>
+<!-- ================================================================
+  YantraFleet MARKETING SITE — Changelog
+  Lightly reformatted excerpt of the real CHANGELOG.md (most recent
+  entries) — no fabricated history. Full history links to the source
+  file per the content brief.
+  ================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YantraFleet Changelog</title>
+<meta name="description" content="Recent release notes for YantraFleet, the open-source AMR fleet-operations platform — real version history, sourced from CHANGELOG.md.">
+<link rel="canonical" href="https://yantrafleet.example.com/changelog.html">
+<meta property="og:title" content="YantraFleet Changelog">
+<meta property="og:description" content="Recent release notes for YantraFleet, the open-source AMR fleet-operations platform — real version history, sourced from CHANGELOG.md.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yantrafleet.example.com/changelog.html">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<a class="skiplink" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><span class="mark">Y</span> YantraFleet</a>
+    <button class="navtoggle" aria-expanded="false" aria-label="Toggle navigation">☰</button>
+    <nav class="top">
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="features.html">Features</a>
+      <a href="security.html">Security</a>
+      <a href="docs.html">Docs</a>
+      <a href="get-involved.html">Get Involved</a>
+      <a class="on" href="changelog.html">Changelog</a>
+      <a class="cta" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" style="padding-bottom:10px">
+    <div class="wrap">
+      <p class="kicker">Changelog</p>
+      <h1 style="max-width:22ch">Recent releases.</h1>
+      <p class="lede">The most recent entries from the project's real <a href="../CHANGELOG.md">CHANGELOG.md</a>, lightly reformatted for the web. See that file for the complete history back to v0.1.0.</p>
+    </div>
+  </section>
+
+  <section class="tight">
+    <div class="wrap" style="max-width:780px">
+
+      <div class="entry">
+        <span class="ver">v0.12.1</span><span class="date">2026-09-03</span>
+        <ul style="margin-top:12px">
+          <li><strong>Single-sourced release version</strong> — <code>core/yantracore/version.py</code> is now the one place the version lives, with a cross-check test that fails the build if the console, academy, and CLI ever drift out of lockstep.</li>
+          <li><strong>WebLLM pinned</strong> — the academy's on-device tutor CDN import is pinned to an exact version instead of a floating <code>@latest</code>-style reference.</li>
+          <li><strong>Academy</strong> — lesson search/filter in the rail, plus a print-friendly single-lesson view.</li>
+          <li><strong>Console</strong> — an empty-state card explains a fresh or not-yet-migrated Supabase project instead of showing a blank dashboard.</li>
+          <li>525 tests green across 10 suites, per this release's README badge.</li>
+        </ul>
+      </div>
+
+      <div class="entry">
+        <span class="ver">v0.12.0</span><span class="date">2026-09-03</span>
+        <ul style="margin-top:12px">
+          <li><strong>Account signup</strong> in console and academy — Sign in / Create account tabs with both real Supabase outcomes (instant session, or an email-confirmation step) handled explicitly.</li>
+          <li><strong>Cross-linked discovery</strong> — the console header gains an Academy link and the academy links back, preserving backend connection params either way.</li>
+          <li><strong>Physical AI Foundations track</strong> — 7 new academy lessons (19 total across 4 tracks), every platform fact sourced from this repository.</li>
+          <li>511 tests green across 10 suites.</li>
+        </ul>
+      </div>
+
+      <div class="entry">
+        <span class="ver">v0.11.0</span><span class="date">2026-09-02</span>
+        <ul style="margin-top:12px">
+          <li><strong>Real authentication + enforced RBAC</strong> — the <code>0007_rbac.sql</code> migration adds per-site user roles, row-level security policies, and <code>SECURITY DEFINER</code> RPCs for command decisions, progress saves, and certificate issuance.</li>
+          <li><strong><code>yantraops audit-security</code></strong> — probes a live backend and labels its mode (demo / hardened / RBAC), flagging anon-writable tables or misplaced service keys with PASS/WARN/FAIL output.</li>
+          <li><strong>docs/COMPLIANCE.md</strong> added — honest mappings to SOC 2, ISO 27001, the EU AI Act, VDA 5050 conformance, ISA-18.2, and NIST CSF.</li>
+          <li>498 tests green across 10 suites.</li>
+        </ul>
+      </div>
+
+      <div class="entry">
+        <span class="ver">v0.10.0</span><span class="date">2026-09-02</span>
+        <ul style="margin-top:12px">
+          <li><strong>YantraFleet Academy launched</strong> — learn Physical AI by operating the live platform: role tracks, practicals verified against the live backend, and an Operator Certification Checkride with a printable certificate.</li>
+          <li><strong>Guru, the on-device AI tutor</strong> — an opt-in WebLLM-based tutor that runs fully offline after a one-time model download, degrading to the server-side copilot or offline rules when unavailable.</li>
+          <li><code>yantraops up</code> now serves the console, academy, and docs from a single command.</li>
+          <li>450 tests green across 10 suites.</li>
+        </ul>
+      </div>
+
+      <p style="margin-top:30px"><a class="reslink" style="display:block" href="../CHANGELOG.md">Full changelog<span class="desc">CHANGELOG.md — every release back to v0.1.0.</span></a></p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <div class="fbrand">YantraFleet</div>
+        <p style="color:var(--muted);font-size:14px;max-width:38ch">Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. MIT licensed.</p>
+      </div>
+      <div>
+        <h4>Site</h4>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository</a></li>
+          <li><a href="get-involved.html">Get involved / Issues</a></li>
+          <li><a href="../LICENSE">License (MIT)</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="fine">YantraFleet is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection.</p>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>
