@@ -161,12 +161,100 @@ def test_opt_in_migrations_gated_by_default(tmp_path):
     assert names_all == ["0001_base.sql", "0006_lock.sql"]
 
 
+#: Every migration that must be gated behind --include-opt-in. 0006/0007
+#: lock the project down; 0008 needs 0007's yf_has_role; 0009-0016 all build
+#: on 0007 (and 0009's yf_can_read_site), and 0009 in particular hands
+#: anonymous visitors a scoped write path — none of them may ever be applied
+#: to a demo project by a plain `yantraops migrate`.
+OPT_IN_MIGRATIONS = (
+    "0006_harden.sql",
+    "0007_rbac.sql",
+    "0008_app_settings.sql",
+    "0009_demo_sandbox.sql",
+    "0010_share_links.sql",
+    "0011_replay.sql",
+    "0012_utilization.sql",
+    "0013_maintenance_explain.sql",
+    "0014_inbound_ops.sql",
+    "0015_certification.sql",
+    "0016_public_status.sql",
+)
+
+#: The baseline files a plain `migrate` run applies. Listed explicitly so a
+#: new migration cannot silently join the default set by forgetting its
+#: OPT-IN banner — the equality assertion below fails instead.
+BASELINE_MIGRATIONS = (
+    "0001_init.sql",
+    "0002_commands.sql",
+    "0003_telemetry.sql",
+    "0004_maintenance.sql",
+    "0005_sites.sql",
+)
+
+
 def test_repo_opt_in_files_detected():
     from yantraops.migrate import default_migrations_dir, discover_migrations
     d = default_migrations_dir()
     base = {p.name for p in discover_migrations(d)}
     every = {p.name for p in discover_migrations(d, include_opt_in=True)}
-    assert "0006_harden.sql" in every - base
-    assert "0007_rbac.sql" in every - base
-    assert "0008_app_settings.sql" in every - base
+    gated = every - base
+    for name in OPT_IN_MIGRATIONS:
+        assert name in gated, f"{name} must carry an OPT-IN banner"
     assert "0001_init.sql" in base
+
+
+def test_baseline_set_is_exactly_the_unlocked_files():
+    """A new migration must not join the default set by accident."""
+    from yantraops.migrate import default_migrations_dir, discover_migrations
+    d = default_migrations_dir()
+    assert {p.name for p in discover_migrations(d)} == set(BASELINE_MIGRATIONS)
+
+
+def test_every_repo_migration_is_baseline_or_opt_in():
+    """No migration file is unaccounted for by the two lists above."""
+    from yantraops.migrate import default_migrations_dir, discover_migrations
+    d = default_migrations_dir()
+    every = {p.name for p in discover_migrations(d, include_opt_in=True)}
+    assert every == set(BASELINE_MIGRATIONS) | set(OPT_IN_MIGRATIONS)
+
+
+def test_opt_in_marker_is_inside_the_scanned_header():
+    """``is_opt_in`` only reads the first 400 characters, so a banner that
+    drifts below that line silently un-gates the file. Assert the marker is
+    genuinely within the scanned window for every gated migration."""
+    from yantraops.migrate import (OPT_IN_MARKER, default_migrations_dir,
+                                   is_opt_in)
+    d = default_migrations_dir()
+    for name in OPT_IN_MIGRATIONS:
+        path = d / name
+        assert path.exists(), f"{name} is missing from supabase/"
+        assert is_opt_in(path)
+        head = path.read_text(encoding="utf-8", errors="replace")[:400]
+        assert OPT_IN_MARKER in head
+
+
+def test_opt_in_migrations_carry_a_rollback_block():
+    """Repo convention (supabase/README.md): every opt-in migration ends in a
+    commented ROLLBACK block that restores the previous posture."""
+    from yantraops.migrate import default_migrations_dir
+    d = default_migrations_dir()
+    for name in OPT_IN_MIGRATIONS:
+        text = (d / name).read_text(encoding="utf-8", errors="replace")
+        assert "ROLLBACK" in text, f"{name} has no ROLLBACK block"
+        tail = text[text.index("ROLLBACK"):]
+        assert "-- drop " in tail or "-- do $$" in tail or "-- update " in tail, (
+            f"{name}'s ROLLBACK block has no commented statements")
+
+
+def test_new_migrations_are_ordered_after_rbac():
+    """0009-0016 all depend on 0007 (and 0009's helpers). Filename order is
+    the ordering contract, so assert they sort after it."""
+    from yantraops.migrate import default_migrations_dir, discover_migrations
+    names = [p.name for p in
+             discover_migrations(default_migrations_dir(), include_opt_in=True)]
+    rbac = names.index("0007_rbac.sql")
+    for name in ("0009_demo_sandbox.sql", "0010_share_links.sql",
+                 "0011_replay.sql", "0012_utilization.sql",
+                 "0013_maintenance_explain.sql", "0014_inbound_ops.sql",
+                 "0015_certification.sql", "0016_public_status.sql"):
+        assert names.index(name) > rbac
