@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yantraconform"
+version = "0.1.0"
+description = "Free VDA 5050 v2.1 conformance tester for AMRs and fleet managers"
+readme = "README.md"
+requires-python = ">=3.10"
+# Deliberately ZERO required dependencies: the whole scoring/report engine is
+# stdlib-only so `yantra-conform checks`, replaying a capture and rendering a
+# report all work in an empty venv. Talking to a real broker needs paho, which
+# is already used elsewhere in this repo (sim, connector, ops) -- install it
+# with `pip install yantraconform[mqtt]`.
+dependencies = []
+
+[project.optional-dependencies]
+mqtt = ["paho-mqtt>=2.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+yantra-conform = "yantraconform.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["yantraconform*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

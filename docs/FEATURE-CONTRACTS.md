@@ -63,6 +63,30 @@ users who are not the caller (0014 needs this) with `fake.set_user_role(...)`.
 Differences from the real database are called out per feature under
 **Fake divergences**.
 
+**Seeded rows get the migrations' one-shot backfill.** Rows you hand to the
+constructor (`FakePostgREST({"incidents": [...]})`) are the fake's analogue of
+rows that already existed when 0011/0012 were applied, so they go through the
+same backfill the migrations run — not through the write triggers:
+
+| table | seeded row | what the fake fills in |
+|---|---|---|
+| `incidents` | `state <> 'Open'`, no `closed_at` | `closed_at = created_at + dur minutes`, `closed_at_estimated = true` |
+| `incidents` | `state = 'Open'` | `closed_at = null`, `closed_at_estimated = false` |
+| `missions` | `state = 'Done'`, no `completed_at` | `completed_at = created_at` |
+
+Both also get `updated_at = coalesce(closed_at/completed_at, created_at)`.
+So a seeded `{"state":"Resolved","dur":60}` incident is genuinely closed 60
+minutes after its `created_at`, and `replay_state_at` at a later instant will
+**not** list it — set `created_at` and `dur` deliberately when you build
+replay fixtures. Rows written later over HTTP go through the triggers instead
+and are stamped with `now()`, exactly as the database does.
+
+A fake RPC handler that raises answers `500` with
+`{"message":"<fn>: fake handler raised <Type>: <msg>", "code":"XX000"}` rather
+than dropping the socket — if you see that, you have found a bug in
+`fakerest.py` or seeded a row missing a column the real schema declares
+`NOT NULL`.
+
 ---
 
 ## 1. Ephemeral demo sandbox — `0009_demo_sandbox.sql`

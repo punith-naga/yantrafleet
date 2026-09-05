@@ -4,7 +4,7 @@
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql AND 0009_demo_sandbox.sql —    !!
 -- !!  REQUIRES public.yf_can_read_site() (defined in 0009),  !!
--- !!  which is REQUIRES yf_has_role() from 0007 in turn.     !!
+-- !!  which in turn REQUIRES yf_has_role() from 0007.        !!
 -- !!  Adds columns + a trigger to public.incidents; read the !!
 -- !!  "WHAT WAS ALREADY QUERYABLE" note before applying.     !!
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

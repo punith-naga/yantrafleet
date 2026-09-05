@@ -288,6 +288,57 @@ def _apply_write_triggers(table: str, row: Row) -> Row:
     return row
 
 
+def _apply_seed_backfill(table: str, row: Row) -> Row:
+    """The ONE-SHOT backfill 0011/0012 run over rows that already existed.
+
+    Distinct from :func:`_apply_write_triggers`, and deliberately so. The
+    trigger fires on a *write* and stamps ``now()``; the backfill runs
+    *once, at migration time*, over history nobody is writing any more, and
+    derives the timestamp from the row's own data:
+
+    * 0011 — ``closed_at = created_at + dur minutes`` for every incident
+      whose ``state <> 'Open'``, flagged ``closed_at_estimated = true``
+      because a duration is not a real close time.
+    * 0012 — ``completed_at = created_at`` for every mission in state
+      ``'Done'``.
+
+    Rows handed to :class:`FakePostgREST`'s constructor are the fake's
+    analogue of "rows that were already in the table when the migration
+    ran", so they must go through this and NOT through the trigger. Without
+    it a seeded ``state='Resolved'`` incident keeps ``closed_at = null`` and
+    ``replay_state_at`` reports it as still open — an offline-only wrong
+    answer that would not reproduce against a real project.
+    """
+    if table == "incidents":
+        row.setdefault("state", "Open")
+        row.setdefault("closed_at_estimated", False)
+        if row["state"] != "Open" and not row.get("closed_at"):
+            created = _ts(row.get("created_at"))
+            if created is not None:
+                mins = row.get("dur") or 0
+                try:
+                    mins = max(float(mins), 0.0)
+                except (TypeError, ValueError):
+                    mins = 0.0
+                row["closed_at"] = _iso(created + timedelta(minutes=mins))
+                row["closed_at_estimated"] = True
+        elif row["state"] == "Open":
+            row["closed_at"] = None
+            row["closed_at_estimated"] = False
+        if not row.get("updated_at"):
+            row["updated_at"] = row.get("closed_at") or row.get("created_at")
+    elif table == "missions":
+        row.setdefault("state", "Queued")
+        if row["state"] == "Done":
+            if not row.get("completed_at"):
+                row["completed_at"] = row.get("created_at")
+        else:
+            row["completed_at"] = None
+        if not row.get("updated_at"):
+            row["updated_at"] = row.get("completed_at") or row.get("created_at")
+    return row
+
+
 # --------------------------------------------------------------------------
 # Filtering helpers
 # --------------------------------------------------------------------------
@@ -419,6 +470,8 @@ class FakePostgREST:
                 if name in SITE_TABLES:
                     for r in seeded:  # column default (0005_sites.sql)
                         r.setdefault("site_id", DEFAULT_SITE_ID)
+                for r in seeded:  # 0011/0012 one-shot backfill
+                    _apply_seed_backfill(name, r)
                 self.tables[name] = seeded
         self.lock = threading.Lock()
         self.requests: list[tuple[str, str]] = []  # (method, path) audit log
@@ -1615,7 +1668,8 @@ class FakePostgREST:
         hi = _ts(args.get("p_to")) or _now()
         lo = _ts(args.get("p_from")) or (hi - timedelta(days=90))
         findings = {f["id"]: f for f in self.tables["maintenance_findings"]
-                    if f.get("site_id") == site
+                    if f.get("id") is not None
+                    and f.get("site_id") == site
                     and lo <= (_ts(f.get("created_at")) or hi) <= hi}
         scored = [(findings[r["finding_id"]], r)
                   for r in self.tables["maintenance_feedback"]
@@ -2424,7 +2478,23 @@ class _Handler(BaseHTTPRequestHandler):
                 "message": f"Could not find the function public.{fn} in the "
                            "schema cache", "code": "PGRST202"})
         ident = self.fake.identity(self.headers)
-        with self.fake.lock:
-            self.fake.requests.append(("POST", self.path))
-            status, payload = getattr(self.fake, method)(ident, args)
+        try:
+            with self.fake.lock:
+                self.fake.requests.append(("POST", self.path))
+                status, payload = getattr(self.fake, method)(ident, args)
+        except Exception as exc:  # noqa: BLE001 - see below
+            # A handler that raises would otherwise propagate out of
+            # BaseHTTPRequestHandler, drop the socket, and reach the caller
+            # as an opaque ``RemoteProtocolError: Server disconnected`` with
+            # the real traceback buried in stderr. Real PostgREST answers a
+            # failing function with a JSON error, so do that: the offending
+            # RPC and exception are named in the body where the failing
+            # assertion can print them.
+            return self._reply(500, {
+                "message": f"{fn}: fake handler raised "
+                           f"{type(exc).__name__}: {exc}",
+                "hint": "This is a bug in e2e/fakerest.py, or a seeded row "
+                        "missing a column the real schema declares NOT NULL "
+                        "(see docs/FEATURE-CONTRACTS.md).",
+                "code": "XX000"})
         self._reply(status, payload)

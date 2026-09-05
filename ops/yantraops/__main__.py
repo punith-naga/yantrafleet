@@ -11,12 +11,16 @@
     python -m yantraops migrate --db-url URL     # apply supabase/*.sql
     python -m yantraops audit-security           # backend/RLS security audit
     python -m yantraops grant-role --db-url URL --email you@x.com --role admin
+    python -m yantraops sandbox-mint --origin marketing   # zero-signup demo
+    python -m yantraops sandbox-list                      # what's live here
+    python -m yantraops sandbox-reap                      # cron: purge expired
 """
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 from .orchestrator import (DEFAULT_STATE_FILE, FleetStack,
                            preflight_supabase_schema, resolve_supabase)
@@ -121,7 +125,92 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"site_id to grant the role at (default: {DEFAULT_SITE}"
                          "; an admin role at any site is global — see "
                          "docs/SECURITY.md)")
+
+    add_sandbox_parsers(sub)
     return p
+
+
+def add_sandbox_parsers(sub: Any) -> None:
+    """``sandbox-mint|list|reap|drive`` — the zero-signup live demo (0009)."""
+    from .sandbox import (DEFAULT_CONSOLE_URL, DEFAULT_MAX_LIVE,
+                          DEFAULT_STATE_PATH)
+
+    def backend(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--url", default=None,
+                            help="Supabase/PostgREST URL (or env SUPABASE_URL)")
+        parser.add_argument("--key", default=None,
+                            help="API key (or env SUPABASE_KEY). sandbox-mint "
+                                 "needs only the anon key — the sandbox is "
+                                 "anon by design; sandbox-reap/--remote need "
+                                 "the service key (or an admin session)")
+        parser.add_argument("--state-file", type=Path, default=None,
+                            metavar="PATH",
+                            help="per-box registry of live sandboxes "
+                                 f"(default {DEFAULT_STATE_PATH}, env "
+                                 "YANTRAOPS_SANDBOX_STATE); it records site "
+                                 "ids and pids, never tokens")
+        parser.add_argument("--json", action="store_true", dest="json_output",
+                            help="machine-readable output")
+
+    mint = sub.add_parser(
+        "sandbox-mint",
+        help="mint a throwaway demo sandbox: ephemeral site + token, a seeded "
+             "fleet with history, and a simulator scoped to it")
+    backend(mint)
+    mint.add_argument("--ttl", type=int, default=None, metavar="MIN",
+                      help="requested lifetime in minutes (clamped by "
+                           "demo_limits.ttl_minutes; default: the server's)")
+    mint.add_argument("--robots", type=int, default=6, metavar="N",
+                      help="robots to seed (clamped by "
+                           "demo_limits.max_seed_robots; default 6)")
+    mint.add_argument("--origin", default=None,
+                      help="coarse marker recorded on the session, e.g. "
+                           "'marketing'")
+    mint.add_argument("--console", default=None, metavar="URL",
+                      help="console base for the printed link (env "
+                           f"YANTRA_CONSOLE_URL, default {DEFAULT_CONSOLE_URL})")
+    mint.add_argument("--max-live", type=int, default=None, metavar="N",
+                      help="ceiling on concurrent sandboxes ON THIS BOX "
+                           f"(default {DEFAULT_MAX_LIVE}, env "
+                           "YANTRAOPS_SANDBOX_MAX); exits 3 when hit")
+    mint.add_argument("--no-sim", action="store_true",
+                      help="mint and seed but do not start a simulator")
+    mint.add_argument("--no-history", action="store_true",
+                      help="skip the telemetry/incident/mission backfill")
+    mint.add_argument("--sim-interval", type=float, default=2.0, metavar="S",
+                      help="simulator tick interval seconds (default 2)")
+
+    lst = sub.add_parser(
+        "sandbox-list", help="list the demo sandboxes running on this box")
+    backend(lst)
+    lst.add_argument("--remote", action="store_true",
+                     help="also call admin_list_demo_sessions (needs admin or "
+                          "the service key)")
+    lst.add_argument("--max-live", type=int, default=None, metavar="N",
+                     help="ceiling to report (default: env/built-in)")
+
+    reap = sub.add_parser(
+        "sandbox-reap",
+        help="purge every expired sandbox (rows + simulator). Idempotent — "
+             "safe to run from cron every minute")
+    backend(reap)
+    reap.add_argument("--grace", type=int, default=0, metavar="MIN",
+                      help="extra minutes past expiry before purging "
+                           "(default 0)")
+
+    drive = sub.add_parser(
+        "sandbox-drive",
+        help="internal: move one sandbox's fleet (spawned by sandbox-mint; "
+             "reads the demo token from $YANTRAOPS_DEMO_TOKEN)")
+    drive.add_argument("--url", default=None)
+    drive.add_argument("--key", default=None)
+    drive.add_argument("--site", required=True, metavar="DEMO-XXXX")
+    drive.add_argument("--robots", type=int, default=6)
+    drive.add_argument("--interval", type=float, default=2.0)
+    drive.add_argument("--until", default=None, metavar="ISO8601",
+                       help="stop at this timestamp (the session's expiry)")
+    drive.add_argument("--ticks", type=int, default=0,
+                       help="stop after N ticks (0 = until --until/SIGTERM)")
 
 
 MIGRATE_CMD = ('python -m yantraops migrate --db-url '
@@ -209,7 +298,38 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "grant-role":
         from .grant_role import run_grant_role
         return run_grant_role(args.db_url, args.email, args.role, args.site)
+    if args.command.startswith("sandbox-"):
+        return cmd_sandbox(args)
     return run_status(args.state_file)
+
+
+def cmd_sandbox(args: argparse.Namespace) -> int:
+    """Dispatch the four ``sandbox-*`` subcommands (see sandbox.py)."""
+    from . import sandbox as sb
+    try:
+        base_url, key = resolve_supabase(args.url, args.key)
+    except RuntimeError as exc:
+        print(f"yantraops: {exc}", file=sys.stderr)
+        return sb.EXIT_ERROR
+    if args.command == "sandbox-mint":
+        return sb.run_sandbox_mint(
+            base_url, key, ttl=args.ttl, robots=args.robots,
+            origin=args.origin, console=args.console, max_live=args.max_live,
+            sim=not args.no_sim, interval=args.sim_interval,
+            history=not args.no_history, state_file=args.state_file,
+            json_output=args.json_output)
+    if args.command == "sandbox-list":
+        return sb.run_sandbox_list(
+            base_url, key, state_file=args.state_file,
+            json_output=args.json_output, remote=args.remote,
+            max_live=args.max_live)
+    if args.command == "sandbox-reap":
+        return sb.run_sandbox_reap(
+            base_url, key, grace=args.grace, state_file=args.state_file,
+            json_output=args.json_output)
+    return sb.run_sandbox_drive(
+        base_url, key, args.site, robots=args.robots,
+        interval=args.interval, until=args.until, ticks=args.ticks)
 
 
 if __name__ == "__main__":
