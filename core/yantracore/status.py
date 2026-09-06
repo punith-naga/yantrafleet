@@ -1,4 +1,4 @@
-"""Canonical robot-status vocabulary for every YantraFleet component.
+"""Canonical robot-status vocabulary for every Yantrika component.
 
 v0.1 shipped with three diverging vocabularies (sim: working/moving/
 safety_stop, connector: estop/active, console: fault/paused/...). v0.2

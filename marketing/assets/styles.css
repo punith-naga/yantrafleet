@@ -1,5 +1,5 @@
 /* ================================================================
-   YantraFleet MARKETING SITE — shared stylesheet
+   Yantrika MARKETING SITE — shared stylesheet
    ================================================================
    Plain hand-written CSS, no build step, no framework. Shared across
    every page in marketing/ so the nav/footer/typography stay in sync
@@ -61,7 +61,7 @@ hr.rule{border:none; border-top:1px solid var(--border); margin:0}
 header.site{position:sticky; top:0; z-index:20; background:rgba(251,250,247,.92); backdrop-filter:blur(6px); border-bottom:1px solid var(--border)}
 header.site .bar{display:flex; align-items:center; gap:20px; padding:14px 0}
 .brand{display:flex; align-items:center; gap:9px; font-weight:800; font-size:16.5px; color:var(--ink)}
-.brand .mark{width:26px; height:26px; border-radius:7px; background:linear-gradient(135deg,#2563c9,#0d8a4f); display:grid; place-items:center; font-size:12px; color:#fff}
+.brand .mark{width:26px; height:26px; display:block; flex:none}
 /* gap was 22px with eight nav items; the VDA 5050 Test link makes nine and
    the row wraps at --maxw unless the gutters come in a little. */
 nav.top{margin-left:auto; display:flex; align-items:center; gap:16px; font-size:14px}

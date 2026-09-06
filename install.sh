@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# YantraFleet one-shot installer for Linux/macOS.
+# Yantrika one-shot installer for Linux/macOS.
 #
 #   bash install.sh          # create .venv, install everything editable
 #   bash install.sh --run    # ... then start the loopback demo immediately
@@ -30,7 +30,7 @@ for cand in python3.13 python3.12 python3.11 python3.10 python3 python; do
     fi
 done
 [ -n "$PY" ] || fail "no Python >= 3.10 found on PATH.
-YantraFleet needs Python 3.10 or newer. Install it via your package manager
+Yantrika needs Python 3.10 or newer. Install it via your package manager
 (e.g. 'sudo apt install python3', 'brew install python@3.12') or from
 https://www.python.org/downloads/ and re-run this script."
 say "using $("$PY" --version 2>&1) at $PY"
@@ -54,7 +54,7 @@ fi
 say "upgrading pip"
 "$VPY" -m pip install --quiet --upgrade pip
 
-say "installing YantraFleet packages (editable)"
+say "installing Yantrika packages (editable)"
 "$VPY" -m pip install --quiet \
     -e "$REPO_ROOT/core" \
     -e "$REPO_ROOT/sim" \
@@ -81,7 +81,7 @@ say "verifying: python -m yantraops --help"
 cat <<EOF
 
 ============================================================
- YantraFleet installed.
+ Yantrika installed.
 
  Start the full loopback demo (no cloud, no keys) with:
 

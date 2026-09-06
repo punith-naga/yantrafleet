@@ -1,7 +1,7 @@
-# supabase/ — schema migrations for YantraFleet
+# supabase/ — schema migrations for Yantrika
 
 Ordered, idempotent SQL files. Apply them **in filename order** to a fresh
-Supabase project and every YantraFleet component (sim, detector, notifier,
+Supabase project and every Yantrika component (sim, detector, notifier,
 copilot, console) can talk to it.
 
 ## Migration order + modes

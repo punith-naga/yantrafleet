@@ -1,19 +1,20 @@
 """Live settings sync: poll ``public.app_settings``, env var as fallback.
 
 Design principle: the env var stays the fallback default forever. A
-deployment that never touches the admin settings panel — including every
-existing test — behaves byte-for-byte like today: ``_overrides`` simply
-stays empty, including against a project that has not even run
+deployment that never touches the admin settings panel — including
+every existing test — behaves byte-for-byte like today: ``_overrides``
+simply stays empty, including against a project that has not even run
 ``supabase/0008_app_settings.sql`` (the poll fails, is logged at debug,
 and ``_overrides`` is left exactly as it was).
 
-Construction never touches the network — it only stores config and builds
-an inert ``httpx.Client`` (constructing a client performs no I/O). Only
-``.start()`` spawns the background thread and does the first blocking
-fetch. This is what lets every existing copilot test keep constructing
-apps/services without a ``settings_sync`` at all: :func:`sarathi.app.create_app`
-gives them a real-but-never-started ``SettingsSync`` whose ``.get(key)``
-degrades to a plain ``os.environ.get(key)`` forever.
+Construction never touches the network — it only stores config and, when
+no client is injected, builds one via ``yantracore.runtime_config.TablePoller``
+(constructing a client performs no I/O). Only ``.start()`` spawns the
+background thread and does the first blocking fetch. This is what lets
+every existing copilot test keep constructing apps/services without a
+``settings_sync`` at all: :func:`sarathi.app.create_app` gives them a
+real-but-never-started ``SettingsSync`` whose ``.get(key)`` degrades to a
+plain ``os.environ.get(key)`` forever.
 
 ``os.environ`` mirroring (``GEMINI_API_KEY``-specific reason): ``litellm``
 reads its provider API key straight out of ``os.environ`` inside
@@ -25,6 +26,16 @@ poll recomputes every tracked env var from an immutable snapshot taken at
 construction time (never incrementally overwritten), so clearing a panel
 value correctly restores the original deploy-time env var instead of
 leaving a stale override behind.
+
+The actual HTTP fetch (build the PostgREST querystring, parse the JSON,
+degrade quietly on any failure) is NOT reimplemented here — it is
+``yantracore.runtime_config.TablePoller``, the same mechanism
+``notifier/yantranotify/settings_sync.py`` and every ``app_config``
+(non-secret runtime tunables) call site use. This class only adds what's
+specific to *this* table: the fixed ``SETTINGS_KEYS`` tuple, the
+``os.environ`` mirroring, and its own dedicated background thread (kept
+as its own attribute, not delegated, so ``.start()``/``.stop()`` can run
+the mirroring step after every poll — see ``poll_once()`` below).
 """
 from __future__ import annotations
 
@@ -32,6 +43,8 @@ import logging
 import os
 import threading
 from typing import Iterable
+
+from yantracore.runtime_config import TablePoller
 
 log = logging.getLogger("sarathi")
 
@@ -65,21 +78,10 @@ class SettingsSync:
             k: os.environ.get(k) for k in self._keys
         }
         self._overrides: dict[str, str] = {}
-        self._own_client = client is None
-        if client is not None:
-            self._client = client
-        else:
-            import httpx  # local import keeps offline installs light
-
-            self._client = httpx.Client(
-                base_url=f"{supabase_url.rstrip('/')}/rest/v1",
-                headers={
-                    "apikey": supabase_key,
-                    "Authorization": f"Bearer {supabase_key}",
-                    "Accept": "application/json",
-                },
-                timeout=10.0,
-            )
+        self._poller = TablePoller(
+            supabase_url, supabase_key, table="app_settings",
+            keys=self._keys, interval_s=interval_s, client=client,
+        )
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
@@ -91,38 +93,10 @@ class SettingsSync:
     # -- polling ---------------------------------------------------------------
 
     def poll_once(self) -> None:
-        """Unconditional fetch; never raises.
-
-        Any failure — network, 404 because 0008 isn't applied yet,
-        RLS/table missing, timeout, malformed payload — is caught and
-        logged at debug; ``_overrides`` is left exactly as it was. This is
-        exactly how "a deployment with nothing configured behaves like
-        today" is satisfied.
-        """
-        try:
-            key_list = ",".join(self._keys)
-            resp = self._client.get(
-                "/app_settings",
-                params=[("select", "key,value"), ("key", f"in.({key_list})")],
-            )
-            if resp.status_code >= 400:
-                raise RuntimeError(
-                    f"app_settings poll: HTTP {resp.status_code}: {resp.text[:200]}"
-                )
-            rows = resp.json()
-            if not isinstance(rows, list):
-                raise ValueError(f"unexpected app_settings payload: {rows!r}")
-            overrides = {
-                row["key"]: row["value"]
-                for row in rows
-                if isinstance(row, dict)
-                and row.get("key") in self._keys
-                and row.get("value")
-            }
-        except Exception as exc:  # network, 404, RLS, malformed — degrade quietly
-            log.debug("settings poll failed (using env fallback): %s", exc)
-            return
-        self._overrides = overrides
+        """Unconditional fetch (delegated to the shared TablePoller);
+        never raises. See ``TablePoller.poll_once`` for the degrade-
+        quietly behaviour on any failure."""
+        self._overrides = self._poller.poll_once()
         if self._mirror_to_environ:
             self._sync_environ()
 
@@ -161,5 +135,4 @@ class SettingsSync:
         if self._thread is not None:
             self._thread.join(timeout=self._interval_s + 1.0)
             self._thread = None
-        if self._own_client:
-            self._client.close()
+        self._poller.close()

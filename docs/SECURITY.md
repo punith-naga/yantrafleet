@@ -1,6 +1,6 @@
-# YantraFleet security: demo, hardened, and RBAC modes
+# Yantrika security: demo, hardened, and RBAC modes
 
-YantraFleet ships demo-open on purpose — one shared Supabase project,
+Yantrika ships demo-open on purpose — one shared Supabase project,
 one client-safe key, zero setup. This page explains what that means,
 and the two opt-in lockdown levels for real deployments.
 

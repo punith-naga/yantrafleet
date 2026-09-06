@@ -1,5 +1,5 @@
 [Unit]
-Description=YantraFleet copilot API (sarathi via uvicorn on 127.0.0.1:8001)
+Description=Yantrika copilot API (sarathi via uvicorn on 127.0.0.1:8001)
 After=network-online.target
 Wants=network-online.target
 

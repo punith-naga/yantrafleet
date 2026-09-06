@@ -1,4 +1,4 @@
-# YantraFleet marketing site
+# Yantrika marketing site
 
 The public site: a landing page whose primary call to action starts a live
 fleet with no signup, a deep page on the free VDA 5050 conformance tester,
@@ -97,13 +97,15 @@ verbatim. The conformance tester's own 188 tests are quoted separately
 because they are a separate suite (`tools/conformance/tests`) that
 `TEST-REPORT.md` does not yet count.
 
-## Before this goes live: two placeholders to replace
+## Two placeholders — resolved
 
-Both are used consistently across every file listed below, so a find-and-
-replace across `marketing/` catches all of it. Run the two commands at the
-end of this section and then verify with the grep in "Check your work".
+Both used to be placeholders (`https://yantrafleet.example.com` and
+`https://github.com/YOUR_GITHUB_USERNAME/yantrafleet`), consistently across
+every file listed below. Both have since been replaced with the real values
+below; this section is kept as a record of where each one lives and as the
+regression check in "Check your work".
 
-### 1. The domain — `https://yantrafleet.example.com`
+### 1. The domain — `https://yantrika.ai`
 
 | File | Tags / lines carrying it |
 |---|---|
@@ -128,10 +130,11 @@ site URL into every report it generates:
 there as well or every report you hand a vendor links to somebody else's
 site.
 
-### 2. The GitHub repository URL — `https://github.com/YOUR_GITHUB_USERNAME/yantrafleet`
+### 2. The GitHub repository URL — `https://github.com/yantrika-ai/yantrika`
 
-Same placeholder convention already used in `deploy/aws/user-data.sh` and
-`deploy/azure/custom-data.sh`. It appears in:
+Same placeholder convention also used in `deploy/aws/user-data.sh` and
+`deploy/azure/custom-data.sh` (their `REPO_URL=` default), both of which have
+been updated too. It appears in:
 
 | File | Where |
 |---|---|
@@ -141,14 +144,14 @@ Same placeholder convention already used in `deploy/aws/user-data.sh` and
 | `docs.html`, `get-involved.html`, `about.html`, `changelog.html` | additionally: the in-page links to `CONTRIBUTING.md`, `LICENSE`, `CHANGELOG.md`, `docker/`, `deploy/*/README.md` and issue templates, which point at GitHub precisely because nginx does not serve the repo root |
 | `assets/demo.js` | the fallback link shown when the live demo is unavailable |
 
-```bash
-# from marketing/, after you know your real values:
-grep -rl 'yantrafleet.example.com' . | xargs sed -i 's#https://yantrafleet.example.com#https://YOUR-REAL-DOMAIN#g'
-grep -rl 'YOUR_GITHUB_USERNAME' . | xargs sed -i 's#https://github.com/YOUR_GITHUB_USERNAME/yantrafleet#https://github.com/YOUR-ORG/YOUR-REPO#g'
+If either value ever needs to change again, from `marketing/`:
 
-# only if yantrika.ai is NOT your domain -- the links inside every
-# generated conformance report:
-sed -i 's#https://yantrika.ai#https://YOUR-REAL-DOMAIN#g' \
+```bash
+grep -rl 'https://yantrika.ai' . | xargs sed -i 's#https://yantrika\.ai#https://YOUR-NEW-DOMAIN#g'
+grep -rl 'github.com/yantrika-ai/yantrika' . | xargs sed -i 's#github\.com/yantrika-ai/yantrika#github.com/YOUR-ORG/YOUR-REPO#g'
+
+# and, if the domain changes, the links inside every generated conformance report:
+sed -i 's#https://yantrika\.ai#https://YOUR-NEW-DOMAIN#g' \
     ../tools/conformance/yantraconform/report_html.py
 ```
 

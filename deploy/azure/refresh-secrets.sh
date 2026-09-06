@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# YantraFleet - manual secrets refresh for an Azure VM deployed with
+# Yantrika - manual secrets refresh for an Azure VM deployed with
 # USE_KEYVAULT=true.
 #
 # custom-data.sh installs this to /opt/yantrafleet/refresh-secrets.sh on

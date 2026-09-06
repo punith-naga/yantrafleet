@@ -1,4 +1,4 @@
-# YantraFleet one-shot installer for Windows (PowerShell 5.1+).
+# Yantrika one-shot installer for Windows (PowerShell 5.1+).
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1        # install only
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Run   # ... then start the demo
@@ -78,7 +78,7 @@ if (-not $PyExe) {
 }
 
 if (-not $PyExe) {
-    Fail ("no Python 3.10+ found. YantraFleet needs Python 3.10 or newer.`n" +
+    Fail ("no Python 3.10+ found. Yantrika needs Python 3.10 or newer.`n" +
           "Download it from https://www.python.org/downloads/windows/ " +
           "(check 'Add python.exe to PATH' in the installer), then re-run:`n" +
           "  powershell -ExecutionPolicy Bypass -File install.ps1")
@@ -110,7 +110,7 @@ Say "upgrading pip"
 & $VenvPy -m pip install --quiet --upgrade pip
 if ($LASTEXITCODE -ne 0) { Fail "pip upgrade failed" }
 
-Say "installing YantraFleet packages (editable)"
+Say "installing Yantrika packages (editable)"
 & $VenvPy -m pip install --quiet `
     -e (Join-Path $RepoRoot "core") `
     -e (Join-Path $RepoRoot "sim") `
@@ -140,7 +140,7 @@ try { & $VenvPy -m yantraops doctor 2>$null | Out-Null } catch { }
 # ---------------------------------------------------------------------------
 Write-Host ""
 Write-Host "============================================================"
-Write-Host " YantraFleet installed."
+Write-Host " Yantrika installed."
 Write-Host ""
 Write-Host " Start the full loopback demo (no cloud, no keys) with:"
 Write-Host ""

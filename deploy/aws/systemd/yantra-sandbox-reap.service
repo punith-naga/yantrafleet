@@ -23,7 +23,7 @@
 # that stops orphaned simulator processes.
 
 [Unit]
-Description=YantraFleet demo sandbox reaper (purge expired sandboxes)
+Description=Yantrika demo sandbox reaper (purge expired sandboxes)
 After=network-online.target
 Wants=network-online.target
 

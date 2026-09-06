@@ -14,7 +14,7 @@ fail() { printf 'FAIL  %s\n' "$*" >&2; FAILS=$((FAILS + 1)); }
 # ---------------------------------------------------------------------------
 # 1) bash -n every shell script in the kit (+ the installer user-data calls)
 # ---------------------------------------------------------------------------
-for script in "$HERE/user-data.sh" "$HERE/validate.sh" "$REPO_ROOT/install.sh"; do
+for script in "$HERE/user-data.sh" "$HERE/validate.sh" "$HERE/enable-demo.sh" "$REPO_ROOT/install.sh"; do
     if bash -n "$script"; then
         pass "bash -n ${script#"$REPO_ROOT"/}"
     else

@@ -103,9 +103,9 @@ def _slack_event(event: Event) -> dict:
     header = f"{_emoji(event.sev)} {event.sev.upper()} {noun} — {event.id}"
     body = event.msg or event.text
     if event.kind == "incident":
-        context = f"YantraFleet · incident `{event.id}` · state Open"
+        context = f"Yantrika · incident `{event.id}` · state Open"
     else:
-        context = f"YantraFleet · alert `{event.id}` · unacknowledged"
+        context = f"Yantrika · alert `{event.id}` · unacknowledged"
     blocks: list[dict] = [
         {"type": "header",
          "text": {"type": "plain_text", "text": header, "emoji": True}},
@@ -135,7 +135,7 @@ def _discord_event(event: Event) -> dict:
         "description": event.msg or event.text,
         "color": _color(event.sev),
         "fields": fields,
-        "footer": {"text": "YantraFleet"},
+        "footer": {"text": "Yantrika"},
     }
     return {"embeds": [embed]}
 
@@ -147,7 +147,7 @@ def _discord_event(event: Event) -> dict:
 def _digest_head(events: Sequence[Event]) -> str:
     alerts = sum(1 for e in events if e.kind == "alert")
     incidents = sum(1 for e in events if e.kind == "incident")
-    return (f"YantraFleet digest: {len(events)} new notifications "
+    return (f"Yantrika digest: {len(events)} new notifications "
             f"({alerts} alerts, {incidents} incidents)")
 
 
@@ -179,7 +179,7 @@ def _slack_digest(events: Sequence[Event]) -> dict:
     blocks: list[dict] = [
         {"type": "header",
          "text": {"type": "plain_text",
-                  "text": f":inbox_tray: YantraFleet digest — "
+                  "text": f":inbox_tray: Yantrika digest — "
                           f"{len(events)} new",
                   "emoji": True}},
     ]
@@ -213,7 +213,7 @@ def _discord_digest(events: Sequence[Event]) -> dict:
         "title": _digest_head(events),
         "color": _color(worst),
         "fields": fields,
-        "footer": {"text": "YantraFleet"},
+        "footer": {"text": "Yantrika"},
     }
     return {"embeds": [embed]}
 

@@ -4,7 +4,21 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from yantracore.site import stop_site_sync
+
 URL = "https://example.test"
+
+
+@pytest.fixture(autouse=True)
+def _clean_site_sync():
+    """yantranotify.__main__.run() starts a live YANTRA_SITE_ID sync
+    (yantracore.site.start_site_sync) on every call; without this, the
+    first test to run it would leave its SiteSync active (and its fake
+    client polling in a background thread) for every later test in this
+    session — see core/yantracore/site.py's module docstring."""
+    stop_site_sync()
+    yield
+    stop_site_sync()
 
 
 def alert_row(i: int, sev: str = "crit", ack: bool = False) -> dict:
@@ -29,6 +43,7 @@ class FakeRest:
     def __init__(self) -> None:
         self.alerts: list[dict] = []
         self.incidents: list[dict] = []
+        self.app_config: list[dict] = []
         self.requests: list[httpx.Request] = []
         self.webhook_posts: list[httpx.Request] = []
         self.twilio_posts: list[httpx.Request] = []
@@ -46,6 +61,8 @@ class FakeRest:
             return httpx.Response(200, json=self.alerts)
         if path.endswith("/incidents"):
             return httpx.Response(200, json=self.incidents)
+        if path.endswith("/app_config"):
+            return httpx.Response(200, json=self.app_config)
         return httpx.Response(404)
 
     def client(self) -> httpx.Client:

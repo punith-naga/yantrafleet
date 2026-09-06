@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet v0.2 migration — command queue with human approval
+-- Yantrika v0.2 migration — command queue with human approval
 -- + canonical robot-status vocabulary.
 -- Run AFTER fleetmind_schema.sql (0001). Idempotent.
 -- ============================================================

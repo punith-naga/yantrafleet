@@ -155,7 +155,7 @@ def classify_mode(probe: dict[str, Any]) -> str:
     """demo / hardened-read / rbac / no-schema — from the anon key's view."""
     if probe["read_status"] == 404 and probe["write_status"] == 404:
         # PostgREST 404 = relation does not exist: the project has no
-        # YantraFleet schema at all (migrations never applied). Distinct
+        # Yantrika schema at all (migrations never applied). Distinct
         # from RLS lockdown, which answers 200-empty/401/403.
         return "no-schema"
     if probe["write_status"] in (200, 201, 204):

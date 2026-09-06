@@ -34,11 +34,11 @@ YF_VERSION = _version_mod.__version__
 # ------------------------------------------------------------ version chip
 
 def test_version_chip_in_rail_foot(page: Page, academy_url: str) -> None:
-    """The rail footer carries the release chip 'YantraFleet v<x.y.z>'."""
+    """The rail footer carries the release chip 'Yantrika v<x.y.z>'."""
     page.goto(academy_url)
     chip = page.locator("#yf-version")
     expect(chip).to_be_visible()
-    expect(chip).to_have_text(f"YantraFleet v{YF_VERSION}")
+    expect(chip).to_have_text(f"Yantrika v{YF_VERSION}")
 
 
 # ------------------------------------------------------------ lesson search

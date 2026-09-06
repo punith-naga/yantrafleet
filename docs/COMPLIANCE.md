@@ -1,4 +1,4 @@
-# YantraFleet compliance mapping
+# Yantrika compliance mapping
 
 > **Linking note:** this page belongs next to
 > [`docs/SECURITY.md`](SECURITY.md) and should be linked from its intro
@@ -6,7 +6,7 @@
 > made here because SECURITY.md is being revised in a parallel change —
 > add the link there when it lands.
 
-**Scope, stated plainly.** YantraFleet is fleet *monitoring and
+**Scope, stated plainly.** Yantrika is fleet *monitoring and
 operations* tooling: it observes robots over VDA 5050, stores state in
 Postgres/Supabase, raises alarms, and routes human-approved commands
 back. It is **not** a safety controller, not a robot's safety system,
@@ -67,7 +67,7 @@ A.7 physical controls, supplier management, BC/DR (A.5.29/5.30).
 
 ## EU AI Act
 
-Position: YantraFleet is **operations/monitoring tooling with human
+Position: Yantrika is **operations/monitoring tooling with human
 oversight built in** — it surfaces state and recommendations; it does
 not autonomously control robots.
 
@@ -79,7 +79,7 @@ not autonomously control robots.
   retained. The copilot answers questions; it does not act.
 - **The platform is not the robot's safety system.** E-stop, field
   violation and safety-rated functions live in the robot/AGV per
-  ISO 3691-4 / vendor certification; YantraFleet only *reports*
+  ISO 3691-4 / vendor certification; Yantrika only *reports*
   `safetyState` (eStop, fieldViolation) from VDA 5050 messages. Do not
   wire an emergency stop path through this stack.
 - Risk-class determination for a concrete deployment (e.g. whether

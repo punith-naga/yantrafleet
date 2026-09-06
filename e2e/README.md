@@ -4,7 +4,7 @@ Suites in this directory: `test_e2e.py` (sim → gate → copilot story),
 `test_mqtt_e2e.py` (MQTT connector loop), `test_rbac_e2e.py`
 (rbac-0007 auth emulation — see below).
 
-Proves the whole YantraFleet stack **without Supabase**: a tiny in-process
+Proves the whole Yantrika stack **without Supabase**: a tiny in-process
 fake PostgREST (`fakerest.py`, stdlib `http.server` on a `127.0.0.1`
 ephemeral port, in-memory dict tables) stands in for the cloud, and the
 *real* transports talk genuine httpx to it over localhost sockets. No

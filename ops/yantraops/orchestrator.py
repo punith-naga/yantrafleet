@@ -1,4 +1,4 @@
-"""FleetStack: start/stop the whole YantraFleet demo as child processes.
+"""FleetStack: start/stop the whole Yantrika demo as child processes.
 
 Loopback mode (the default) starts the in-process fake PostgREST from
 ``e2e/fakerest.py`` first, then points every child at it via the
@@ -8,8 +8,15 @@ Loopback mode (the default) starts the in-process fake PostgREST from
 Children (start order; shutdown is the reverse):
 
 1. ``yantrasim --supabase``      — the 10-AMR fleet simulator
-2. ``yantradetect --interval N`` — incident detector
+2. ``yantradetect``              — incident detector
 3. ``yantranotify --dry-run``    — notifier (prints instead of sending)
+
+Each of the three above gets an explicit ``--interval`` flag ONLY when
+the matching ``up --sim-interval``/``--detect-interval``/
+``--notify-interval`` flag was actually given (v0.18.1); otherwise the
+flag is omitted so the child's own argparse default-or-live-app_config
+precedence decides (see each service's ``__main__.py``) — the whole
+point of the runtime config feature for the default startup path.
 4. ``uvicorn sarathi.app:app``   — the copilot API (skipped by --no-copilot)
 5. ``http.server``               — one static server on an ephemeral port,
    serving a tiny generated docroot that exposes the console at ``/``,
@@ -228,9 +235,9 @@ class FleetStack:
         copilot: bool = True,
         url: str | None = None,
         key: str | None = None,
-        sim_interval: float = 2.0,
-        detect_interval: float = 5.0,
-        notify_interval: float = 10.0,
+        sim_interval: float | None = None,
+        detect_interval: float | None = None,
+        notify_interval: float | None = None,
         state_file: Path | str | None = None,
         quiet: bool = False,
         verbose: bool = False,
@@ -310,19 +317,27 @@ class FleetStack:
                     self.broker = EmbeddedBroker()
                     mqtt_host, mqtt_port = self.broker.start()
 
+            # v0.18.1: --interval is only forwarded when the caller (an
+            # explicit `up --sim-interval`/etc flag) actually gave one;
+            # omitting it lets the child's own argparse default-or-live-
+            # app_config precedence take over (see yantrasim/yantradetect/
+            # yantranotify --main--.py) instead of the orchestrator's old
+            # behavior of ALWAYS forcing a concrete value, which defeated
+            # live config for the default `up` startup path.
             if self.sim:
                 if self.mqtt:
-                    spawn("yantrasim", [
+                    sim_cmd = [
                         py, "-m", "yantrasim", "--mqtt",
                         "--broker", str(mqtt_host), "--port", str(mqtt_port),
-                        "--interval", str(self.sim_interval),
-                    ])
+                    ]
                 else:
-                    spawn("yantrasim", [
+                    sim_cmd = [
                         py, "-m", "yantrasim", "--supabase",
                         "--url", base_url, "--key", key,
-                        "--interval", str(self.sim_interval),
-                    ])
+                    ]
+                if self.sim_interval is not None:
+                    sim_cmd += ["--interval", str(self.sim_interval)]
+                spawn("yantrasim", sim_cmd)
             if self.mqtt:
                 spawn("yantrabridge", [
                     py, "-m", "yantrabridge",
@@ -332,13 +347,14 @@ class FleetStack:
                     "--commands",
                     "--site", self.site,
                 ], url=f"mqtt://{mqtt_host}:{mqtt_port}")
-            spawn("yantradetect", [
-                py, "-m", "yantradetect", "--interval", str(self.detect_interval),
-            ])
-            spawn("yantranotify", [
-                py, "-m", "yantranotify", "--dry-run",
-                "--interval", str(self.notify_interval),
-            ])
+            detect_cmd = [py, "-m", "yantradetect"]
+            if self.detect_interval is not None:
+                detect_cmd += ["--interval", str(self.detect_interval)]
+            spawn("yantradetect", detect_cmd)
+            notify_cmd = [py, "-m", "yantranotify", "--dry-run"]
+            if self.notify_interval is not None:
+                notify_cmd += ["--interval", str(self.notify_interval)]
+            spawn("yantranotify", notify_cmd)
 
             copilot_url: str | None = None
             if self.copilot:
@@ -512,8 +528,18 @@ class FleetStack:
                     time.sleep(0.4)
         took = time.time() - started
         state = "READY" if (robots_ok and sarathi_ok) else "PARTIAL (still warming up)"
-        print(f"\n  \u2714 {state} in {took:.1f}s \u2014 open:  "
-              f"{self.info.console_url}\n", flush=True)
+        try:
+            print(f"\n  \u2714 {state} in {took:.1f}s \u2014 open:  "
+                  f"{self.info.console_url}\n", flush=True)
+        except UnicodeEncodeError:
+            # stdout redirected to a file/pipe on Windows without UTF-8
+            # (no PYTHONUTF8/PYTHONIOENCODING, legacy console codepage)
+            # can't encode \u2714/\u2014 \u2014 an ASCII fallback beats crashing
+            # cmd_up() before it ever reaches stack.stop(), which would
+            # otherwise orphan every spawned child (see git history/tests
+            # for the pre-existing failure this guards against).
+            print(f"\n  * {state} in {took:.1f}s -- open:  "
+                  f"{self.info.console_url}\n", flush=True)
         if self.open_browser and robots_ok:
             try:  # best-effort; headless/CI environments just skip
                 import webbrowser
@@ -534,7 +560,7 @@ class FleetStack:
         width = max([len("backend")] + [len(s.name) for s in self.services]) + 2
         lines = [
             "=" * 72,
-            f"YantraFleet {YF_VERSION} up — mode: {i.mode}",
+            f"Yantrika {YF_VERSION} up — mode: {i.mode}",
             "=" * 72,
             f"  {'backend':<{width}}{i.base_url}  (data API \u2014 not the UI; key: {key_label})",
         ]

@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0010 — EXPIRING READ-ONLY SHARE LINKS (OPT-IN).
+-- Yantrika 0010 — EXPIRING READ-ONLY SHARE LINKS (OPT-IN).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql — REQUIRES yf_has_role/yf_rank !!

@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0009 — EPHEMERAL DEMO SANDBOX (OPT-IN).
+-- Yantrika 0009 — EPHEMERAL DEMO SANDBOX (OPT-IN).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql — REQUIRES yf_has_role/yf_rank !!

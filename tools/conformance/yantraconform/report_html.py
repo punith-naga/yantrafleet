@@ -23,7 +23,7 @@ from .model import GRADE_BANDS, SEVERITY_WEIGHT
 #: where to get it, so it is not decoration.
 HOME_URL = "https://yantrika.ai/"
 TOOL_URL = "https://yantrika.ai/vda-5050-conformance-test.html"
-PROJECT = "YantraFleet"
+PROJECT = "Yantrika"
 VENDOR = "Yantrika"
 
 STATUS_LABEL = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "skip": "SKIP"}

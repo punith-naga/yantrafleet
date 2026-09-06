@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0013 — EXPLAINABLE PREDICTIVE MAINTENANCE (OPT-IN).
+-- Yantrika 0013 — EXPLAINABLE PREDICTIVE MAINTENANCE (OPT-IN).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql AND 0009_demo_sandbox.sql —    !!

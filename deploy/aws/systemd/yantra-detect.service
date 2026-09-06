@@ -1,5 +1,5 @@
 [Unit]
-Description=YantraFleet incident detector (yantradetect)
+Description=Yantrika incident detector (yantradetect)
 After=network-online.target
 Wants=network-online.target
 

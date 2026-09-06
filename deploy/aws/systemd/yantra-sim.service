@@ -3,7 +3,7 @@
 #   sudo systemctl enable --now yantra-sim
 
 [Unit]
-Description=YantraFleet demo fleet simulator (yantrasim, optional)
+Description=Yantrika demo fleet simulator (yantrasim, optional)
 After=network-online.target
 Wants=network-online.target
 

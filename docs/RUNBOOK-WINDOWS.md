@@ -1,4 +1,4 @@
-# YantraFleet — Windows runbook (PowerShell)
+# Yantrika — Windows runbook (PowerShell)
 
 Everything on this page is plain PowerShell from the repo root. No WSL, no
 Docker, no venv activation — the venv's `python.exe` is called by full path

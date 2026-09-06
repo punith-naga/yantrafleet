@@ -34,8 +34,8 @@ Every check names the clause it comes from and tells you what to change.
 Python 3.10 or newer. Nothing else.
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/yantrafleet.git
-cd yantrafleet
+git clone https://github.com/yantrika-ai/yantrika.git
+cd yantrika
 pip install -e "tools/conformance[mqtt]"
 ```
 
@@ -342,5 +342,5 @@ Where this tool and the specification disagree, the specification wins. Every
 check names its clause so a disagreement is a short conversation. Open an issue
 with the clause and the payload and the rule gets fixed.
 
-Part of [YantraFleet](https://yantrika.ai/) — open-source, multi-vendor AMR
+Part of [Yantrika](https://yantrika.ai/) — open-source, multi-vendor AMR
 fleet software. MIT licensed.

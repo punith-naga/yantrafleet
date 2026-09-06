@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0015 — SHAREABLE OPERATOR CERTIFICATION (OPT-IN).
+-- Yantrika 0015 — SHAREABLE OPERATOR CERTIFICATION (OPT-IN).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql — EXTENDS public.certificates  !!
@@ -142,7 +142,7 @@ begin
       -- Last resort: the local part of the email, never the domain, so a
       -- public certificate cannot disclose an employer.
       nullif(split_part(coalesce(v_email, ''), '@', 1), ''),
-      'YantraFleet operator');
+      'Yantrika operator');
   end if;
   if new.issued_for is null or length(btrim(new.issued_for)) = 0 then
     new.issued_for := new.track;
@@ -168,11 +168,11 @@ update public.certificates c
          nullif(btrim(coalesce(u.raw_user_meta_data ->> 'full_name', '')), ''),
          nullif(btrim(coalesce(u.raw_user_meta_data ->> 'name', '')), ''),
          nullif(split_part(coalesce(u.email, ''), '@', 1), ''),
-         'YantraFleet operator')
+         'Yantrika operator')
   from auth.users u
  where u.id = c.user_id and c.holder_name is null;
 update public.certificates
-   set holder_name = 'YantraFleet operator'
+   set holder_name = 'Yantrika operator'
  where holder_name is null;
 
 create index if not exists certificates_level

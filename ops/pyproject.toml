@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yantraops"
 version = "0.1.0"
-description = "One-command orchestrator for the YantraFleet demo stack"
+description = "One-command orchestrator for the Yantrika demo stack"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

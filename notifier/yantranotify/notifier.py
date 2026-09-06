@@ -31,7 +31,7 @@ def render_digest(events: Sequence[Event]) -> str:
     incidents = [e for e in events if e.kind == "incident"]
     crit = sum(1 for e in events if e.sev == "crit")
     head = (
-        f"YantraFleet digest: {len(events)} new notifications "
+        f"Yantrika digest: {len(events)} new notifications "
         f"({len(alerts)} alerts, {len(incidents)} incidents; {crit} crit)"
     )
     lines = [head] + [f"- {e.render()}" for e in events]

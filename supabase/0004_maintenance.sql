@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet v0.4 migration — predictive maintenance findings.
+-- Yantrika v0.4 migration — predictive maintenance findings.
 -- Run after 0003_telemetry.sql. Idempotent.
 -- Written by detector/yantradetect (python -m yantradetect --maintenance):
 -- deterministic text ids (MF-XXXX) make POST ... on_conflict=id retries

@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0017 — DEMO SANDBOX: ROBOT-SCOPED WRITES (SECURITY FIX).
+-- Yantrika 0017 — DEMO SANDBOX: ROBOT-SCOPED WRITES (SECURITY FIX).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN ONLY IF YOU APPLIED 0009_demo_sandbox.sql (OPT-IN) !!
@@ -201,7 +201,7 @@ end $mig$;
 -- missions.robots (a jsonb array of robot ids) is the fourth member of
 -- this family and is DELIBERATELY LEFT ALONE. The equivalent policy is
 -- written out in the commented block below; do not enable it before
--- fixing the writer, because YantraFleet's own demo sandbox violates it:
+-- fixing the writer, because Yantrika's own demo sandbox violates it:
 --
 --   ops/yantraops/sandbox.py builds its FleetSim first and renames the
 --   robots afterwards (`robot.robot_id = self.robot_id(i)`), but

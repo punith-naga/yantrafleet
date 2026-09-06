@@ -1,7 +1,7 @@
 # yantrabridge — VDA 5050 → Supabase connector
 
 Consumes **VDA 5050 v2.1 `state` messages** (live from MQTT, or replayed from
-a JSONL file) and translates them into the YantraFleet Supabase tables:
+a JSONL file) and translates them into the Yantrika Supabase tables:
 
 | Output | Table | Write mode |
 |---|---|---|

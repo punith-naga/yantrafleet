@@ -1,4 +1,4 @@
-"""yantrabridge — VDA 5050 v2.1 -> Supabase connector for YantraFleet.
+"""yantrabridge — VDA 5050 v2.1 -> Supabase connector for Yantrika.
 
 Consumes VDA 5050 ``state`` messages (from an MQTT broker via the optional
 paho-mqtt subscriber, or from a JSONL file for testing) and translates them

@@ -1,0 +1,13 @@
+<svg viewBox="0 0 300 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Yantrika — AMR Fleet Management">
+  <g transform="translate(0,0)">
+    <polygon points="32,6 54.5,19 54.5,45 32,58 9.5,45 9.5,19" fill="#2563c9"/>
+    <g fill="none" stroke="#ffffff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20,18 L32,32"/>
+      <path d="M44,18 L32,32"/>
+      <path d="M32,32 L32,48"/>
+    </g>
+    <circle cx="32" cy="50" r="3.4" fill="#22d3ee"/>
+  </g>
+  <text x="72" y="34" font-family="'Segoe UI', Inter, system-ui, sans-serif" font-weight="700" font-size="26" fill="#ffffff">Yantrika</text>
+  <text x="73" y="50" font-family="'Segoe UI', Inter, system-ui, sans-serif" font-weight="600" font-size="10.5" letter-spacing="1.5" fill="#94a3b8">AMR FLEET MANAGEMENT</text>
+</svg>

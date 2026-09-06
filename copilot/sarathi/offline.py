@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from .tools import Toolbox, ToolResult
 from .transport import TransportError
@@ -80,10 +80,28 @@ def classify_intent(question: str) -> tuple[str, dict[str, Any]]:
 class OfflineEngine:
     """Deterministic tier-3 answerer over a Toolbox."""
 
-    def __init__(self, toolbox_factory: Any, low_battery_threshold: float = 20.0) -> None:
+    def __init__(
+        self,
+        toolbox_factory: Any,
+        low_battery_threshold: float = 20.0,
+        low_battery_threshold_fn: Callable[[], float] | None = None,
+    ) -> None:
         # toolbox_factory: () -> Toolbox with a fresh (empty) log per request
         self._factory = toolbox_factory
-        self._low = low_battery_threshold
+        self._low_default = low_battery_threshold
+        # v0.18: when given, read live on every answer() instead of the
+        # value frozen at construction — same "live seam" shape as
+        # CopilotService._current_model() reading through settings_sync.
+        self._low_fn = low_battery_threshold_fn
+
+    @property
+    def _low(self) -> float:
+        if self._low_fn is not None:
+            try:
+                return float(self._low_fn())
+            except (TypeError, ValueError):
+                pass
+        return self._low_default
 
     def answer(self, question: str) -> OfflineAnswer:
         intent, slots = classify_intent(question)

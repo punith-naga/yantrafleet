@@ -1,4 +1,4 @@
-# YantraFleet — Test Report (v0.12.1)
+# Yantrika — Test Report (v0.12.1)
 
 | Suite | Tests |
 |---|---|
@@ -34,7 +34,7 @@ green". Fixed: the matrix now includes `detector`/`notifier`/`ops`; `e2e`
 and a `browser` job (pytest-playwright, matching how these suites are
 actually written — Python, not JS) were added. Wiring the browser suite
 into CI surfaced one real pre-existing bug in each of console's and
-academy's `test_polish.py`: both hardcoded `"YantraFleet v0.12.0"` as the
+academy's `test_polish.py`: both hardcoded `"Yantrika v0.12.0"` as the
 expected version-chip text, missed by the v0.12.1 single-sourcing release
 bump. Fixed by reading `core/yantracore/version.py` live instead of a
 literal, so this class of drift can't recur.

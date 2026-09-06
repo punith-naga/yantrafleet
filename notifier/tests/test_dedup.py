@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import httpx
+
 from yantranotify.notifier import Notifier
 from yantranotify.source import AlertSource
 
@@ -103,3 +105,30 @@ def test_source_all_sites_drops_site_filter(rest: FakeRest):
     source.fetch_events()
     for req in rest.requests:
         assert "site_id" not in req.url.params
+
+
+def test_source_site_filter_updates_live_without_recreating_source(
+    rest: FakeRest, monkeypatch,
+):
+    """v0.18.1: AlertSource.site is resolved fresh on every fetch_events()
+    call (a property, not a value cached in __init__), so a live
+    yantracore.site.start_site_sync() override reaches an ALREADY-
+    CONSTRUCTED source's next poll — the same object, no restart."""
+    from yantracore.site import start_site_sync, stop_site_sync
+
+    monkeypatch.delenv("YANTRA_SITE_ID", raising=False)
+    source = AlertSource(url=URL, key="k", client=rest.client())
+    source.fetch_events()
+    assert rest.requests[-1].url.params["site_id"] == "eq.BLR-DC1"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=[{"key": "YANTRA_SITE_ID", "value": "PNQ-WH7"}])
+
+    try:
+        start_site_sync(URL, "key",
+                        client=httpx.Client(transport=httpx.MockTransport(handler)))
+        source.fetch_events()
+        assert rest.requests[-1].url.params["site_id"] == "eq.PNQ-WH7"
+    finally:
+        stop_site_sync()

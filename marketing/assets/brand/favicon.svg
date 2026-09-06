@@ -1,0 +1,9 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Yantrika">
+  <polygon points="32,6 54.5,19 54.5,45 32,58 9.5,45 9.5,19" fill="#2563c9"/>
+  <g fill="none" stroke="#ffffff" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19,17 L32,32"/>
+    <path d="M45,17 L32,32"/>
+    <path d="M32,32 L32,49"/>
+  </g>
+  <circle cx="32" cy="51" r="4" fill="#22d3ee"/>
+</svg>

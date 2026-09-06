@@ -6,7 +6,7 @@
 #   sudo systemctl enable --now yantra-sandbox-reap.timer
 
 [Unit]
-Description=Run the YantraFleet demo sandbox reaper every minute
+Description=Run the Yantrika demo sandbox reaper every minute
 
 [Timer]
 OnBootSec=2min

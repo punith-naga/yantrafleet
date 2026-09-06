@@ -36,9 +36,9 @@ except Exception:  # yantracore not installed — standalone ops checkout
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="yantraops",
-        description="One-command orchestrator for the YantraFleet demo stack")
+        description="One-command orchestrator for the Yantrika demo stack")
     p.add_argument("--version", action="version",
-                   version=f"YantraFleet {YF_VERSION}")
+                   version=f"Yantrika {YF_VERSION}")
     sub = p.add_subparsers(dest="command", required=True)
 
     up = sub.add_parser("up", help="start the whole stack")
@@ -63,12 +63,23 @@ def build_parser() -> argparse.ArgumentParser:
                     help="exit cleanly after N seconds (default: run until Ctrl-C)")
     up.add_argument("--url", default=None, help="Supabase URL (supabase mode)")
     up.add_argument("--key", default=None, help="Supabase anon key (supabase mode)")
-    up.add_argument("--sim-interval", type=float, default=2.0,
-                    help="yantrasim tick interval seconds (default 2)")
-    up.add_argument("--detect-interval", type=float, default=5.0,
-                    help="yantradetect poll interval seconds (default 5)")
-    up.add_argument("--notify-interval", type=float, default=10.0,
-                    help="yantranotify poll interval seconds (default 10)")
+    up.add_argument("--sim-interval", type=float, default=None,
+                    help="yantrasim tick interval seconds — an explicit "
+                         "value here always wins; omit it to let the "
+                         "child pick up a live public.app_config "
+                         "SIM_INTERVAL, else its own hardcoded default (2)")
+    up.add_argument("--detect-interval", type=float, default=None,
+                    help="yantradetect poll interval seconds — an "
+                         "explicit value here always wins; omit it to "
+                         "let the child pick up a live public.app_config "
+                         "DETECTOR_INTERVAL, else its own hardcoded "
+                         "default (5)")
+    up.add_argument("--notify-interval", type=float, default=None,
+                    help="yantranotify poll interval seconds — an "
+                         "explicit value here always wins; omit it to "
+                         "let the child pick up a live public.app_config "
+                         "NOTIFIER_INTERVAL, else its own hardcoded "
+                         "default (10)")
     up.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE,
                     help=f"where to record ports/pids (default {DEFAULT_STATE_FILE})")
     up.add_argument("--no-open", action="store_true",

@@ -10,7 +10,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Callable
 
-# Client-safe defaults for the YantraFleet demo project.
+# Client-safe defaults for the Yantrika demo project.
 DEFAULT_SUPABASE_URL = "https://flwyvhsmgrrqpmhcqlzd.supabase.co"
 DEFAULT_SUPABASE_KEY = "sb_publishable_7rqvPRggmPDRKNL8Jurcqg_Hf531puf"
 

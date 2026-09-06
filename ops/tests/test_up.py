@@ -38,6 +38,14 @@ def _wait_for(predicate, deadline: float, interval: float = 0.4):
 def stack(tmp_path, monkeypatch):
     for var in LLM_ENV:
         monkeypatch.delenv(var, raising=False)
+    # v0.18.1: these are explicit overrides passed straight to the
+    # FleetStack API (the same thing an explicit `up --sim-interval`/etc
+    # flag would produce) — a genuine "I want to control timing" case,
+    # which the interval-precedence fix leaves untouched: an explicit
+    # value always wins and reaches the child's argv exactly as before.
+    # See test_up_omits_interval_flags_when_not_explicit below for the
+    # actual bug fix (the DEFAULT `up` path, with no override, no longer
+    # forces an --interval flag at all).
     st = FleetStack(
         loopback=True,
         sim_interval=0.25,       # scripted AMR-07 fault hits at sim tick 20
@@ -130,7 +138,7 @@ def test_up_duration_subprocess(tmp_path, monkeypatch):
     # v0.12: the banner header carries the release version between the
     # product name and 'up' — assert version-agnostically here (the exact
     # version is covered by ops/tests/test_version.py).
-    assert "YantraFleet" in out and "up — mode: loopback" in out
+    assert "Yantrika" in out and "up — mode: loopback" in out
     assert "console" in out and "?supa=" in out and "&key=" in out
     assert "--duration reached" in out
     # ephemeral ports only — the classic fixed demo ports must not appear
@@ -250,3 +258,116 @@ def test_static_server_argv_banner_and_state(tmp_path, monkeypatch):
     finally:
         stack.stop()
     assert stack.docroot is None, "temp docroot must be removed on stop()"
+
+
+# --------------------------------------------------------------------------
+# v0.18.1: --sim/--detect/--notify-interval precedence — an explicit `up`
+# flag always wins; omitting it must NOT force a concrete --interval onto
+# the child, or the child's own live app_config wiring never gets a chance
+# to run for the default `up` startup path (the bug this fixes).
+# --------------------------------------------------------------------------
+
+def _up_args(*extra: str):
+    from yantraops.__main__ import build_parser
+
+    return build_parser().parse_args(
+        ["up", "--loopback", "--no-copilot", *extra])
+
+
+def _stack_from_up_args(args, tmp_path) -> FleetStack:
+    return FleetStack(
+        loopback=not args.supabase, copilot=not args.no_copilot,
+        sim_interval=args.sim_interval, detect_interval=args.detect_interval,
+        notify_interval=args.notify_interval,
+        state_file=tmp_path / "state.json", quiet=True, open_browser=False,
+    )
+
+
+def _capture_argv(monkeypatch):
+    """Patch subprocess.Popen; return {module name: argv} once populated."""
+    from yantraops import orchestrator as orch
+
+    spawned: dict[str, list[str]] = {}
+
+    def fake_popen(cmd, **_kw):
+        name = cmd[2] if len(cmd) > 2 else cmd[0]  # "-m <name>" -> name
+        spawned[name] = list(cmd)
+        return _FakeProc()
+
+    monkeypatch.setattr(orch.subprocess, "Popen", fake_popen)
+    return spawned
+
+
+def test_up_omits_interval_flags_when_not_explicit(tmp_path, monkeypatch):
+    """No --sim/--detect/--notify-interval flag on `up` -> the child gets
+    NO --interval at all, letting its own argparse default-or-live-
+    app_config precedence (see yantrasim/yantradetect/yantranotify
+    --main--.py) decide. Before this fix, `up` always forced a hardcoded
+    interval here, defeating live config for the default startup path."""
+    args = _up_args()
+    assert args.sim_interval is None
+    assert args.detect_interval is None
+    assert args.notify_interval is None
+
+    spawned = _capture_argv(monkeypatch)
+    stack = _stack_from_up_args(args, tmp_path)
+    try:
+        stack.start()
+        for name in ("yantrasim", "yantradetect", "yantranotify"):
+            assert "--interval" not in spawned[name], (
+                f"{name} argv forced --interval with no explicit "
+                f"up-level flag: {spawned[name]}")
+    finally:
+        stack.stop()
+
+
+def test_up_explicit_interval_flags_propagate_to_children(tmp_path, monkeypatch):
+    """An explicit `up --sim-interval`/etc flag still wins and reaches the
+    child's argv exactly as before this fix."""
+    args = _up_args("--sim-interval", "0.5", "--detect-interval", "1.5",
+                    "--notify-interval", "3.5")
+    spawned = _capture_argv(monkeypatch)
+    stack = _stack_from_up_args(args, tmp_path)
+    try:
+        stack.start()
+        for name, expected in (("yantrasim", "0.5"), ("yantradetect", "1.5"),
+                               ("yantranotify", "3.5")):
+            argv = spawned[name]
+            assert argv[argv.index("--interval") + 1] == expected
+    finally:
+        stack.stop()
+
+
+def test_up_omitted_interval_argv_actually_honors_live_app_config(
+    tmp_path, monkeypatch,
+):
+    """End-to-end proof, not just an argv shape assertion: the exact argv
+    `up` hands yantrasim when --sim-interval is omitted (no --interval
+    flag at all, per the test above) still resolves to a live
+    public.app_config SIM_INTERVAL once yantrasim's own CLI parses it
+    against a backend that has one."""
+    args = _up_args()
+    spawned = _capture_argv(monkeypatch)
+    stack = _stack_from_up_args(args, tmp_path)
+    try:
+        stack.start()
+        sim_flags = spawned["yantrasim"][3:]  # drop [py, "-m", "yantrasim"]
+    finally:
+        stack.stop()
+    assert "--interval" not in sim_flags
+
+    import yantrasim.__main__ as sim_main
+
+    seen_sleep: list[float] = []
+    monkeypatch.setattr(sim_main.time, "sleep", lambda s: seen_sleep.append(s))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/app_config"):
+            return httpx.Response(
+                200, json=[{"key": "SIM_INTERVAL", "value": "0.3"}])
+        return httpx.Response(200, json=[])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    rc = sim_main.main(sim_flags + ["--ticks", "2"], client=client)
+    assert rc == 0
+    assert seen_sleep == [0.3]

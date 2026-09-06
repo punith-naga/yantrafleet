@@ -178,7 +178,7 @@ def test_ask_streams_grounded_answer(page: Page, academy_url: str) -> None:
     assert req["stream"] is True
     assert req["temperature"] == 0.2
     sys = req["messages"][0]["content"]
-    assert sys.startswith("You are Guru, the YantraFleet Academy tutor.")
+    assert sys.startswith("You are Guru, the Yantrika Academy tutor.")
     assert "Answer ONLY from the LESSON section" in sys
     assert "suggest asking Sarathi" in sys
     assert "LiDAR" in sys                     # pai-101 tutor_context made it in

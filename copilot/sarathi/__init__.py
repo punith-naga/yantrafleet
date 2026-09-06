@@ -1,4 +1,4 @@
-"""sarathi — YantraFleet ops copilot service.
+"""sarathi — Yantrika ops copilot service.
 
 A three-tier, evidence-grounded question-answering service for a robot fleet:
 

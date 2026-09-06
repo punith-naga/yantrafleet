@@ -1,7 +1,7 @@
 [project]
 name = "yantracore"
 version = "0.2.0"
-description = "Shared contracts (status vocabulary) for YantraFleet components"
+description = "Shared contracts (status vocabulary) for Yantrika components"
 requires-python = ">=3.10"
 
 [build-system]

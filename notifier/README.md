@@ -1,6 +1,6 @@
 # yantranotify — omnichannel alert notifier
 
-Polls the YantraFleet backend (PostgREST/Supabase) for **unacked
+Polls the Yantrika backend (PostgREST/Supabase) for **unacked
 `crit`/`serious` alerts** and **newly `Open` incidents**, and pushes
 human-readable notifications through pluggable channels:
 
@@ -60,7 +60,7 @@ dict, no I/O, trivially unit-testable.
 ## Slack webhook setup (walkthrough)
 
 1. Go to <https://api.slack.com/apps> → **Create New App** → *From
-   scratch*, name it (e.g. `YantraFleet`) and pick your workspace.
+   scratch*, name it (e.g. `Yantrika`) and pick your workspace.
 2. In the app's sidebar open **Incoming Webhooks** and toggle
    **Activate Incoming Webhooks** on.
 3. Click **Add New Webhook to Workspace**, choose the channel (e.g.

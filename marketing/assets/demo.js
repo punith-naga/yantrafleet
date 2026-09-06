@@ -1,5 +1,5 @@
 // ===========================================================================
-// YantraFleet marketing site — "Try it with a live fleet" button.
+// Yantrika marketing site — "Try it with a live fleet" button.
 //
 // PROGRESSIVE ENHANCEMENT, NOT THE FEATURE ITSELF.
 //
@@ -128,7 +128,7 @@
       note.innerHTML = "";
       note.appendChild(document.createTextNode(message + " "));
       var link = document.createElement("a");
-      link.href = "https://github.com/YOUR_GITHUB_USERNAME/yantrafleet";
+      link.href = "https://github.com/yantrika-ai/yantrika";
       link.textContent = "Run the whole thing locally in three commands";
       note.appendChild(link);
       note.appendChild(document.createTextNode(" — it needs no account either."));

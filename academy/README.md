@@ -1,4 +1,4 @@
-# YantraFleet Academy
+# Yantrika Academy
 
 Single-file learning app (`index.html`) — *learn Physical AI by operating a
 live fleet*. Same design language and zero-build philosophy as the console:

@@ -21,6 +21,8 @@ def make_client(robot_polls: list[list[dict]], requests: list[httpx.Request],
             return httpx.Response(200, json=snap)
         if request.method == "GET" and request.url.path.endswith("/incidents"):
             return httpx.Response(200, json=open_incidents or [])
+        if request.method == "GET" and request.url.path.endswith("/app_config"):
+            return httpx.Response(200, json=[])
         return httpx.Response(201)
 
     return httpx.Client(transport=httpx.MockTransport(handler))
@@ -30,10 +32,13 @@ FAULTED = [{"id": "AMR-02", "status": "fault", "fault_msg": "overtemp"}]
 
 
 def test_parser_defaults():
+    # v0.18: these flags default to None (not explicitly passed) so run()
+    # can prefer a live public.app_config value over the hardcoded
+    # default — see yantradetect.__main__.DEFAULT_* and resolve_value().
     args = build_parser().parse_args([])
-    assert args.interval == 5.0
+    assert args.interval is None
     assert not args.once and not args.dry_run
-    assert args.pending_polls == 2
+    assert args.pending_polls is None
 
 
 def test_once_polls_exactly_one_snapshot():
@@ -41,8 +46,13 @@ def test_once_polls_exactly_one_snapshot():
     client = make_client([FAULTED], requests)
     assert run(["--once", "--url", "https://x.test"], client=client) == 0
     gets = [r for r in requests if r.method == "GET"]
-    # one seed fetch (incidents) + one robots poll, no writes yet (flap guard)
-    assert [g.url.path.rsplit("/", 1)[-1] for g in gets] == ["incidents", "robots"]
+    # v0.18: one app_config fetch (live tuning) + one seed fetch
+    # (incidents) + one robots poll, no writes yet (flap guard).
+    # v0.18.1: a second, independent app_config fetch for the live
+    # YANTRA_SITE_ID sync (yantracore.site.start_site_sync) started
+    # alongside the tuning poller.
+    assert [g.url.path.rsplit("/", 1)[-1] for g in gets] == [
+        "app_config", "app_config", "incidents", "robots"]
     assert all(r.method == "GET" for r in requests)
 
 

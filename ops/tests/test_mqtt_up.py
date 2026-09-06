@@ -279,6 +279,24 @@ def test_mqtt_bridge_site_from_param_and_env(tmp_path, monkeypatch):
     assert flags[flags.index("--site") + 1] == "MAA-DC2"
 
 
+def test_mqtt_up_omits_interval_flag_when_not_explicit(tmp_path, monkeypatch):
+    """v0.18.1: in --mqtt mode too, no sim_interval override -> the
+    mqtt-mode yantrasim child gets NO --interval flag at all, letting its
+    own argparse default-or-live-app_config precedence decide (mirrors
+    ops/tests/test_up.py's --supabase-mode coverage of the same fix)."""
+    _, _, argvs = _start_stack_with_captured_argv(tmp_path, monkeypatch)
+    assert "--interval" not in argvs["yantrasim"]
+
+
+def test_mqtt_up_explicit_sim_interval_propagates(tmp_path, monkeypatch):
+    """An explicit sim_interval (what `up --sim-interval` produces) still
+    reaches the mqtt-mode yantrasim child's argv exactly as before."""
+    _, _, argvs = _start_stack_with_captured_argv(
+        tmp_path, monkeypatch, sim_interval=0.4)
+    argv = argvs["yantrasim"]
+    assert argv[argv.index("--interval") + 1] == "0.4"
+
+
 def test_no_sim_stack_skips_simulator(tmp_path, monkeypatch):
     """--no-sim: no yantrasim child; the bridge still points at the broker."""
     if not (PAHO_AVAILABLE and AMQTT_AVAILABLE):

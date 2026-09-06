@@ -33,10 +33,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any
 
-from yantrabridge.sink import SupabaseSink
+import httpx
+
+from yantrabridge.sink import DEFAULT_SUPABASE_KEY, DEFAULT_SUPABASE_URL, SupabaseSink
 from yantrabridge.sources import DEFAULT_STATE_TOPIC, MqttSource, read_jsonl
 from yantrabridge.translate import (
     BATTERY_ALERT_THRESHOLD,
@@ -54,7 +57,7 @@ def _print_rows(title: str, rows: list[dict[str, Any]]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="yantrabridge",
-        description="VDA 5050 v2.1 state -> Supabase connector (YantraFleet).",
+        description="VDA 5050 v2.1 state -> Supabase connector (Yantrika).",
     )
     src = p.add_argument_group("source")
     src.add_argument("--file", help="JSONL file of VDA 5050 state messages")
@@ -226,13 +229,55 @@ def run_file(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_mqtt(args: argparse.Namespace) -> int:
+#: v0.18: non-secret runtime tunables this service reads live from
+#: public.app_config (see supabase/0018_app_config.sql).
+CONFIG_KEYS = (
+    "CONNECTOR_BATTERY_THRESHOLD", "CONNECTOR_MQTT_HOST",
+    "CONNECTOR_MQTT_PORT", "CONNECTOR_MQTT_TOPIC",
+    "CONNECTOR_MQTT_USERNAME", "CONNECTOR_MQTT_PASSWORD",
+)
+CONFIG_POLL_INTERVAL_S = 30.0
+
+
+def run_mqtt(args: argparse.Namespace,
+            transport: httpx.BaseTransport | None = None,
+            stop_event: Any | None = None) -> int:
+    """Live MQTT bridge, optionally with live app_config wiring (v0.18).
+
+    ``transport`` is an injectable ``httpx.BaseTransport``
+    (``httpx.MockTransport``) used for both the Supabase writes (sink /
+    CommandPublisher, same convention as the rest of this module) and the
+    app_config poll below — tests exercise the whole thing offline.
+
+    ``stop_event`` (a ``threading.Event``) is an injectable substitute
+    for "wait for Ctrl-C": tests set it (immediately, or from another
+    thread after letting a poll or two run) instead of sending a real
+    SIGINT. Production leaves it ``None`` and gets a fresh Event that
+    nothing but KeyboardInterrupt ever sets.
+
+    Precedence for CONNECTOR_MQTT_HOST/PORT/TOPIC/USERNAME/PASSWORD and
+    CONNECTOR_BATTERY_THRESHOLD is DELIBERATELY inverted from every other
+    live-config wiring in this codebase: here, a live app_config value
+    (once one exists) always wins over the CLI flag/hardcoded default,
+    rather than the CLI flag pinning forever. That's because --mqtt-host
+    is structurally REQUIRED just to select MQTT mode at all (see main()
+    below) — treating "a CLI flag was given" as a permanent override
+    would make it impossible to ever move a running bridge to a
+    different broker from the admin console, which is the entire point
+    of this wiring. The CLI flags/hardcoded defaults still matter: they
+    are the value used at startup and whenever no app_config row exists
+    (or the migration isn't applied) — see resolve_value() calls below,
+    all with ``explicit=None``.
+    """
     import threading
+
+    from yantracore.runtime_config import TablePoller
+    from yantrabridge.mqtt_runtime import LiveMqttConfig, MqttConnectionManager
 
     translator = Translator(battery_threshold=args.battery_threshold)
     sink: SupabaseSink | None = None
     if not args.dry_run:
-        sink = SupabaseSink(args.supabase_url, args.supabase_key)
+        sink = SupabaseSink(args.supabase_url, args.supabase_key, transport=transport)
     publisher = None  # set below when --commands; on_state reads the closure
 
     def on_state(msg: dict[str, Any]) -> None:
@@ -264,15 +309,29 @@ def run_mqtt(args: argparse.Namespace) -> int:
             print(f"[{row['id']}] connection={msg.get('connectionState')} "
                   f"-> status={row['status']}")
 
-    source = MqttSource(
-        on_state,
-        host=args.mqtt_host,
-        port=args.mqtt_port,
-        topic=args.mqtt_topic,
-        on_connection=on_connection,
-        username=args.mqtt_username,
-        password=args.mqtt_password,
-    )
+    def build_source(params: dict[str, Any]) -> MqttSource:
+        return MqttSource(
+            on_state,
+            host=params["host"],
+            port=params["port"],
+            topic=params["topic"],
+            on_connection=on_connection,
+            username=params.get("username"),
+            password=params.get("password"),
+        )
+
+    initial_params = {
+        "host": args.mqtt_host, "port": args.mqtt_port,
+        "topic": args.mqtt_topic, "username": args.mqtt_username,
+        "password": args.mqtt_password,
+    }
+    manager = MqttConnectionManager(build_source, initial_params)
+
+    def _publish(topic: str, payload: str, qos: int = 0) -> None:
+        # Indirection so CommandPublisher survives a live reconnect —
+        # manager.source is read fresh on every publish, never bound to
+        # one specific (possibly torn-down) MqttSource instance.
+        manager.source.publish(topic, payload, qos=qos)
 
     stop_polling = threading.Event()
     poll_thread: threading.Thread | None = None
@@ -280,8 +339,8 @@ def run_mqtt(args: argparse.Namespace) -> int:
         from yantrabridge.commands import CommandPublisher
 
         publisher = CommandPublisher(
-            source.publish, args.supabase_url, args.supabase_key,
-            site=args.site)
+            _publish, args.supabase_url, args.supabase_key,
+            site=args.site, transport=transport)
 
         def _poll_loop() -> None:
             while not stop_polling.wait(args.commands_interval):
@@ -293,18 +352,56 @@ def run_mqtt(args: argparse.Namespace) -> int:
         print(f"command gate: polling approved commands every "
               f"{args.commands_interval}s -> instantActions")
 
+    resolved_url = (args.supabase_url or os.environ.get("SUPABASE_URL")
+                    or DEFAULT_SUPABASE_URL).rstrip("/")
+    resolved_key = (args.supabase_key or os.environ.get("SUPABASE_KEY")
+                    or DEFAULT_SUPABASE_KEY)
+    config_client = httpx.Client(transport=transport) if transport is not None else None
+    config = TablePoller(resolved_url, resolved_key, table="app_config",
+                         keys=CONFIG_KEYS, client=config_client)
+    config.poll_once()
+
+    live_config = LiveMqttConfig(
+        config, manager, translator.deduper,
+        defaults={
+            "mqtt_host": args.mqtt_host, "mqtt_port": args.mqtt_port,
+            "mqtt_topic": args.mqtt_topic, "mqtt_username": args.mqtt_username,
+            "mqtt_password": args.mqtt_password,
+            "battery_threshold": args.battery_threshold,
+        },
+    )
+
+    stop_config_poll = threading.Event()
+
+    def _config_poll_loop() -> None:
+        while not stop_config_poll.wait(CONFIG_POLL_INTERVAL_S):
+            live_config.poll_and_apply()
+
+    config_thread = threading.Thread(
+        target=_config_poll_loop, name="yantrabridge-config", daemon=True)
+    config_thread.start()
+
     print(f"connecting to mqtt://{args.mqtt_host}:{args.mqtt_port} "
           f"topic '{args.mqtt_topic}' (ctrl-c to stop)")
     try:
-        source.run_forever()
+        # manager already started the broker connection (non-blocking —
+        # paho runs its own network thread via loop_start()); the main
+        # thread just waits for Ctrl-C (or stop_event, in tests),
+        # mirroring run_forever()'s old blocking behaviour from the
+        # outside.
+        (stop_event or threading.Event()).wait()
     except KeyboardInterrupt:
-        source.stop()
+        pass
     finally:
+        stop_config_poll.set()
+        config_thread.join(timeout=5)
+        config.close()
         stop_polling.set()
         if poll_thread is not None:
             poll_thread.join(timeout=5)
         if publisher is not None:
             publisher.close()
+        manager.stop()
         if sink is not None:
             sink.close()
     return 0

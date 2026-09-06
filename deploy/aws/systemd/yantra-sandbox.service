@@ -22,7 +22,7 @@
 #   sudo systemctl enable --now yantra-sandbox yantra-sandbox-reap.timer
 
 [Unit]
-Description=YantraFleet zero-signup demo sandbox door (yantraops sandbox-serve)
+Description=Yantrika zero-signup demo sandbox door (yantraops sandbox-serve)
 After=network-online.target
 Wants=network-online.target
 

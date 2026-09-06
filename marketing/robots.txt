@@ -1,4 +1,4 @@
-# YantraFleet — https://yantrafleet.example.com
+# Yantrika — https://yantrika.ai
 #
 # The marketing site owns the bare host root; the console, the operator
 # academy and the docs site are served beside it out of the same nginx
@@ -29,4 +29,4 @@ Disallow: /api/
 Disallow: /console/
 Disallow: /academy/
 
-Sitemap: https://yantrafleet.example.com/sitemap.xml
+Sitemap: https://yantrika.ai/sitemap.xml

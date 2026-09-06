@@ -1,4 +1,4 @@
-"""Real-browser tests for the YantraFleet Academy (academy/index.html).
+"""Real-browser tests for the Yantrika Academy (academy/index.html).
 
 Fixture style mirrors console/tests/test_console.py (fixtures live in
 conftest.py): headless Chromium + the in-process fake PostgREST from

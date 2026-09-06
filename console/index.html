@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ================================================================
-  YantraFleet CONSOLE — FleetMind ops console + Sarathi copilot bridge
+  Yantrika CONSOLE — FleetMind ops console + Sarathi copilot bridge
   =================================================================
   CONFIG (all optional — the console degrades gracefully):
 
@@ -62,6 +62,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FleetMind — Fleet Operations (Live)</title>
+<link rel="icon" href="/assets/brand/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/brand/icon-mark.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/brand/icon-180.png">
 <style>
 /* ============ Design tokens (dark ops console — deliberate single-theme, ISA-101) ============ */
 :root{
@@ -71,6 +74,10 @@
   --grid:#2c2c2a; --axis:#383835;
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;   /* categorical, dark-stepped */
   --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  /* --crit is tuned for white-on-red fills (badges/dots/bars) — 4.8:1 there.
+     Red TEXT directly on --surface/--page needs a lighter step to clear
+     WCAG AA's 4.5:1 (--crit alone measures 3.6:1 as foreground text). */
+  --crit-text:#e85555;
   --accent:#3987e5;
   --r:8px; --r-sm:6px;
   --font:system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -132,7 +139,7 @@ main{overflow:hidden;position:relative;display:flex}
 .stat .val small{font-size:13px;color:var(--muted);font-weight:500}
 .stat .lbl{font-size:12px;color:var(--muted);margin-top:2px}
 .stat .delta{font-size:11.5px;margin-top:6px;display:flex;align-items:center;gap:5px}
-.up{color:#0ca30c}.down{color:var(--crit)}.flat{color:var(--muted)}
+.up{color:#0ca30c}.down{color:var(--crit-text)}.flat{color:var(--muted)}
 .btn{background:var(--surface2);border:1px solid var(--border2);color:var(--ink);border-radius:var(--r-sm);padding:6px 13px;font-size:12.5px;font-weight:600}
 .btn:hover{background:var(--surface3)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -295,7 +302,7 @@ svg text{font-family:var(--font)}
   <div class="chip" id="h-clock">14:32</div>
   <div class="chip" id="chip-cloud" title="Supabase sync status"><span class="dot" id="cloud-dot" style="background:var(--muted)"></span><span id="cloud-lbl">connecting…</span></div>
   <button class="copilot-btn" id="btn-copilot" onclick="Copilot.toggle()">✦ Copilot <span class="kbd">⌘J</span></button>
-  <a class="copilot-btn" id="btn-academy" href="academy/index.html" target="_blank" rel="noopener" title="YantraFleet Academy — operator training on this backend">🎓 Academy</a>
+  <a class="copilot-btn" id="btn-academy" href="academy/index.html" target="_blank" rel="noopener" title="Yantrika Academy — operator training on this backend">🎓 Academy</a>
   <button class="btn ghost sm" id="btn-tour" title="Replay the first-run tour" onclick="Tour.start()">?</button>
   <span id="auth-box" style="display:flex;align-items:center;gap:8px"></span>
   <div class="avatar">PN</div>
@@ -313,7 +320,8 @@ svg text{font-family:var(--font)}
   <button data-v="fleet"><i class="ic">⬡</i>Fleet &amp; Connectors</button>
   <button data-v="audit"><i class="ic">☰</i>Audit</button>
   <button data-v="settings" id="nav-settings" style="display:none"><i class="ic">⚙</i>Settings</button>
-  <div class="nav-foot"><span class="pill" id="yf-version" title="YantraFleet release — matches core/yantracore/version.py"></span><br>VDA 5050 · 3 vendors<br><span style="color:#0ca30c">●</span> Sim feed connected</div>
+  <button data-v="config" id="nav-config" style="display:none"><i class="ic">🛠</i>Config</button>
+  <div class="nav-foot"><span class="pill" id="yf-version" title="Yantrika release — matches core/yantracore/version.py"></span><br>VDA 5050 · 3 vendors<br><span style="color:#0ca30c">●</span> Sim feed connected</div>
 </nav>
 <main id="main">
   <div class="view on" id="v-overview"></div>
@@ -325,6 +333,7 @@ svg text{font-family:var(--font)}
   <div class="view" id="v-fleet"></div>
   <div class="view" id="v-audit"></div>
   <div class="view" id="v-settings"></div>
+  <div class="view" id="v-config"></div>
   <div class="drawer" id="drawer"></div>
   <div id="copilot"></div>
 </main>
@@ -414,6 +423,7 @@ const store={
   findings:null, findingsReq:false,   // v0.4: maintenance_findings rows (null = not fetched / unavailable → mock tickets)
   audit:null, auditReq:false,         // v0.9: full commands history for the Audit view (null = not fetched)
   appSettings:null,                   // v0.13: admin_list_settings() rows for the Settings view (null = not fetched)
+  appConfig:null,                     // v0.18: admin_list_config() rows for the Config view (null = not fetched)
   availOk:0, availTot:0,              // v0.9: availability sampling for the Analytics SLA card
   throughput:132, sla:98.2, alarmHr:6, ackedIds:new Set()
 };
@@ -563,7 +573,7 @@ function hbar(el,rows,{unit='',color='var(--s1)'}={}){ // horizontal bars, round
 
 /* ================= Status helpers ================= */
 const liveNow=()=>typeof Sync!=='undefined'&&(Sync.mode==='leader'||Sync.mode==='follower');
-const STATUS={active:['●','var(--s3)','Active'],charging:['⚡','var(--s4)','Charging'],idle:['◌','var(--muted)','Idle'],fault:['✕','var(--crit)','Fault'],paused:['❚❚','var(--muted)','Paused'],estop:['■','var(--crit)','E-Stop'],degraded:['◐','var(--serious)','Degraded']};
+const STATUS={active:['●','var(--s3)','Active'],charging:['⚡','var(--s4)','Charging'],idle:['◌','var(--muted)','Idle'],fault:['✕','var(--crit-text)','Fault'],paused:['❚❚','var(--muted)','Paused'],estop:['■','var(--crit-text)','E-Stop'],degraded:['◐','var(--serious)','Degraded']};
 /* Other writers (yantrasim / yantrabridge) publish a richer VDA-style status
    vocabulary; fold it into the console's five display states. */
 const ST_NORM={active:'active',working:'active',moving:'active',transit:'active',to_charger:'active',degraded:'degraded',charging:'charging',idle:'idle',fault:'fault',estop:'estop',estopped:'estop',safety_stop:'estop',paused:'paused'};
@@ -574,6 +584,7 @@ const posToSvg=p=>Array.isArray(p)&&p.length===2&&p[0]!=null&&Math.abs(p[0])<=40
 const stBadge=s=>{const[ic,c,l]=STATUS[s]||STATUS[normStatus(s)]||STATUS.idle;return `<span class="st" style="color:${c}"><i class="ic">${ic}</i>${l}</span>`;};
 const sevBadge=s=>({crit:'<span class="sev crit">▲ CRITICAL</span>',serious:'<span class="sev serious">▲ SERIOUS</span>',warn:'<span class="sev warn">● WARNING</span>',info:'<span class="sev info">○ INFO</span>'}[s]);
 const batColor=b=>b>50?'var(--s3)':b>25?'var(--warn)':'var(--crit)';
+const batTextColor=b=>b>50?'var(--s3)':b>25?'var(--warn)':'var(--crit-text)';
 
 /* ================= Views ================= */
 function fleetStats(){
@@ -755,7 +766,7 @@ function openRobot(id){
         <button class="btn sm primary" onclick="fixRobot('${r.id}')">Re-localize from anchor</button>
         <button class="btn sm" onclick="Copilot.ask('Why did ${r.id} fault?')">✦ Ask Copilot</button></div></div>`:''}
     <div class="card">
-      <div class="kv"><span>Battery</span><b style="color:${batColor(r.battery)}">${r.battery.toFixed(0)}%</b></div>
+      <div class="kv"><span>Battery</span><b style="color:${batTextColor(r.battery)}">${r.battery.toFixed(0)}%</b></div>
       <div class="bar-track"><div class="bar-fill" style="width:${r.battery}%;background:${batColor(r.battery)}"></div></div>
       <div class="kv" style="margin-top:8px"><span>Speed</span><b>${r.speed.toFixed(2)} m/s</b></div>
       <div>${spark(r.spdHist,{w:300,h:30,color:'#3987e5'})}</div>
@@ -1185,7 +1196,7 @@ function rFleet(){
 let auditFilter='all';
 const AUDIT_FILTERS=['all','pending','approved','executed','failed','rejected'];
 const cmdStBadge=s=>{
-  const m={pending:['◷','var(--warn)'],approved:['✓','var(--s1)'],executed:['✔','var(--s3)'],failed:['✕','var(--crit)'],rejected:['⊘','var(--muted)']};
+  const m={pending:['◷','var(--warn)'],approved:['✓','var(--s1)'],executed:['✔','var(--s3)'],failed:['✕','var(--crit-text)'],rejected:['⊘','var(--muted)']};
   const[ic,c]=m[s]||['○','var(--muted)'];
   return `<span class="st" style="color:${c}"><i class="ic">${ic}</i>${Copilot.esc(s||'—')}</span>`;
 };
@@ -1273,6 +1284,63 @@ function saveSetting(key){
 function clearSetting(key){
   Sync.saveAppSetting(key,'')
     .then(()=>{toast(key+' cleared — falling back to the deploy-time env var, if any');store.appSettings=null;Sync.loadAppSettings().then(()=>{if(curView==='settings')rSettings();});})
+    .catch(e=>toast('⚠ Clear failed'+(e&&e.status===403?' — requires the admin role':'')));
+}
+
+/* ================= Runtime Config (v0.18) =================
+   Sibling of Settings above, backed by admin_list_config()/
+   admin_set_config() (supabase/0018_app_config.sql) instead of
+   admin_list_settings()/admin_set_setting(). Same admin-only gating and
+   live-within-~30s story, but values are NOT masked — these are
+   operational tunables (poll intervals, thresholds, an MQTT broker),
+   not credentials, so an admin should see exactly what's configured. */
+function rConfig(){
+  if(!(typeof YFAuth!=='undefined'&&YFAuth.state.role==='admin')){
+    $('#v-config').innerHTML='<div class="empty">Admin role required.</div>';return;
+  }
+  if(!store.appConfig){
+    $('#v-config').innerHTML='<div class="empty">Loading…</div>';
+    Sync.loadAppConfig().then(()=>{if(curView==='config')rConfig();});return;
+  }
+  const e=s=>Copilot.esc(s);
+  const bySection=k=>APP_CONFIG_KEYS.filter(([,,sec])=>sec===k);
+  const section=(title,keys)=>keys.length?`<div class="card" style="margin-top:14px"><h3>${e(title)}</h3>
+    ${keys.map(([key,label,,hint])=>configRow(key,label,hint)).join('')}</div>`:'';
+  $('#v-config').innerHTML=`
+    <div class="vhead"><h1>Runtime Config</h1><span class="sub">operational tunables · admin only · live within ~30s, no restart</span></div>
+    ${section('Fleet',bySection('Fleet'))}
+    ${section('Copilot (sarathi)',bySection('Copilot'))}
+    ${section('Detector (yantradetect)',bySection('Detector'))}
+    ${section('Notifier (yantranotify)',bySection('Notifier'))}
+    ${section('Sim (yantrasim)',bySection('Sim'))}
+    ${section('Connector (yantrabridge)',bySection('Connector'))}`;
+}
+function configRow(key,label,hint){
+  const e=s=>Copilot.esc(s);
+  const row=(store.appConfig||[]).find(c=>c.key===key)||{configured:false,value:null};
+  const status=row.configured?'configured':'not set — using CLI flag / hardcoded default';
+  const meta=row.configured?('updated '+e(row.updated_at||'')+' by '+e(row.updated_by||'')):'';
+  return `<div class="kv" id="config-row-${key}" style="align-items:center;gap:10px">
+    <span>${e(label)}${hint?`<br><span style="font-size:10.5px;color:var(--muted)">${e(hint)}</span>`:''}</span>
+    <span style="display:flex;gap:6px;align-items:center">
+      <span class="pill" id="config-status-${key}" title="${meta}">${status}</span>
+      <input type="text" id="cfg-${key}" placeholder="value" value="${row.configured?e(row.value):''}"
+             style="width:200px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--ink);padding:6px 10px;font-size:12.5px;outline:none">
+      <button class="btn sm primary" onclick="saveConfig('${key}')">Save</button>
+      ${row.configured?`<button class="btn sm ghost" onclick="clearConfig('${key}')">Clear</button>`:''}
+    </span>
+  </div>`;
+}
+function saveConfig(key){
+  const el=$('#cfg-'+key), v=el?el.value:'';
+  if(!v){toast('Enter a value first (or Clear to remove an existing one)');return;}
+  Sync.saveAppConfig(key,v)
+    .then(()=>{toast(key+' saved');store.appConfig=null;Sync.loadAppConfig().then(()=>{if(curView==='config')rConfig();});})
+    .catch(e=>toast('⚠ Save failed'+(e&&e.status===403?' — requires the admin role':(e&&e.message?': '+e.message:''))));
+}
+function clearConfig(key){
+  Sync.saveAppConfig(key,'')
+    .then(()=>{toast(key+' cleared — reverting to the CLI flag / hardcoded default');store.appConfig=null;Sync.loadAppConfig().then(()=>{if(curView==='config')rConfig();});})
     .catch(e=>toast('⚠ Clear failed'+(e&&e.status===403?' — requires the admin role':'')));
 }
 
@@ -1504,7 +1572,7 @@ const ShiftReport={
       ${d.missions.length?`<table><thead><tr><th>Mission</th><th>Robots</th><th>State</th><th>Progress</th><th>ETA</th></tr></thead><tbody>
         ${d.missions.map(m=>`<tr><td><b>${e(m.name)}</b> · ${e(m.id)}</td><td>${e((m.robots||[]).join(', ')||'—')}</td><td>${e(m.state)}</td><td>${m.prog}%</td><td>${e(m.eta)}</td></tr>`).join('')}
       </tbody></table>`:'<p class="empty">No missions on the board.</p>'}
-      <footer><span>Generated by YantraFleet</span><span>${e(d.site)} · ${e(d.when)}</span></footer>
+      <footer><span>Generated by Yantrika</span><span>${e(d.site)} · ${e(d.when)}</span></footer>
     </div></body></html>`;
   },
   /** The same report as clipboard-friendly Markdown. */
@@ -1540,7 +1608,7 @@ const ShiftReport={
     if(d.missions.length)d.missions.forEach(m=>L.push('- '+m.id+' '+m.name+' — '+m.state+' '+m.prog+'% (ETA '+m.eta+')'));
     else L.push('- none');
     L.push('');
-    L.push('_Generated by YantraFleet_');
+    L.push('_Generated by Yantrika_');
     return L.join('\n');
   },
   /** Open the report in a new window; wire Print + Copy from the opener. */
@@ -1748,6 +1816,34 @@ const APP_SETTING_KEYS=[
   ['TWILIO_TO','Twilio To number','Notifier','your verified WhatsApp recipient'],
 ];
 
+/* v0.18: admin runtime config panel — the 16 non-secret operational
+   tunables an `admin` may edit live via admin_list_config()/
+   admin_set_config(). Mirrors the CHECK constraint + RPC allowlists in
+   supabase/0018_app_config.sql and each service's CONFIG_KEYS tuple
+   (core/yantracore/site.py, copilot/sarathi/app.py,
+   detector/yantradetect/__main__.py, notifier/yantranotify/__main__.py,
+   sim/yantrasim/__main__.py, connector/yantrabridge/__main__.py). Keep
+   in sync by hand — same deliberate duplication as APP_SETTING_KEYS.
+   [key, label, section, hint] */
+const APP_CONFIG_KEYS=[
+  ['YANTRA_SITE_ID','Site ID','Fleet','Stamps/filters every row this process writes or reads (default BLR-DC1)'],
+  ['SARATHI_LOW_BATTERY_THRESHOLD','Low-battery threshold (%)','Copilot','Below this battery %, the copilot flags a robot as low (default 20)'],
+  ['DETECTOR_PENDING_POLLS','Pending polls','Detector','Consecutive abnormal polls before opening an incident (default 2)'],
+  ['DETECTOR_CLEAR_POLLS','Clear polls','Detector','Consecutive clear polls before resolving an incident (default 1)'],
+  ['DETECTOR_REOPEN_WINDOW','Re-open window (s)','Detector','Re-open the same incident if bad again within N seconds (default 300)'],
+  ['DETECTOR_STALE_POLLS','Stale polls','Detector','Missing polls before auto-resolving as stale (default 6)'],
+  ['DETECTOR_WINDOW_HOURS','Telemetry window (h)','Detector','Hours of telemetry scanned per --maintenance poll (default 6)'],
+  ['DETECTOR_INTERVAL','Poll interval (s)','Detector','Seconds between robots-table polls (default 5)'],
+  ['NOTIFIER_INTERVAL','Poll interval (s)','Notifier','Seconds between alert/incident polls (default 10)'],
+  ['SIM_INTERVAL','Tick interval (s)','Sim','Wall-clock seconds between simulator ticks (default 2)'],
+  ['CONNECTOR_BATTERY_THRESHOLD','Low-battery threshold (%)','Connector','Battery % that raises a low-battery alert (default 20)'],
+  ['CONNECTOR_MQTT_HOST','MQTT broker host','Connector','A running --mqtt-host bridge reconnects to the new broker within ~30s'],
+  ['CONNECTOR_MQTT_PORT','MQTT broker port','Connector','Live broker port (default 1883)'],
+  ['CONNECTOR_MQTT_TOPIC','MQTT state topic','Connector','VDA 5050 state topic filter'],
+  ['CONNECTOR_MQTT_USERNAME','MQTT username','Connector','Optional broker auth'],
+  ['CONNECTOR_MQTT_PASSWORD','MQTT password','Connector','Optional broker auth'],
+];
+
 /* v0.12: '🎓 Academy' header link → the training app, same backend params.
    Served (nginx template / ops static server) the docroot exposes the console
    at /index.html and the academy at /academy/index.html, so the RELATIVE
@@ -1890,9 +1986,11 @@ const YFAuth={
           <span class="role-badge" id="auth-role">${this.esc(this.state.role||'…')}</span></span>
         <button class="btn ghost sm" id="btn-signout" onclick="YFAuth.logout()">Sign out</button>`
       :`<button class="btn sm" id="btn-signin" onclick="YFAuth.show()">Sign in</button>`;
-    // v0.13: the Settings nav entry is admin-only — every auth state
-    // transition (login/logout/expiry) already routes through here.
+    // v0.13/v0.18: the Settings and Config nav entries are admin-only —
+    // every auth state transition (login/logout/expiry) already routes
+    // through here.
     const nb=$('#nav-settings'); if(nb) nb.style.display=(this.state.role==='admin')?'':'none';
+    const ncb=$('#nav-config'); if(ncb) ncb.style.display=(this.state.role==='admin')?'':'none';
   },
   mode:'in',                                    // 'in' = sign in · 'up' = create account
   ensure(){
@@ -2154,6 +2252,15 @@ const Sync={
     return this.q('rpc/admin_set_setting',{method:'POST',
       body:JSON.stringify({p_key:key,p_value:value})});
   },
+  /* ---- v0.18 admin runtime config panel (supabase/0018_app_config.sql) ---- */
+  async loadAppConfig(){
+    try{ store.appConfig=await this.q('rpc/admin_list_config',{method:'POST',body:'{}'}); }
+    catch(e){ store.appConfig=[]; if(e&&e.status===403)toast('⚠ Config requires the admin role'); }
+  },
+  saveAppConfig(key,value){
+    return this.q('rpc/admin_set_config',{method:'POST',
+      body:JSON.stringify({p_key:key,p_value:value})});
+  },
   async push(){
     this.robotsEmptySince=null;   // leader mode publishes robots itself
     const rows=robots.map(r=>({id:r.id,vendor:r.vendor,status:r.status,battery:+r.battery.toFixed(1),
@@ -2198,14 +2305,15 @@ const Sync={
 };
 
 /* ================= Router + main loop ================= */
-const VIEWS={overview:rOverview,liveops:rLiveOps,incidents:rIncidents,missions:rMissions,maint:rMaint,analytics:rAnalytics,fleet:rFleet,audit:rAudit,settings:rSettings};
+const VIEWS={overview:rOverview,liveops:rLiveOps,incidents:rIncidents,missions:rMissions,maint:rMaint,analytics:rAnalytics,fleet:rFleet,audit:rAudit,settings:rSettings,config:rConfig};
 let curView='overview';
 function go(v){
-  // v0.13: UI-level defense in depth — the RPC's own yf_has_role('admin')
-  // check is the real gate; this just avoids flashing the settings view
-  // at a non-admin before the RPC 403 comes back.
-  if(v==='settings'&&!(typeof YFAuth!=='undefined'&&YFAuth.state.role==='admin')){
-    toast('⚠ Settings requires the admin role');v='overview';
+  // v0.13/v0.18: UI-level defense in depth — the RPCs' own
+  // yf_has_role('admin') check is the real gate; this just avoids
+  // flashing the settings/config view at a non-admin before the RPC
+  // 403 comes back.
+  if((v==='settings'||v==='config')&&!(typeof YFAuth!=='undefined'&&YFAuth.state.role==='admin')){
+    toast('⚠ '+(v==='config'?'Config':'Settings')+' requires the admin role');v='overview';
   }
   curView=v;
   $$('#nav button[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
@@ -2240,7 +2348,7 @@ function render(force){
 }
 VIEWS.overview();rLiveOps();$('#v-liveops').classList.remove('on');$('#v-overview').classList.add('on');
 YFAuth.renderHeader();   // v0.11: Sign in button / signed-in identity chip
-{const vc=$('#yf-version');if(vc)vc.textContent='YantraFleet v'+YF_VERSION;}
+{const vc=$('#yf-version');if(vc)vc.textContent='Yantrika v'+YF_VERSION;}
 sampleAvail();   // seed one availability sample so the SLA card never starts empty
 setInterval(()=>{ if(Sync.mode!=='follower')step(0.4); sampleAvail(); render(false); },400);
 Sync.init();

@@ -1,4 +1,4 @@
-# YantraFleet — What We Built, and How
+# Yantrika — What We Built, and How
 
 *Comprehensive implementation reference — v0.12.1, 2026-09-03*
 
@@ -15,9 +15,9 @@ For the security posture in isolation, see `docs/SECURITY.md` and
 
 ---
 
-## 1. What YantraFleet is
+## 1. What Yantrika is
 
-YantraFleet is an operations platform for **Physical AI** — specifically,
+Yantrika is an operations platform for **Physical AI** — specifically,
 fleets of autonomous mobile robots (AMRs) in warehouses and industrial
 sites. "Physical AI" is the umbrella the industry (NVIDIA, Amazon Robotics,
 Physical Intelligence, Google DeepMind and others) uses for AI systems that
@@ -27,7 +27,7 @@ needs the same operational layer once you have more than a handful of them
 running: a place to see what they're doing, a way to catch problems before
 they become costly, a gate that keeps a human in the loop for anything
 consequential, and a way for new operators to learn the system quickly.
-YantraFleet is that layer.
+Yantrika is that layer.
 
 Concretely, the platform is three things that share one backend and one
 identity system:
@@ -39,7 +39,7 @@ identity system:
    questions about the fleet ("why is AMR-07 down?", "what's pending
    approval?") with cited evidence pulled live from the same database,
    never from imagination.
-3. **YantraFleet Academy** — a self-contained learning product, sharing the
+3. **Yantrika Academy** — a self-contained learning product, sharing the
    same login, that teaches two things: how to *operate* this specific
    platform (hands-on, against a live simulated fleet), and how Physical AI
    *actually works* as a field (perception, planning, robot learning,
@@ -314,7 +314,7 @@ in order:
 Sarathi is also exposed over MCP (`copilot/sarathi/mcp_server.py`), so an
 external agent platform (including the user's other Agentic AI platform,
 Vegaduta) can query fleet state as a tool — this is the integration seam
-between YantraFleet and the broader multi-agent ecosystem it's meant to sit
+between Yantrika and the broader multi-agent ecosystem it's meant to sit
 inside.
 
 ### 7.2 Academy tutor — the same pattern, in the browser
@@ -342,7 +342,7 @@ hands-on demonstration of on-device AI inference, which is directly
 relevant to the "Physical AI Foundations" curriculum described next (edge
 inference is exactly what runs onboard a real robot).
 
-## 8. YantraFleet Academy — curriculum
+## 8. Yantrika Academy — curriculum
 
 The Academy is content-driven: `academy/content/pack-physical-ai.json`
 defines tracks, lessons, quizzes, practicals, tutor grounding context, and
@@ -506,7 +506,7 @@ single generated drop:
 | v0.6.0–v0.6.2 | Startup UX (log-level control, auto-open browser, wrong-URL redirect), copilot grounding guard |
 | v0.7.0–v0.8.0 | Console command palette / tour / shift report, MQTT transport + real broker |
 | v0.9.0 | AWS deploy kit, MQTT command loop closing on real `actionStates`, security hardening (0006), console audit/SLA views, docs site |
-| v0.10.0 | YantraFleet Academy: learn-by-operating, live-verified checkride certification, WebLLM on-device tutor |
+| v0.10.0 | Yantrika Academy: learn-by-operating, live-verified checkride certification, WebLLM on-device tutor |
 | v0.11.0–v0.11.1 | Real Supabase Auth + enforced RBAC (0007, Postgres-verified), `audit-security`, compliance mappings, no-schema detection + OPT-IN migration gating |
 | v0.12.0 | Account signup, console↔academy cross-discovery, the Physical AI Foundations curriculum track |
 | v0.12.1 | Version single-sourcing, WebLLM version pin, academy search/print, console empty-state handling |

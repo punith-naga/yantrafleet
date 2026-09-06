@@ -12,7 +12,7 @@ defaults to the site value server-side (0005_sites.sql), so legacy rows
 still match.
 
 An injectable :class:`httpx.Client` keeps every test offline
-(``httpx.MockTransport``), mirroring the other YantraFleet components.
+(``httpx.MockTransport``), mirroring the other Yantrika components.
 """
 from __future__ import annotations
 
@@ -106,8 +106,22 @@ class AlertSource:
         the site filter entirely (``--all-sites``)."""
         self.base_url, self.key = resolve_config(url, key)
         self.rest = f"{self.base_url}/rest/v1"
-        self.site: str | None = None if all_sites else (site or _default_site_id())
+        self._explicit_site = site
+        self._all_sites = all_sites
         self._client = client or httpx.Client(timeout=timeout_s)
+
+    @property
+    def site(self) -> str | None:
+        """Effective site filter for the next poll: ``None`` when built
+        with ``all_sites=True``; otherwise an explicit ``site=`` pin, or
+        (the common case) this process's live ``yantracore.site_id()`` —
+        resolved fresh on every access, not cached at construction, so a
+        v0.18.1 ``YANTRA_SITE_ID`` change synced by
+        ``yantracore.site.start_site_sync()`` takes effect on the very
+        next poll with no restart needed."""
+        if self._all_sites:
+            return None
+        return self._explicit_site or _default_site_id()
 
     @property
     def _headers(self) -> dict[str, str]:

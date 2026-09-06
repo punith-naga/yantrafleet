@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet v0.5.x migration — multi-site groundwork.
+-- Yantrika v0.5.x migration — multi-site groundwork.
 -- Run after 0004_maintenance.sql. Idempotent.
 --
 -- Every operational table gains a ``site_id`` column. The default

@@ -2,7 +2,7 @@
 
 A tiny stdlib ``http.server`` bound to ``127.0.0.1`` on an ephemeral port,
 backed by in-memory dicts — one list of row-dicts per table. It speaks
-exactly the subset of PostgREST that the YantraFleet components use:
+exactly the subset of PostgREST that the Yantrika components use:
 
 * ``POST /rest/v1/{table}`` — bulk insert. With ``?on_conflict=col`` and a
   ``Prefer: resolution=merge-duplicates`` header it upserts (existing row
@@ -110,7 +110,7 @@ DEMO_ROBOT_SCOPED: dict[str, str] = {
 }
 
 #: 0017 leaves ``missions.robots`` (a jsonb array of robot ids) alone, and
-#: so does this: YantraFleet's own sandbox driver writes real fleet robot
+#: so does this: Yantrika's own sandbox driver writes real fleet robot
 #: ids there (ops/yantraops/sandbox.py renames its FleetSim robots AFTER
 #: FleetSim.__init__ has already captured mission crews from the original
 #: ids). Nothing dispatches from that column. See the note in 0017 and
@@ -137,6 +137,34 @@ APP_SETTING_KEYS: tuple[str, ...] = (
     "GEMINI_API_KEY", "SARATHI_TOKEN", "WEBHOOK_URL", "YANTRA_WEBHOOK_SECRET",
     "TWILIO_SID", "TWILIO_TOKEN", "TWILIO_FROM", "TWILIO_TO",
 )
+
+#: 0018_app_config.sql's CHECK constraint / RPC allowlist — the 16
+#: non-secret runtime tunables the admin config panel may edit. Mirrors
+#: console/index.html's APP_CONFIG_KEYS and each service's CONFIG_KEYS
+#: tuple (core/yantracore/site.py, copilot/sarathi/app.py,
+#: detector/yantradetect/__main__.py, notifier/yantranotify/__main__.py,
+#: sim/yantrasim/__main__.py, connector/yantrabridge/__main__.py).
+APP_CONFIG_KEYS: tuple[str, ...] = (
+    "YANTRA_SITE_ID", "SARATHI_LOW_BATTERY_THRESHOLD",
+    "DETECTOR_PENDING_POLLS", "DETECTOR_CLEAR_POLLS",
+    "DETECTOR_REOPEN_WINDOW", "DETECTOR_STALE_POLLS",
+    "DETECTOR_WINDOW_HOURS", "DETECTOR_INTERVAL",
+    "NOTIFIER_INTERVAL", "SIM_INTERVAL",
+    "CONNECTOR_BATTERY_THRESHOLD", "CONNECTOR_MQTT_HOST",
+    "CONNECTOR_MQTT_PORT", "CONNECTOR_MQTT_TOPIC",
+    "CONNECTOR_MQTT_USERNAME", "CONNECTOR_MQTT_PASSWORD",
+)
+
+#: Keys whose value must parse as a number — mirrors
+#: 0018_app_config.sql's _yf_config_is_numeric_key().
+APP_CONFIG_NUMERIC_KEYS: frozenset[str] = frozenset({
+    "SARATHI_LOW_BATTERY_THRESHOLD",
+    "DETECTOR_PENDING_POLLS", "DETECTOR_CLEAR_POLLS",
+    "DETECTOR_REOPEN_WINDOW", "DETECTOR_STALE_POLLS",
+    "DETECTOR_WINDOW_HOURS", "DETECTOR_INTERVAL",
+    "NOTIFIER_INTERVAL", "SIM_INTERVAL",
+    "CONNECTOR_BATTERY_THRESHOLD", "CONNECTOR_MQTT_PORT",
+})
 
 
 def _mask_setting(value: str | None) -> str | None:
@@ -471,6 +499,11 @@ class FakePostgREST:
         #: posture: this is deliberately NOT in self.tables, see module note
         #: on rpc_admin_list_settings/rpc_admin_set_setting below).
         self.settings: dict[str, Row] = {}
+        #: app_config stand-in: {key: {"value","updated_at","updated_by"}} —
+        #: written only via admin_set_config (mirrors 0018's revoke-all-grants
+        #: posture, same as self.settings above — deliberately NOT in
+        #: self.tables, see rpc_admin_list_config/rpc_admin_set_config).
+        self.config: dict[str, Row] = {}
         #: 0009 demo_sessions stand-in: {token: session row}. No table
         #: route — a bare GET /rest/v1/demo_sessions must 404, mirroring
         #: the SQL's `revoke all` posture.
@@ -817,6 +850,72 @@ class FakePostgREST:
         self.settings[p_key] = row
         return 200, {"key": p_key, "configured": True,
                     "masked_value": _mask_setting(row["value"]),
+                    "updated_at": row["updated_at"], "updated_by": row["updated_by"]}
+
+    def rpc_admin_list_config(self, ident: _Identity, args: Row) -> tuple[int, Any]:
+        """supabase/0018_app_config.sql's admin_list_config(): always
+        returns all 16 known keys (configured or not), values UNMASKED —
+        these are tunables, not credentials. Deliberately reads
+        self.config, never self.tables — a bare GET /rest/v1/app_config
+        must keep 404ing/not-routing, faithfully mirroring the real
+        table's `revoke all` / no-policy posture."""
+        if self.rbac:
+            if ident.kind == "anon":
+                return 401, {"message": "admin_list_config: not authenticated "
+                                        "— sign in first", "code": "PGRST301"}
+            if ident.kind != "service" and not ident.is_admin:
+                return 403, {"message": "admin_list_config: requires admin role",
+                             "code": "42501"}
+        result = []
+        for key in APP_CONFIG_KEYS:
+            row = self.config.get(key)
+            if row is None:
+                result.append({"key": key, "configured": False, "value": None,
+                               "updated_at": None, "updated_by": None})
+            else:
+                result.append({"key": key, "configured": True,
+                               "value": row.get("value"),
+                               "updated_at": row.get("updated_at"),
+                               "updated_by": row.get("updated_by")})
+        return 200, result
+
+    def rpc_admin_set_config(self, ident: _Identity, args: Row) -> tuple[int, Any]:
+        """supabase/0018_app_config.sql's admin_set_config(): p_value
+        null/empty deletes the row (explicit "revert to the CLI flag /
+        hardcoded default" action); a numeric key (APP_CONFIG_NUMERIC_KEYS)
+        that doesn't parse as a number is rejected, mirroring the SQL
+        RPC's numeric-cast validation."""
+        p_key, p_value = args.get("p_key"), args.get("p_value")
+        if self.rbac:
+            if ident.kind == "anon":
+                return 401, {"message": "admin_set_config: not authenticated "
+                                        "— sign in first", "code": "PGRST301"}
+            if ident.kind != "service" and not ident.is_admin:
+                return 403, {"message": "admin_set_config: requires admin role",
+                             "code": "42501"}
+        if p_key not in APP_CONFIG_KEYS:
+            return 400, {"message": f"admin_set_config: unknown config key "
+                                    f"\"{p_key}\"", "code": "P0001"}
+        if p_value is None or len(str(p_value).strip()) == 0:
+            self.config.pop(p_key, None)
+            return 200, {"key": p_key, "configured": False, "value": None,
+                        "updated_at": None, "updated_by": None}
+        if p_key in APP_CONFIG_NUMERIC_KEYS:
+            try:
+                num = float(p_value)
+            except (TypeError, ValueError):
+                return 400, {"message": f"admin_set_config: \"{p_key}\" must "
+                                        f"be numeric, got \"{p_value}\"",
+                             "code": "22P02"}
+            if (p_key == "CONNECTOR_MQTT_PORT"
+                    and (num < 1 or num > 65535 or num != int(num))):
+                return 400, {"message": "admin_set_config: CONNECTOR_MQTT_PORT "
+                                        f"must be an integer 1-65535, got "
+                                        f"\"{p_value}\"", "code": "22P02"}
+        row = {"value": str(p_value), "updated_at": _now_iso(),
+              "updated_by": ident.email or "service"}
+        self.config[p_key] = row
+        return 200, {"key": p_key, "configured": True, "value": row["value"],
                     "updated_at": row["updated_at"], "updated_by": row["updated_by"]}
 
     # -- 0009-0016 RPCs ----------------------------------------------------
@@ -2077,7 +2176,7 @@ class FakePostgREST:
             code = f"YF-{slug or 'GEN'}-{uuid.uuid4().hex[:12].upper()}"
         if not holder:
             holder = ((ident.email or "").split("@")[0]
-                      or "YantraFleet operator")
+                      or "Yantrika operator")
         row = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"yf-cert:{code}")),
                "user_id": ident.sub or ident.email or "anon",
                "track": track, "score": score,
@@ -2244,6 +2343,9 @@ class FakePostgREST:
         "issue_certificate": "rpc_issue_certificate",
         "admin_list_settings": "rpc_admin_list_settings",
         "admin_set_setting": "rpc_admin_set_setting",
+        # 0018 app config
+        "admin_list_config": "rpc_admin_list_config",
+        "admin_set_config": "rpc_admin_set_config",
         # 0009 demo sandbox
         "demo_mint_session": "rpc_demo_mint_session",
         "demo_claim_session": "rpc_demo_claim_session",

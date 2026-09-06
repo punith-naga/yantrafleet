@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- ================================================================
-  YantraFleet MARKETING SITE — Home / Landing
+  Yantrika MARKETING SITE — Home / Landing
   ================================================================
   Plain static HTML/CSS/JS, no build step, no framework — consistent
   with the rest of this repo (console/, academy/, docs/). Shared
@@ -11,10 +11,10 @@
 
   PLACEHOLDERS TO REPLACE BEFORE GOING LIVE (see marketing/README.md
   for the complete list — it covers every file and every tag):
-    - https://yantrafleet.example.com  → your real domain, everywhere
+    - https://yantrika.ai  → your real domain, everywhere
       it appears (canonical, og:url, og:image, twitter:image, JSON-LD
       url/@id fields, sitemap.xml, robots.txt)
-    - https://github.com/YOUR_GITHUB_USERNAME/yantrafleet → your real
+    - https://github.com/yantrika-ai/yantrika → your real
       GitHub repo URL (same placeholder convention already used in
       deploy/aws/user-data.sh and deploy/azure/custom-data.sh)
 
@@ -28,23 +28,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YantraFleet — Open-Source AMR Fleet Management (VDA 5050)</title>
+<title>Yantrika — Open-Source AMR Fleet Management (VDA 5050)</title>
+<link rel="icon" href="/assets/brand/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/brand/icon-mark.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/brand/icon-180.png">
 <meta name="description" content="Open-source, self-hosted fleet software for multi-vendor AMR fleets. VDA 5050 v2.1, human-approved commands, incident detection. MIT licensed.">
-<link rel="canonical" href="https://yantrafleet.example.com/index.html">
+<link rel="canonical" href="https://yantrika.ai/index.html">
 <meta name="theme-color" content="#2563c9">
-<meta property="og:site_name" content="YantraFleet">
-<meta property="og:title" content="YantraFleet — Open-Source AMR Fleet Management (VDA 5050)">
+<meta property="og:site_name" content="Yantrika">
+<meta property="og:title" content="Yantrika — Open-Source AMR Fleet Management (VDA 5050)">
 <meta property="og:description" content="Open-source, self-hosted fleet software for multi-vendor AMR fleets. VDA 5050 v2.1, human-approved commands, incident detection, predictive maintenance. MIT licensed — try a live fleet with no signup.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://yantrafleet.example.com/index.html">
-<meta property="og:image" content="https://yantrafleet.example.com/assets/og-yantrafleet.png">
+<meta property="og:url" content="https://yantrika.ai/index.html">
+<meta property="og:image" content="https://yantrika.ai/assets/og-yantrafleet.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="YantraFleet — open-source AMR fleet operations, VDA 5050 v2.1, MIT licensed.">
+<meta property="og:image:alt" content="Yantrika — open-source AMR fleet operations, VDA 5050 v2.1, MIT licensed.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="YantraFleet — Open-Source AMR Fleet Management (VDA 5050)">
+<meta name="twitter:title" content="Yantrika — Open-Source AMR Fleet Management (VDA 5050)">
 <meta name="twitter:description" content="Open-source, self-hosted fleet software for multi-vendor AMR fleets. VDA 5050 v2.1, human-approved commands, incident detection. MIT licensed.">
-<meta name="twitter:image" content="https://yantrafleet.example.com/assets/og-yantrafleet.png">
+<meta name="twitter:image" content="https://yantrika.ai/assets/og-yantrafleet.png">
 <link rel="stylesheet" href="assets/styles.css">
 <script type="application/ld+json">
 {
@@ -52,32 +55,32 @@
   "@graph": [
     {
       "@type": "WebSite",
-      "@id": "https://yantrafleet.example.com/#website",
-      "url": "https://yantrafleet.example.com/",
-      "name": "YantraFleet",
+      "@id": "https://yantrika.ai/#website",
+      "url": "https://yantrika.ai/",
+      "name": "Yantrika",
       "description": "Open-source, self-hosted fleet-operations software for multi-vendor AMR fleets.",
       "inLanguage": "en",
       "potentialAction": {
         "@type": "SearchAction",
         "target": {
           "@type": "EntryPoint",
-          "urlTemplate": "https://yantrafleet.example.com/search.html?q={search_term_string}"
+          "urlTemplate": "https://yantrika.ai/search.html?q={search_term_string}"
         },
         "query-input": "required name=search_term_string"
       }
     },
     {
       "@type": "SoftwareApplication",
-      "@id": "https://yantrafleet.example.com/#software",
-      "name": "YantraFleet",
+      "@id": "https://yantrika.ai/#software",
+      "name": "Yantrika",
       "applicationCategory": "BusinessApplication",
       "applicationSubCategory": "Autonomous mobile robot (AMR) fleet management",
       "operatingSystem": "Linux, Windows, macOS (Docker)",
       "softwareVersion": "0.12.1",
       "license": "https://opensource.org/licenses/MIT",
       "isAccessibleForFree": true,
-      "codeRepository": "https://github.com/YOUR_GITHUB_USERNAME/yantrafleet",
-      "url": "https://yantrafleet.example.com/index.html",
+      "codeRepository": "https://github.com/yantrika-ai/yantrika",
+      "url": "https://yantrika.ai/index.html",
       "description": "Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. Speaks VDA 5050 v2.1, provides human-approved command gating, automatic incident detection, predictive maintenance, and a grounded AI copilot.",
       "featureList": [
         "VDA 5050 v2.1 multi-vendor robot connectivity over MQTT",
@@ -96,22 +99,22 @@
     },
     {
       "@type": "FAQPage",
-      "@id": "https://yantrafleet.example.com/#faq",
+      "@id": "https://yantrika.ai/#faq",
       "mainEntity": [
         {
           "@type": "Question",
-          "name": "Is there a hosted SaaS version of YantraFleet?",
+          "name": "Is there a hosted SaaS version of Yantrika?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "No. YantraFleet is self-hosted software you run on your own infrastructure against your own database, under the MIT license. The live demo on this site is a throwaway sandbox that expires on its own; it is not a hosted product."
+            "text": "No. Yantrika is self-hosted software you run on your own infrastructure against your own database, under the MIT license. The live demo on this site is a throwaway sandbox that expires on its own; it is not a hosted product."
           }
         },
         {
           "@type": "Question",
-          "name": "Does YantraFleet work with robots from more than one vendor?",
+          "name": "Does Yantrika work with robots from more than one vendor?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "That is the point of it. Robots talk to YantraFleet over VDA 5050 v2.1, the open vendor-neutral MQTT protocol for AMR fleet communication, so any vehicle that implements the standard can be driven from the same console. The bundled simulator models a 10-robot fleet across 3 simulated vendors to exercise that path without hardware."
+            "text": "That is the point of it. Robots talk to Yantrika over VDA 5050 v2.1, the open vendor-neutral MQTT protocol for AMR fleet communication, so any vehicle that implements the standard can be driven from the same console. The bundled simulator models a 10-robot fleet across 3 simulated vendors to exercise that path without hardware."
           }
         },
         {
@@ -124,7 +127,7 @@
         },
         {
           "@type": "Question",
-          "name": "What does YantraFleet cost?",
+          "name": "What does Yantrika cost?",
           "acceptedAnswer": {
             "@type": "Answer",
             "text": "Nothing. It is MIT licensed open-source software. There is no paid tier, no enterprise edition, and no feature held back behind a sales call. Your costs are whatever infrastructure you choose to run it on."
@@ -135,7 +138,7 @@
           "name": "How do I check whether my robots actually implement VDA 5050 correctly?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Run yantra-conform, the conformance tester that ships with YantraFleet. It grades a fleet against 52 checks drawn from VDA 5050 v2.1 and writes a single HTML report naming the clause, what was expected, what your vehicle actually did, and how to fix it. It is a command-line tool that runs on your machine against your broker, and it is free."
+            "text": "Run yantra-conform, the conformance tester that ships with Yantrika. It grades a fleet against 52 checks drawn from VDA 5050 v2.1 and writes a single HTML report naming the clause, what was expected, what your vehicle actually did, and how to fix it. It is a command-line tool that runs on your machine against your broker, and it is free."
           }
         }
       ]
@@ -149,7 +152,7 @@
 
 <header class="site">
   <div class="wrap bar">
-    <a class="brand" href="index.html"><span class="mark">Y</span> YantraFleet</a>
+    <a class="brand" href="index.html"><img class="mark" src="assets/brand/icon-mark.svg" alt="" width="26" height="26"> Yantrika</a>
     <button class="navtoggle" aria-expanded="false" aria-label="Toggle navigation">☰</button>
     <nav class="top">
       <a class="on" href="index.html">Home</a>
@@ -161,7 +164,7 @@
       <a href="get-involved.html">Get Involved</a>
       <a href="changelog.html">Changelog</a>
       <a class="signin" href="/console/">Sign in</a>
-      <a class="cta" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+      <a class="cta" href="https://github.com/yantrika-ai/yantrika">View on GitHub</a>
     </nav>
   </div>
 </header>
@@ -172,7 +175,7 @@
     <div class="wrap">
       <p class="kicker">Open source · MIT licensed · v0.12.1</p>
       <h1>The operations layer for your robot fleet.</h1>
-      <p class="lede">YantraFleet is an open-source, end-to-end fleet-operations platform for multi-vendor AMR (autonomous mobile robot) fleets. Robots speak VDA 5050 v2.1 over MQTT; YantraFleet gives you a live console, human-approved command gating, automatic incident detection, predictive maintenance, real alert delivery, and an AI copilot grounded in your fleet's actual data — self-hosted, on your own infrastructure.</p>
+      <p class="lede">Yantrika is an open-source, end-to-end fleet-operations platform for multi-vendor AMR (autonomous mobile robot) fleets. Robots speak VDA 5050 v2.1 over MQTT; Yantrika gives you a live console, human-approved command gating, automatic incident detection, predictive maintenance, real alert delivery, and an AI copilot grounded in your fleet's actual data — self-hosted, on your own infrastructure.</p>
 
       <!-- ============================================================
         THE PRIMARY CALL TO ACTION.
@@ -216,7 +219,7 @@
 
       <div class="actions">
         <a class="btn secondary" href="vda-5050-conformance-test.html">Test your robots against VDA 5050 →</a>
-        <a class="btn secondary" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+        <a class="btn secondary" href="https://github.com/yantrika-ai/yantrika">View on GitHub</a>
         <a class="btn secondary" href="docs.html">Read the docs</a>
       </div>
       <p class="proofline"><strong>10 automated test suites, 500+ tests, all passing</strong> — plus 188 more covering the conformance tester on its own. MIT license. Runs standalone or against your own Supabase/Postgres project.</p>
@@ -228,7 +231,7 @@
       <div class="quickstart">
         <p class="kicker" style="margin-bottom:8px">Three commands, zero config</p>
         <pre><code><span class="cmt"># Linux / macOS</span>
-<span class="dollar">$</span> git clone https://github.com/YOUR_GITHUB_USERNAME/yantrafleet.git &amp;&amp; cd yantrafleet
+<span class="dollar">$</span> git clone https://github.com/yantrika-ai/yantrika.git &amp;&amp; cd yantrika
 <span class="dollar">$</span> ./install.sh
 <span class="dollar">$</span> .venv/bin/python -m yantraops up --loopback</code></pre>
         <p>That's the full platform — simulated 10-AMR fleet, automatic incident detection, predictive maintenance, notifications, and the Sarathi AI copilot — running against an embedded in-memory backend. No cloud account, no API keys, no physical robots required.</p>
@@ -241,7 +244,7 @@
     <div class="wrap">
       <p class="kicker">What it does</p>
       <h2>One shared data layer, five cooperating services.</h2>
-      <p class="lede">Robots — or YantraFleet's own deterministic warehouse simulator — publish <a href="https://www.vda.de" target="_blank" rel="noopener">VDA 5050 v2.1</a> <code>state</code> messages over MQTT. A connector translates that standard protocol into a shared Postgres (Supabase) schema. Every other component — the console, the incident detector, the predictive-maintenance engine, the notifier, and the AI copilot — reads and writes that same schema, so what you see in the console is exactly what every other service is acting on.</p>
+      <p class="lede">Robots — or Yantrika's own deterministic warehouse simulator — publish <a href="https://www.vda.de" target="_blank" rel="noopener">VDA 5050 v2.1</a> <code>state</code> messages over MQTT. A connector translates that standard protocol into a shared Postgres (Supabase) schema. Every other component — the console, the incident detector, the predictive-maintenance engine, the notifier, and the AI copilot — reads and writes that same schema, so what you see in the console is exactly what every other service is acting on.</p>
 
       <div class="grid">
         <div class="card">
@@ -278,8 +281,8 @@
     <div class="wrap">
       <div class="callout">
         <p class="kicker">Built on an open standard</p>
-        <p>YantraFleet doesn't lock you into one robot vendor. It speaks <strong>VDA 5050 v2.1</strong>, the open, vendor-neutral protocol for AMR fleet communication — so it's built to sit above multiple robot brands on the same floor, not just one. The bundled simulator models a 10-robot fleet across 3 simulated vendors on an 8×5 warehouse grid to prove this out without hardware.</p>
-        <p style="margin-bottom:0">A protocol only helps if the vehicles actually implement it. YantraFleet ships a <a href="vda-5050-conformance-test.html"><strong>free VDA 5050 conformance tester</strong></a> — 52 checks, a graded HTML report, no account and no sales call — so you can find out before the robots are on your floor.</p>
+        <p>Yantrika doesn't lock you into one robot vendor. It speaks <strong>VDA 5050 v2.1</strong>, the open, vendor-neutral protocol for AMR fleet communication — so it's built to sit above multiple robot brands on the same floor, not just one. The bundled simulator models a 10-robot fleet across 3 simulated vendors on an 8×5 warehouse grid to prove this out without hardware.</p>
+        <p style="margin-bottom:0">A protocol only helps if the vehicles actually implement it. Yantrika ships a <a href="vda-5050-conformance-test.html"><strong>free VDA 5050 conformance tester</strong></a> — 52 checks, a graded HTML report, no account and no sales call — so you can find out before the robots are on your floor.</p>
       </div>
     </div>
   </section>
@@ -306,10 +309,10 @@
         </div>
         <div class="card">
           <h3>Deploy to the cloud</h3>
-          <p>Documented, scripted paths for a single-instance deployment on <a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/blob/main/deploy/aws/README.md"><strong>AWS EC2</strong></a> and on <a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/blob/main/deploy/azure/README.md"><strong>Azure</strong></a>, including systemd service files and environment-variable hardening guidance.</p>
+          <p>Documented, scripted paths for a single-instance deployment on <a href="https://github.com/yantrika-ai/yantrika/blob/main/deploy/aws/README.md"><strong>AWS EC2</strong></a> and on <a href="https://github.com/yantrika-ai/yantrika/blob/main/deploy/azure/README.md"><strong>Azure</strong></a>, including systemd service files and environment-variable hardening guidance.</p>
         </div>
       </div>
-      <p style="margin-top:18px">There is no hosted SaaS version. You run YantraFleet on your own infrastructure, with your own data, under the MIT license.</p>
+      <p style="margin-top:18px">There is no hosted SaaS version. You run Yantrika on your own infrastructure, with your own data, under the MIT license.</p>
     </div>
   </section>
 
@@ -317,7 +320,7 @@
     <div class="wrap">
       <div class="callout">
         <p class="kicker">Security &amp; access control, built in</p>
-        <p>YantraFleet ships in <strong>demo mode</strong> by default — one shared key, zero setup, so you can evaluate it in minutes. For real deployments, two opt-in migrations lock it down:</p>
+        <p>Yantrika ships in <strong>demo mode</strong> by default — one shared key, zero setup, so you can evaluate it in minutes. For real deployments, two opt-in migrations lock it down:</p>
         <ul>
           <li><strong>Hardened mode</strong> — drops open read/write access; only authenticated sessions can read, and all writes move to a server-side service key.</li>
           <li><strong>Full RBAC mode</strong> — role-based access control with four levels (<code>operator &lt; engineer &lt; manager &lt; admin</code>), scoped by site, enforced by Postgres row-level security policies and <code>SECURITY DEFINER</code> functions — not just application-layer checks. Command approval requires a manager-or-above role, going through a dedicated database function rather than a direct write path.</li>
@@ -337,10 +340,10 @@
       <h2>Straight answers.</h2>
 
       <h3 style="margin-top:24px">Is there a hosted SaaS version?</h3>
-      <p>No. YantraFleet is self-hosted software you run on your own infrastructure against your own database, under the MIT license. The live demo on this page is a throwaway sandbox that expires on its own; it is not a hosted product.</p>
+      <p>No. Yantrika is self-hosted software you run on your own infrastructure against your own database, under the MIT license. The live demo on this page is a throwaway sandbox that expires on its own; it is not a hosted product.</p>
 
       <h3 style="margin-top:20px">Does it work with robots from more than one vendor?</h3>
-      <p>That is the point of it. Robots talk to YantraFleet over <a href="vda-5050-conformance-test.html">VDA 5050 v2.1</a>, the open vendor-neutral MQTT protocol for AMR fleet communication, so any vehicle that implements the standard can be driven from the same console. The bundled simulator models a 10-robot fleet across 3 simulated vendors to exercise that path without hardware.</p>
+      <p>That is the point of it. Robots talk to Yantrika over <a href="vda-5050-conformance-test.html">VDA 5050 v2.1</a>, the open vendor-neutral MQTT protocol for AMR fleet communication, so any vehicle that implements the standard can be driven from the same console. The bundled simulator models a 10-robot fleet across 3 simulated vendors to exercise that path without hardware.</p>
 
       <h3 style="margin-top:20px">Do I need an account or an email address to try it?</h3>
       <p>No. The <a href="#demo">Try it</a> button mints a throwaway sandbox with its own site id and a small simulated fleet, and drops you straight into the console. It collects nothing about you, and the sandbox and its data are deleted when its time is up.</p>
@@ -349,16 +352,16 @@
       <p>Nothing. It is MIT licensed open-source software. There is no paid tier, no enterprise edition, and no feature held back behind a sales call. Your costs are whatever infrastructure you choose to run it on.</p>
 
       <h3 style="margin-top:20px">How do I check whether my robots actually implement VDA 5050 correctly?</h3>
-      <p>Run <code>yantra-conform</code>, the conformance tester that ships with YantraFleet. It grades a fleet against 52 checks drawn from VDA 5050 v2.1 and writes a single HTML report naming the clause, what was expected, what your vehicle actually did, and how to fix it. It is a command-line tool that runs on your machine against your broker, and it is free — <a href="vda-5050-conformance-test.html">here is what it tests and how to run it</a>.</p>
+      <p>Run <code>yantra-conform</code>, the conformance tester that ships with Yantrika. It grades a fleet against 52 checks drawn from VDA 5050 v2.1 and writes a single HTML report naming the clause, what was expected, what your vehicle actually did, and how to fix it. It is a command-line tool that runs on your machine against your broker, and it is free — <a href="vda-5050-conformance-test.html">here is what it tests and how to run it</a>.</p>
     </div>
   </section>
 
   <section class="band">
     <div class="wrap" style="text-align:center">
-      <h2>YantraFleet is open source and self-hosted.</h2>
+      <h2>Yantrika is open source and self-hosted.</h2>
       <p class="muted" style="max-width:56ch;margin:0 auto">Clone it, run it against the bundled simulator in three commands, and see your first fleet dashboard today.</p>
       <div class="actions" style="justify-content:center;margin-top:22px">
-        <a class="btn primary" href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">View on GitHub</a>
+        <a class="btn primary" href="https://github.com/yantrika-ai/yantrika">View on GitHub</a>
         <a class="btn secondary" href="docs.html">Read the Docs</a>
         <a class="btn secondary" href="get-involved.html">Report an Issue</a>
       </div>
@@ -371,7 +374,7 @@
   <div class="wrap">
     <div class="cols">
       <div>
-        <div class="fbrand">YantraFleet</div>
+        <div class="fbrand">Yantrika</div>
         <p style="color:var(--muted);font-size:14px;max-width:38ch">Open-source, self-hosted fleet-operations platform for multi-vendor AMR fleets. MIT licensed.</p>
       </div>
       <div>
@@ -398,13 +401,13 @@
         <h4>Resources</h4>
         <ul>
           <li><a href="docs.html">Documentation</a></li>
-          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet">GitHub repository</a></li>
+          <li><a href="https://github.com/yantrika-ai/yantrika">GitHub repository</a></li>
           <li><a href="get-involved.html">Get involved / Issues</a></li>
-          <li><a href="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet/blob/main/LICENSE">License (MIT)</a></li>
+          <li><a href="https://github.com/yantrika-ai/yantrika/blob/main/LICENSE">License (MIT)</a></li>
         </ul>
       </div>
     </div>
-    <p class="fine">YantraFleet is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection.</p>
+    <p class="fine">Yantrika is open source under the MIT license. This is a static marketing site with no tracking, no accounts, and no data collection.</p>
   </div>
 </footer>
 

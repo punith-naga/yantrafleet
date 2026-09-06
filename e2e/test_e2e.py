@@ -503,6 +503,6 @@ def test_ops_stack_serves_academy() -> None:
                         time.sleep(0.3)   # static server still booting
             assert resp is not None, "academy URL never became reachable"
             assert resp.status_code == 200
-            assert "YantraFleet" in resp.text
+            assert "Yantrika" in resp.text
         finally:
             stack.stop()

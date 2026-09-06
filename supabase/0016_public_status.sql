@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0016 — PUBLIC FLEET STATUS PAGE (OPT-IN, OFF BY DEFAULT).
+-- Yantrika 0016 — PUBLIC FLEET STATUS PAGE (OPT-IN, OFF BY DEFAULT).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql AND 0012_utilization.sql —     !!

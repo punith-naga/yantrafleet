@@ -1,6 +1,6 @@
-# sarathi — YantraFleet Ops Copilot
+# sarathi — Yantrika Ops Copilot
 
-Evidence-grounded Q&A service for the YantraFleet robot fleet. FastAPI on
+Evidence-grounded Q&A service for the Yantrika robot fleet. FastAPI on
 port **8001**, one endpoint:
 
 ```

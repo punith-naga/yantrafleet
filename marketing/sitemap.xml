@@ -11,48 +11,48 @@
                     this static site; /docs/ is checked-in Markdown, and the
                     console/academy are applications behind a query string.
 
-  The host below is the placeholder https://yantrafleet.example.com and MUST
+  The host below is the placeholder https://yantrika.ai and MUST
   be replaced at deploy time along with every canonical/og:url tag - see
   marketing/README.md, which lists every file and tag that carries it.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://yantrafleet.example.com/index.html</loc>
+    <loc>https://yantrika.ai/index.html</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/vda-5050-conformance-test.html</loc>
+    <loc>https://yantrika.ai/vda-5050-conformance-test.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/features.html</loc>
+    <loc>https://yantrika.ai/features.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/about.html</loc>
+    <loc>https://yantrika.ai/about.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/security.html</loc>
+    <loc>https://yantrika.ai/security.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/docs.html</loc>
+    <loc>https://yantrika.ai/docs.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/get-involved.html</loc>
+    <loc>https://yantrika.ai/get-involved.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://yantrafleet.example.com/changelog.html</loc>
+    <loc>https://yantrika.ai/changelog.html</loc>
     <changefreq>weekly</changefreq>
     <priority>0.5</priority>
   </url>

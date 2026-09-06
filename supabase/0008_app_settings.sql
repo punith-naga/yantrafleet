@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0008 — ADMIN SETTINGS PANEL (OPT-IN).
+-- Yantrika 0008 — ADMIN SETTINGS PANEL (OPT-IN).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql — REQUIRES yf_has_role/yf_rank !!

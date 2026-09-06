@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet v0.3 migration — telemetry history for replay/analytics.
+-- Yantrika v0.3 migration — telemetry history for replay/analytics.
 -- Run after 0002_commands.sql. Idempotent.
 -- Free-tier discipline: writers downsample (default: 1 sample/robot per
 -- ~6s sim time) and a purge function keeps 72h of raw history.

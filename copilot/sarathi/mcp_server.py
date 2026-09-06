@@ -35,7 +35,7 @@ from .transport import SupabaseTransport, Transport, TransportError
 SERVER_NAME = "sarathi-fleet"
 
 SERVER_INSTRUCTIONS = (
-    "Read-only tools over the YantraFleet robot fleet (robots, alerts, "
+    "Read-only tools over the Yantrika robot fleet (robots, alerts, "
     "incidents, operator commands, telemetry history). Every result is a "
     "JSON object carrying the queried data plus a source_id citation key — "
     "quote numbers only from these payloads and cite the source_id as "

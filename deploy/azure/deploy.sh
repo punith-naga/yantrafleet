@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# YantraFleet — Azure deploy (CLI, not portal-click, by design: see
+# Yantrika — Azure deploy (CLI, not portal-click, by design: see
 # deploy/azure/README.md for why). Creates one resource group, one Ubuntu
 # VM with cloud-init custom-data (the EDIT ME'd custom-data.sh next to
 # this file), opens port 80, prints the public IP. Idempotent-ish: safe
@@ -355,7 +355,7 @@ DOMAIN_NAME_SET="$(grep -oP '^DOMAIN_NAME="\K[^"]*' custom-data.sh || true)"
 
 cat <<EOF
 
-== VM created. Cloud-init is now installing YantraFleet on first boot —
+== VM created. Cloud-init is now installing Yantrika on first boot —
    give it 3-5 minutes, then open:
 
      http://$IP/            (marketing site / landing page)

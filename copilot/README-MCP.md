@@ -2,7 +2,7 @@
 
 `sarathi.mcp_server` exposes Sarathi's Toolbox over the
 [Model Context Protocol](https://modelcontextprotocol.io), so *external*
-agents can query the YantraFleet directly — Claude Desktop, Vegaduta,
+agents can query the Yantrika directly — Claude Desktop, Vegaduta,
 Quantum Lab, or anything else that speaks MCP over stdio.
 
 ## The trinity vision: one agent core, three surfaces

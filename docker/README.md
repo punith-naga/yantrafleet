@@ -1,4 +1,4 @@
-# YantraFleet in Docker
+# Yantrika in Docker
 
 One image runs the whole loopback demo — simulator, incident detector,
 notifier, Sarathi copilot, and the web console — against the embedded

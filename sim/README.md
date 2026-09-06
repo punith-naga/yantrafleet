@@ -1,4 +1,4 @@
-# yantrasim — YantraFleet warehouse AMR simulator
+# yantrasim — Yantrika warehouse AMR simulator
 
 Simulates a fleet of **10 AMRs from 3 vendors** (`nexomotion`, `agilus`,
 `boturo`) navigating a warehouse waypoint graph (8×5 grid, 4 m spacing, two

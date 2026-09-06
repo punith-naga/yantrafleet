@@ -38,7 +38,7 @@ def _group_by_keyset(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
 
 
 class SupabaseSink:
-    """Thin PostgREST writer for the YantraFleet tables.
+    """Thin PostgREST writer for the Yantrika tables.
 
     Parameters
     ----------

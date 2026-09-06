@@ -137,13 +137,13 @@ def wait_until(cond: Callable[[], bool], desc: str, timeout: float = 10.0) -> No
 # ---------------------------------------------------------------------- tests
 
 def test_version_footer_chip_renders(page: Page, console_server: str) -> None:
-    """The sidebar footer carries the release chip 'YantraFleet v<x.y.z>',
+    """The sidebar footer carries the release chip 'Yantrika v<x.y.z>',
     backend or not (dead port → offline local sim)."""
     page.goto(f"{console_server}/index.html"
               f"?supa=http://127.0.0.1:{_dead_port()}&key=test")
     chip = page.locator("#yf-version")
     expect(chip).to_be_visible()
-    expect(chip).to_have_text(f"YantraFleet v{YF_VERSION}")
+    expect(chip).to_have_text(f"Yantrika v{YF_VERSION}")
 
 
 def test_empty_fleet_card_appears_then_clears(

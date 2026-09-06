@@ -1,4 +1,4 @@
-# YantraFleet loopback demo image.
+# Yantrika loopback demo image.
 #
 # Build from the REPO ROOT (the Dockerfile lives in docker/ but needs the
 # whole repo as its context):

@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0014 — INBOUND OPS ACTIONS / WHATSAPP (OPT-IN).
+-- Yantrika 0014 — INBOUND OPS ACTIONS / WHATSAPP (OPT-IN).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql AND 0009_demo_sandbox.sql —    !!

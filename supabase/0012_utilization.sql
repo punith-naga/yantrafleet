@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet 0012 — UTILIZATION + COST ROLLUPS (OPT-IN).
+-- Yantrika 0012 — UTILIZATION + COST ROLLUPS (OPT-IN).
 --
 -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 -- !!  RUN AFTER 0007_rbac.sql AND 0009_demo_sandbox.sql —    !!

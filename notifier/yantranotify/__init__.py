@@ -1,4 +1,4 @@
-"""yantranotify — omnichannel notifier for YantraFleet.
+"""yantranotify — omnichannel notifier for Yantrika.
 
 Polls the fleet's PostgREST tables for *unacked* ``crit``/``serious``
 alerts and newly ``Open`` incidents, then dispatches human-readable

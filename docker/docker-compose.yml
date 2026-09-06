@@ -1,4 +1,4 @@
-# YantraFleet loopback demo — single service.
+# Yantrika loopback demo — single service.
 #
 #   docker compose -f docker/docker-compose.yml up --build
 #

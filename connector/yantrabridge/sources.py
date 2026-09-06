@@ -140,3 +140,32 @@ class MqttSource:
 
     def stop(self) -> None:
         self._client.disconnect()
+
+    # -- v0.18: non-blocking lifecycle, for live broker reconnection --------
+    #
+    # connect_start()/disconnect_stop() let a caller keep its own thread
+    # free (paho runs its network I/O on a thread of its own via
+    # loop_start()) so it can watch for a live MQTT config change (see
+    # yantrabridge.mqtt_runtime.MqttConnectionManager) and swap this
+    # source out for a freshly-built one without blocking. run_forever()/
+    # stop() above are unchanged for callers that don't need that.
+
+    def connect_start(self) -> None:
+        """Connect and start paho's background network thread.
+
+        Raises synchronously if the initial TCP connect itself fails
+        (bad host, connection refused, DNS failure) — callers use that to
+        decide whether to keep an existing connection instead of
+        switching to a broken one. A broker that accepts the connection
+        but drops it later is handled by paho's own reconnect logic, not
+        surfaced here.
+        """
+        self._client.connect(self._host, self._port, keepalive=60)
+        self._client.loop_start()
+
+    def disconnect_stop(self) -> None:
+        """Counterpart to :meth:`connect_start`: stop the background
+        network thread and disconnect. Safe to call even if the client
+        never successfully connected."""
+        self._client.loop_stop()
+        self._client.disconnect()

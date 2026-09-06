@@ -1,6 +1,6 @@
 # yantraops
 
-One-command orchestrator for the YantraFleet demo stack.
+One-command orchestrator for the Yantrika demo stack.
 
 ```bash
 pip install -e ops/

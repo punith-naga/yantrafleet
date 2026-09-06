@@ -1,4 +1,4 @@
-# Deploying YantraFleet on AWS (console only — no CLI, no Terraform)
+# Deploying Yantrika on AWS (console only — no CLI, no Terraform)
 
 This guide takes you from "repo on my laptop" to "fleet console on
 `http://<public-ip>/console/`" using nothing but the AWS web console and
@@ -31,7 +31,7 @@ and writes it, so the box is disposable.
 The instance clones your repo over HTTPS at boot, so it needs to be on
 GitHub (private is fine) first.
 
-If you received YantraFleet as a **git bundle** (a single `.bundle`
+If you received Yantrika as a **git bundle** (a single `.bundle`
 file), turn it into a normal checkout first:
 
 ```bash
@@ -165,7 +165,22 @@ if you add one, add that comment — `validate.sh` checks for it.
 
 The marketing site's primary call to action is a "Try it with a live fleet"
 button that mints a throwaway sandbox with no signup. It is **off by
-default**, because it grants anonymous visitors write access. To enable it:
+default**, because it grants anonymous visitors write access.
+
+**Fast path**: read `supabase/0009_demo_sandbox.sql`'s THREAT MODEL block
+first (the script below does not replace understanding it), then run
+[`enable-demo.sh`](enable-demo.sh) from the box, as root:
+
+```bash
+sudo ./enable-demo.sh --service-role-key "<service_role key>" \
+    --db-url "postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres"
+```
+
+It runs the three steps below in order, then verifies the door and
+`/api/demo/limits` both answer. Pass `--skip-migrate` instead of `--db-url`
+if 0007/0009/0017 are already applied to your project.
+
+**What it does, spelled out** (same three steps, by hand):
 
 1. **Read `supabase/0009_demo_sandbox.sql`**, in particular its THREAT MODEL
    block, then apply it:

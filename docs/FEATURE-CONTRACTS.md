@@ -1,4 +1,4 @@
-# YantraFleet — Feature Contracts (migrations 0009–0017)
+# Yantrika — Feature Contracts (migrations 0009–0017)
 
 Every table, column, view and RPC added by `supabase/0009_*.sql` through
 `supabase/0017_*.sql`, with exact names, exact argument names and types,
@@ -832,7 +832,7 @@ the fake learns it from the JWT) before calling `inbound_perform`.
 **Trigger `yf_certificates_fill_trg` (BEFORE INSERT)** fills in whatever the
 caller left out: `level` from `score`, `verification_code` when null,
 `holder_name` from `auth.users.raw_user_meta_data->>'full_name'` / `'name'` /
-the email **local part** (never the domain) / `'YantraFleet operator'`, and
+the email **local part** (never the domain) / `'Yantrika operator'`, and
 `issued_for` from `track`. **0007's `issue_certificate(p_track, p_score,
 p_code)` keeps its exact signature and keeps working** — it now produces
 verifiable certificates with no caller change.

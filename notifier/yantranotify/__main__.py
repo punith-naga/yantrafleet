@@ -28,6 +28,8 @@ import sys
 import time
 
 import httpx
+from yantracore import start_site_sync, stop_site_sync
+from yantracore.runtime_config import TablePoller, coerce_float, resolve_value
 
 from .channels import ConsoleChannel, WebhookChannel, WhatsAppChannel
 from .formats import FORMATS, payload_for, sample_alert, sample_incident
@@ -38,6 +40,11 @@ from .source import AlertSource, resolve_config
 
 log = logging.getLogger("yantranotify")
 
+#: v0.18: non-secret runtime tunables this service reads live from
+#: public.app_config (see supabase/0018_app_config.sql).
+CONFIG_KEYS = ("NOTIFIER_INTERVAL",)
+DEFAULT_INTERVAL_S = 10.0
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -46,8 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--url", default=None, help="Supabase URL (env SUPABASE_URL)")
     p.add_argument("--key", default=None, help="Supabase key (env SUPABASE_KEY)")
-    p.add_argument("--interval", type=float, default=10.0,
-                   help="poll interval seconds (default 10)")
+    p.add_argument("--interval", type=float, default=None,
+                   help="poll interval seconds (default: live from "
+                        "public.app_config's NOTIFIER_INTERVAL, else 10)")
     p.add_argument("--once", action="store_true",
                    help="run a single poll and exit")
     p.add_argument("--dry-run", action="store_true",
@@ -92,6 +100,16 @@ def run(args: argparse.Namespace,
     url, key = resolve_config(args.url, args.key)
     settings = SettingsSync(url, key, client=client)
     settings.poll_once()  # populate before the first send, mirrors sarathi's start()
+    # v0.18: NOTIFIER_INTERVAL from public.app_config when --interval was
+    # not explicitly passed; live-refreshed every config poll thereafter.
+    # v0.18.1: YANTRA_SITE_ID gets the same live wiring (used by source.py
+    # when scoping which site's alerts/incidents to notify for) — same
+    # degrade-quietly behavior, so an admin-console site change reaches
+    # yantracore.site_id() without a restart.
+    config = TablePoller(url, key, table="app_config", keys=CONFIG_KEYS,
+                         client=client)
+    config.poll_once()
+    start_site_sync(url, key, client=client)
     source = AlertSource(args.url, args.key, client=client,
                          all_sites=getattr(args, "all_sites", False))
     notifier = Notifier(
@@ -113,13 +131,18 @@ def run(args: argparse.Namespace,
             if args.once or (max_polls is not None and polls >= max_polls):
                 return 0
             settings.maybe_poll()
-            time.sleep(args.interval)
+            config.maybe_poll()
+            interval = resolve_value(args.interval, config, "NOTIFIER_INTERVAL",
+                                     DEFAULT_INTERVAL_S, coerce_float)
+            time.sleep(interval)
     except KeyboardInterrupt:
         return 0
     finally:
         if client is None:
             source.close()
             settings.close()
+            config.close()
+        stop_site_sync()
 
 
 # -- `test` subcommand: verify a webhook in ten seconds ---------------------

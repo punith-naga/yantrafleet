@@ -1,4 +1,4 @@
-"""Shared fixtures for the YantraFleet Academy browser tests.
+"""Shared fixtures for the Yantrika Academy browser tests.
 
 Mirrors the console suite's fixture style (console/tests/test_console.py):
 the single-file academy app runs in headless Chromium (Python Playwright)

@@ -1,5 +1,5 @@
 -- ============================================================
--- YantraFleet base schema (v0.1) — robots, alerts, incidents,
+-- Yantrika base schema (v0.1) — robots, alerts, incidents,
 -- missions, fleet_meta. Run FIRST, then 0002, then 0003.
 -- Idempotent. DEMO-OPEN policies: lock down before real data.
 -- (Checked in at v0.4 so the incidents contract is enforceable —
@@ -80,4 +80,4 @@ end $$;
 
 insert into public.fleet_meta (id) values (1) on conflict (id) do nothing;
 
-select 'YantraFleet base schema ready' as result;
+select 'Yantrika base schema ready' as result;

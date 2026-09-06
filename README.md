@@ -1,4 +1,4 @@
-# YantraFleet
+# Yantrika
 
 **v0.12.1** · 10 test suites, 525 tests, all green · MIT license
 

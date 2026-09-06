@@ -61,6 +61,7 @@ class CopilotService:
         transport: Transport,
         completion_fn: CompletionFn | None = None,
         settings_sync: SettingsSync | None = None,
+        config_sync: Any = None,
     ) -> None:
         self.settings = settings
         self.transport = transport
@@ -70,13 +71,33 @@ class CopilotService:
         # _current_model() then falls back to the model resolved once at
         # process start (self.settings.model), exactly today's behaviour.
         self.settings_sync = settings_sync
+        # v0.18: live, non-secret runtime tunables (public.app_config) —
+        # a yantracore.runtime_config.TablePoller, or None. Same
+        # "None means no wiring, fall back to the value frozen at process
+        # start" shape as settings_sync above.
+        self.config_sync = config_sync
         self._toolbox_factory: Callable[[], Toolbox] = lambda: Toolbox(
             transport=self.transport, row_limit=settings.tool_row_limit
         )
         self._offline = OfflineEngine(
             self._toolbox_factory,
             low_battery_threshold=settings.low_battery_threshold,
+            low_battery_threshold_fn=self._current_low_battery_threshold,
         )
+
+    def _current_low_battery_threshold(self) -> float:
+        """Live low-battery threshold: table override (via config_sync)
+        else the value resolved once at process start
+        (self.settings.low_battery_threshold). Mirrors _current_model()'s
+        precedence for GEMINI_API_KEY below."""
+        if self.config_sync is not None:
+            raw = self.config_sync.get("SARATHI_LOW_BATTERY_THRESHOLD")
+            if raw is not None:
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    pass
+        return self.settings.low_battery_threshold
 
     # -- public API --------------------------------------------------------
 

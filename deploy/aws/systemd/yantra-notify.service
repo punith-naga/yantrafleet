@@ -1,5 +1,5 @@
 [Unit]
-Description=YantraFleet notifier (yantranotify)
+Description=Yantrika notifier (yantranotify)
 After=network-online.target
 Wants=network-online.target
 

@@ -1,4 +1,4 @@
-"""Offline tests for the YantraFleet console (console/index.html).
+"""Offline tests for the Yantrika console (console/index.html).
 
 The console is a single static HTML file, so these tests verify:
   1. structure — the file exists, is a full HTML document, one inline script;

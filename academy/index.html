@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ================================================================
-  YantraFleet ACADEMY — learn Physical AI by operating a live fleet
+  Yantrika ACADEMY — learn Physical AI by operating a live fleet
   =================================================================
   CONFIG (all optional — the academy degrades gracefully):
 
@@ -85,7 +85,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YantraFleet Academy — Learn Physical AI</title>
+<title>Yantrika Academy — Learn Physical AI</title>
+<link rel="icon" href="/assets/brand/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/brand/icon-mark.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/brand/icon-180.png">
 <style>
 /* ============ Design tokens (shared with the console — dark, ISA-101) ============ */
 :root{
@@ -293,7 +296,7 @@ input.name:focus{border-color:#2a4a75}
 <body>
 <div id="app">
 <header>
-  <div class="logo"><div class="mark">⬡</div>YantraFleet <span style="color:#9ec5f4">Academy</span></div>
+  <div class="logo"><div class="mark">⬡</div>Yantrika <span style="color:#9ec5f4">Academy</span></div>
   <span class="pill" id="pack-src">loading pack…</span>
   <div class="spacer"></div>
   <div class="chip" id="chip-backend" title="Live backend used by the practical Verify checks"><span class="dot" id="be-dot" style="background:var(--muted)"></span><span id="be-lbl">backend: probing…</span></div>
@@ -367,7 +370,7 @@ input.name:focus{border-color:#2a4a75}
 <script>
 "use strict";
 /* ================================================================
-   YantraFleet Academy — lesson engine + live-backend practicals +
+   Yantrika Academy — lesson engine + live-backend practicals +
    checkride/certificate + pluggable tutor (window.YFTutor).
    Single file, no build step. Content schema: see academy/README.md.
    ================================================================ */
@@ -569,7 +572,7 @@ const EMBEDDED_PACK={
  ],
  lessons:[
   {id:'pai-101',title:'What is Physical AI?',minutes:8,track:'trk-operator',
-   body_html:'<p><b>Physical AI</b> is software that senses, decides and acts in the real world — warehouse robots, delivery drones, inspection rovers. Unlike a chatbot, a physical agent pays for every mistake in bumped racks, blocked aisles and lost throughput.</p><p>A fleet like YantraFleet’s stitches three loops together: <b>perception</b> (LiDAR, cameras, wheel odometry fused into a position estimate), <b>planning</b> (task allocation and path routing across the fleet) and <b>actuation</b> (motor control with safety interlocks). The operator console you’ll use sits above all three, turning raw telemetry into decisions a human can supervise.</p><ul><li>Robots publish status, battery and position every few seconds.</li><li>Alerts fire when a robot’s confidence or health degrades.</li><li>Operators acknowledge alerts and approve risky commands.</li></ul>',
+   body_html:'<p><b>Physical AI</b> is software that senses, decides and acts in the real world — warehouse robots, delivery drones, inspection rovers. Unlike a chatbot, a physical agent pays for every mistake in bumped racks, blocked aisles and lost throughput.</p><p>A fleet like Yantrika’s stitches three loops together: <b>perception</b> (LiDAR, cameras, wheel odometry fused into a position estimate), <b>planning</b> (task allocation and path routing across the fleet) and <b>actuation</b> (motor control with safety interlocks). The operator console you’ll use sits above all three, turning raw telemetry into decisions a human can supervise.</p><ul><li>Robots publish status, battery and position every few seconds.</li><li>Alerts fire when a robot’s confidence or health degrades.</li><li>Operators acknowledge alerts and approve risky commands.</li></ul>',
    key_points:[
     'Physical AI systems close a sense → decide → act loop in the real world, where errors have physical cost.',
     'Localization fuses LiDAR, cameras and odometry into a position estimate with a confidence score.',
@@ -613,7 +616,7 @@ const EMBEDDED_PACK={
    tutor_context:'Telemetry triage: handle faults and e-stops first because a stopped robot blocks aisles and forces reroutes, then low battery robots, then degradations. Battery below thirty percent should send a robot to a charger. Motor temperature and vibration trends are predictive maintenance signals: rising vibration sigma with elevated temperature means bearing or drivetrain wear with days of remaining useful life. A localization fault means the robot lost position confidence; check the map for where it stopped, check whether reflectors or racks moved nearby, re-localize from a known anchor, and clear the aisle. Escalate to an incident when throughput drops or multiple robots reroute.'},
 
   {id:'pai-103',title:'Humans in the Loop: Commands & Approvals',minutes:7,track:'trk-operator',
-   body_html:'<p>Autonomy is a dial, not a switch. YantraFleet routes risky robot commands — <code>pause</code>, <code>resume</code>, <code>charge</code>, <code>estop</code> — through a <b>command queue with human approval</b>. The console writes a <i>pending</i> command row; a supervisor approves or rejects it; only then does the robot adapter execute it and stamp the result.</p><p>This gives you an audit trail for free: every command records who requested it, who decided, and what happened. When something goes wrong at 2 a.m., the audit view answers "who told the robot to do that?" in one query.</p>',
+   body_html:'<p>Autonomy is a dial, not a switch. Yantrika routes risky robot commands — <code>pause</code>, <code>resume</code>, <code>charge</code>, <code>estop</code> — through a <b>command queue with human approval</b>. The console writes a <i>pending</i> command row; a supervisor approves or rejects it; only then does the robot adapter execute it and stamp the result.</p><p>This gives you an audit trail for free: every command records who requested it, who decided, and what happened. When something goes wrong at 2 a.m., the audit view answers "who told the robot to do that?" in one query.</p>',
    key_points:[
     'Risky commands go through a pending → approved/rejected → executed pipeline, never straight to the robot.',
     'Every command row records requester, decider and outcome — an audit trail by construction.',
@@ -799,7 +802,7 @@ window.YFTutor={
     }
     if(this._tier==='sarathi'){
       try{
-        const ctx=lessonCtx?`Context — YantraFleet Academy lesson "${lessonCtx.title}": ${lessonCtx.tutor_context||''}\n\nLearner question: `:'';
+        const ctx=lessonCtx?`Context — Yantrika Academy lesson "${lessonCtx.title}": ${lessonCtx.tutor_context||''}\n\nLearner question: `:'';
         const c=new AbortController();const t=setTimeout(()=>c.abort(),4000);
         try{
           const r=await fetch(this.SARATHI_URL+'/ask',{method:'POST',signal:c.signal,
@@ -959,7 +962,7 @@ const Rail={
       <div class="note">${Auth.signedIn()
         ?'progress syncs to '+esc(Auth.email())+' (local copy kept)'
         :'progress lives in this browser (localStorage)'}</div>
-      <div class="note"><span class="pill" id="yf-version" title="YantraFleet release — matches core/yantracore/version.py">YantraFleet v${YF_VERSION}</span></div>
+      <div class="note"><span class="pill" id="yf-version" title="Yantrika release — matches core/yantracore/version.py">Yantrika v${YF_VERSION}</span></div>
     </div>`;
     $('#rail-list').innerHTML=h;
     $$('#rail button.lsn[data-lesson]').forEach(b=>b.addEventListener('click',()=>Lesson.open(b.dataset.lesson)));
@@ -1097,7 +1100,7 @@ const Lesson={
 const LessonPrint={
   html(l){
     const track=Content.pack.tracks.find(t=>(t.lesson_ids||[]).includes(l.id));
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(l.title)} — YantraFleet Academy</title><style>
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(l.title)} — Yantrika Academy</title><style>
       body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#1d1d1b;background:#fff;margin:0;font-size:13.5px;line-height:1.6}
       .page{max-width:760px;margin:0 auto;padding:34px 42px}
       h1{font-size:22px;margin:0 0 2px}
@@ -1116,15 +1119,15 @@ const LessonPrint={
     </style></head><body>
     <div class="toolbar no-print">
       <button id="pl-print">⎙ Print / Save as PDF</button>
-      <span class="hint">YantraFleet Academy · lesson handout</span>
+      <span class="hint">Yantrika Academy · lesson handout</span>
     </div>
     <div class="page">
       <h1 id="pl-title">${esc(l.title)}</h1>
-      <div class="meta">${track?esc(track.title)+' · ':''}${l.minutes||'–'} min read · YantraFleet Academy</div>
+      <div class="meta">${track?esc(track.title)+' · ':''}${l.minutes||'–'} min read · Yantrika Academy</div>
       <div class="body" id="pl-body">${sanitize(l.body_html)}</div>
       ${l.key_points&&l.key_points.length?`<h2>Key points</h2><ul class="kps">${
         l.key_points.map(k=>`<li>${esc(k)}</li>`).join('')}</ul>`:''}
-      <footer><span>Generated by YantraFleet Academy v${YF_VERSION}</span><span>${esc(new Date().toISOString().slice(0,10))}</span></footer>
+      <footer><span>Generated by Yantrika Academy v${YF_VERSION}</span><span>${esc(new Date().toISOString().slice(0,10))}</span></footer>
     </div></body></html>`;
   },
   open(l){
@@ -1306,7 +1309,7 @@ const Cert={
     show('cert');
     $('#v-cert').innerHTML=`
       <div class="cert" id="cert">
-        <div class="brand"><span class="mark">⬡</span>YantraFleet Academy</div>
+        <div class="brand"><span class="mark">⬡</span>Yantrika Academy</div>
         <h2>Certificate of Completion</h2>
         <div class="sub2">${esc(d.checkride)} — practical checkride, verified against a live fleet backend</div>
         <div class="name" id="cert-holder">${esc(d.name)}</div>
@@ -1320,7 +1323,7 @@ const Cert={
         </div>
         <div class="code">Verification code <b id="cert-code">${esc(d.code)}</b> — deterministic hash of name + date + score; recompute to verify.</div>
         ${d.recorded?`<div class="code" id="cert-recorded">✓ Recorded to your account — <b>${esc(d.recorded)}</b></div>`:''}
-        <div class="foot">Demo credential issued client-side by the YantraFleet Academy sample app. Unsigned — not a claim of accreditation.</div>
+        <div class="foot">Demo credential issued client-side by the Yantrika Academy sample app. Unsigned — not a claim of accreditation.</div>
       </div>
       <div class="cert-actions no-print">
         <button class="btn primary" id="btn-print">⎙ Print certificate</button>
@@ -1343,7 +1346,7 @@ const Cert={
       type:['VerifiableCredential','OpenBadgeCredential'],
       name:d.checkride,
       issuer:{id:'https://yantrafleet.example/academy',type:['Profile'],
-        name:'YantraFleet Academy (demo)',description:'Sample learning app — demo issuer, not accredited'},
+        name:'Yantrika Academy (demo)',description:'Sample learning app — demo issuer, not accredited'},
       validFrom:d.date+'T00:00:00Z',
       credentialSubject:{
         type:['AchievementSubject'],
@@ -1639,7 +1642,7 @@ const WebLLM={
       ready:()=>!!self.engine,
       async ask(question,lessonCtx,onToken){
         try{
-          const sys='You are Guru, the YantraFleet Academy tutor. Answer ONLY from the LESSON section; if not covered, say you do not know and suggest asking Sarathi.\n\nLESSON:\n'+self._lessonText(lessonCtx);
+          const sys='You are Guru, the Yantrika Academy tutor. Answer ONLY from the LESSON section; if not covered, say you do not know and suggest asking Sarathi.\n\nLESSON:\n'+self._lessonText(lessonCtx);
           const out=await self.engine.chat.completions.create({
             messages:[{role:'system',content:sys},{role:'user',content:String(question)}],
             temperature:0.2,stream:true});
@@ -1663,7 +1666,7 @@ const WebLLM={
         try{
           const rub=(Array.isArray(rubric)?rubric:[]).map(String);
           const q=lessonCtx&&lessonCtx.practical&&lessonCtx.practical.verify?String(lessonCtx.practical.verify.prompt||''):'';
-          const sys='You are Guru, grading a learner\'s free-text answer for the YantraFleet Academy. '+
+          const sys='You are Guru, grading a learner\'s free-text answer for the Yantrika Academy. '+
             'Respond with ONLY a JSON object: {"score": <number 0..1>, "hits": [<rubric strings the answer covers>], "feedback": "<2-3 sentences of coaching>"}. '+
             'Example — rubric: ["Faults first","Check battery"], answer: "I would triage the fault before anything, battery can wait." -> '+
             '{"score":0.5,"hits":["Faults first"],"feedback":"Good triage order. You skipped the battery check: low cells still need a charger plan."}';

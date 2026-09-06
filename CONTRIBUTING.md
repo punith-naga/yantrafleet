@@ -1,4 +1,4 @@
-# Contributing to YantraFleet
+# Contributing to Yantrika
 
 ## Setup
 

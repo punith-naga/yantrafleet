@@ -1,4 +1,4 @@
-"""Single source of the YantraFleet RELEASE version.
+"""Single source of the Yantrika RELEASE version.
 
 This is the fleet-wide release number (the git tag / CHANGELOG version),
 distinct from the per-package ``pyproject.toml`` versions. Release commits

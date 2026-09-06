@@ -22,12 +22,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_version_flag_prints_release() -> None:
-    """`python -m yantraops --version` prints 'YantraFleet <version>'."""
+    """`python -m yantraops --version` prints 'Yantrika <version>'."""
     proc = subprocess.run(
         [sys.executable, "-m", "yantraops", "--version"],
         capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr[-500:]
-    assert proc.stdout.strip() == f"YantraFleet {YF_VERSION}"
+    assert proc.stdout.strip() == f"Yantrika {YF_VERSION}"
 
 
 def test_version_comes_from_yantracore() -> None:
@@ -75,7 +75,7 @@ class _FakeProc:
 
 
 def test_banner_header_carries_version(tmp_path, monkeypatch) -> None:
-    """The up banner's header line reads 'YantraFleet <version> up — mode: …'."""
+    """The up banner's header line reads 'Yantrika <version> up — mode: …'."""
     from yantraops import orchestrator as orch
 
     monkeypatch.setattr(orch.subprocess, "Popen",
@@ -86,7 +86,7 @@ def test_banner_header_carries_version(tmp_path, monkeypatch) -> None:
     try:
         stack.start()
         banner = stack.banner()
-        assert f"YantraFleet {YF_VERSION} up — mode: loopback" in banner
+        assert f"Yantrika {YF_VERSION} up — mode: loopback" in banner
     finally:
         stack.stop()
 
@@ -98,5 +98,5 @@ def test_status_output_carries_version(tmp_path, capsys) -> None:
     rc = run_status(tmp_path / "missing-state.json")
     assert rc == 1                       # no state file → exit 1, as before
     out = capsys.readouterr().out
-    assert f"YantraFleet {YF_VERSION}" in out
+    assert f"Yantrika {YF_VERSION}" in out
     assert "no state file" in out

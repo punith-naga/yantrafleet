@@ -21,11 +21,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from yantracore.runtime_config import TablePoller
+
 from . import __version__
 from .config import Settings, load_settings
 from .service import CopilotService
 from .settings_sync import SettingsSync
 from .transport import SupabaseTransport, Transport
+
+#: v0.18: non-secret runtime tunables this service reads live from
+#: public.app_config (see supabase/0018_app_config.sql).
+CONFIG_KEYS = ("SARATHI_LOW_BATTERY_THRESHOLD",)
 
 
 class AskRequest(BaseModel):
@@ -51,17 +57,20 @@ def create_app(
     settings: Settings | None = None,
     completion_fn=None,
     settings_sync: SettingsSync | None = None,
+    config_sync: TablePoller | None = None,
 ) -> FastAPI:
     """App factory. Tests pass a StaticTransport (and optionally a fake
     ``completion_fn`` for the LLM seam); production uses Supabase +
     litellm.
 
-    ``settings_sync`` is constructed but never ``.start()``-ed here — see
-    the module-level entrypoint at the bottom of this file, which is the
-    only place that starts the background poller. Tests that don't pass
-    one get a real-but-never-started ``SettingsSync`` whose overrides stay
-    empty forever, so ``.get(key)`` is exactly ``os.environ.get(key)`` —
-    identical to today's behaviour, no test changes required.
+    ``settings_sync``/``config_sync`` are constructed but never
+    ``.start()``-ed here — see the module-level entrypoint at the bottom
+    of this file, which is the only place that starts the background
+    pollers. Tests that don't pass one get a real-but-never-started
+    object whose overrides stay empty forever, so ``.get(key)`` degrades
+    to ``os.environ.get(key)`` (settings_sync) or the hardcoded default
+    (config_sync) — identical to today's behaviour, no test changes
+    required.
     """
     settings = settings or load_settings()
     transport = transport or SupabaseTransport(
@@ -70,13 +79,19 @@ def create_app(
     settings_sync = settings_sync or SettingsSync(
         settings.supabase_url, settings.supabase_key
     )
+    config_sync = config_sync or TablePoller(
+        settings.supabase_url, settings.supabase_key,
+        table="app_config", keys=CONFIG_KEYS,
+    )
     service = CopilotService(
-        settings, transport, completion_fn=completion_fn, settings_sync=settings_sync
+        settings, transport, completion_fn=completion_fn,
+        settings_sync=settings_sync, config_sync=config_sync,
     )
 
     app = FastAPI(title="sarathi", version=__version__)
     app.state.service = service
     app.state.settings_sync = settings_sync
+    app.state.config_sync = config_sync
 
     # file:// pages send Origin: null — allow_origins=["*"] covers it as long
     # as credentials stay disabled (they do; the anon key is baked in).
@@ -141,8 +156,10 @@ def create_app(
 
 
 # Default ASGI entrypoint for `uvicorn sarathi.app:app --port 8001`. Only
-# this module-level production entrypoint starts the poller — create_app()
+# this module-level production entrypoint starts the pollers — create_app()
 # itself never does, so every test that calls create_app() directly keeps
-# getting an inert, never-started SettingsSync (see create_app's docstring).
+# getting inert, never-started SettingsSync/TablePoller objects (see
+# create_app's docstring).
 app = create_app()
 app.state.settings_sync.start()
+app.state.config_sync.start()

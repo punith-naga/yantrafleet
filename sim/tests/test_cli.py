@@ -7,7 +7,10 @@ from yantrasim.__main__ import build_parser, main
 def test_defaults_select_supabase():
     args = build_parser().parse_args([])
     assert not args.mqtt and not args.stdout
-    assert args.interval == 2.0
+    # v0.18: None (not explicitly passed) so main() can prefer a live
+    # public.app_config value over the hardcoded default (2.0) — see
+    # yantrasim.__main__.DEFAULT_INTERVAL_S.
+    assert args.interval is None
     assert args.seed == 42
 
 

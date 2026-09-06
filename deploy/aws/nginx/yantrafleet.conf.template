@@ -1,4 +1,4 @@
-# YantraFleet nginx site — TEMPLATE.
+# Yantrika nginx site — TEMPLATE.
 #
 # ${SUPABASE_URL} / ${SUPABASE_KEY} / ${YANTRA_SITE_ID} / ${NGINX_SERVER_NAME}
 # are substituted by envsubst during install (see user-data.sh step 7);

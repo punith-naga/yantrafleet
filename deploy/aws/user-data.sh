@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# YantraFleet - EC2 user-data for Ubuntu 24.04 LTS.
+# Yantrika - EC2 user-data for Ubuntu 24.04 LTS.
 #
 # Paste this whole file into the AWS console:
 #   EC2 -> Launch instance -> Advanced details -> User data
@@ -20,7 +20,7 @@
 #    repo scope "Contents: read-only") and embed it in the URL:
 #      REPO_URL="https://<YOUR_TOKEN>@github.com/<you>/yantrafleet.git"
 #    For a public repo the plain https URL is enough.
-REPO_URL="https://github.com/YOUR_GITHUB_USERNAME/yantrafleet.git"
+REPO_URL="https://github.com/yantrika-ai/yantrika.git"
 
 # 2) Your Supabase project (dashboard -> Settings -> API). Use the
 #    *publishable/anon* key here - it is embedded in the console URL and

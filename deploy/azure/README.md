@@ -1,4 +1,4 @@
-# Deploying YantraFleet on Azure
+# Deploying Yantrika on Azure
 
 Unlike the AWS kit (console-click, on purpose, because that's how that
 guide was designed), this one is a single script you run yourself after
@@ -128,7 +128,19 @@ if you add one, add that comment — both `validate.sh` scripts check for it.
 
 The marketing site's primary call to action is a "Try it with a live fleet"
 button that mints a throwaway sandbox with no signup. It is **off by
-default**, because it grants anonymous visitors write access. To enable it:
+default**, because it grants anonymous visitors write access.
+
+**Fast path**: read `supabase/0009_demo_sandbox.sql`'s THREAT MODEL block
+first, then run [`../aws/enable-demo.sh`](../aws/enable-demo.sh) from the
+box, as root — it's shared with the AWS kit since both use the same
+`/opt/yantrafleet` layout and systemd units:
+
+```bash
+sudo /opt/yantrafleet/deploy/aws/enable-demo.sh --service-role-key "<service_role key>" \
+    --db-url "postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres"
+```
+
+**What it does, spelled out** (same three steps, by hand):
 
 1. **Read `supabase/0009_demo_sandbox.sql`**, in particular its THREAT MODEL
    block, then apply it:
