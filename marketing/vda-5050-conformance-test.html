@@ -12,7 +12,7 @@
   PLACEHOLDERS TO REPLACE BEFORE GOING LIVE (see marketing/README.md
   for the complete per-file list):
     - https://yantrika.ai  → your real domain
-    - https://github.com/yantrika-ai/yantrika → your repo
+    - https://github.com/punith-naga/yantrafleet → your repo
 
   SOURCING. The 52-row catalogue table below is a rendering of the
   tool's own rule set, i.e. the output of `yantra-conform checks
@@ -63,7 +63,7 @@
       "operatingSystem": "Linux, macOS, Windows (Python 3.10+)",
       "license": "https://opensource.org/licenses/MIT",
       "isAccessibleForFree": true,
-      "codeRepository": "https://github.com/yantrika-ai/yantrika",
+      "codeRepository": "https://github.com/punith-naga/yantrafleet",
       "url": "https://yantrika.ai/vda-5050-conformance-test.html",
       "description": "A free, open-source command-line conformance tester for VDA 5050 v2.1. It observes an AMR fleet over MQTT, sends the standard commands the specification requires a vehicle to answer, and produces a graded HTML report across 52 checks naming the clause, the expectation, the observed behaviour and the fix.",
       "softwareRequirements": "Python 3.10 or newer; paho-mqtt only to talk to a broker",
@@ -152,7 +152,7 @@
       <a href="get-involved.html">Get Involved</a>
       <a href="changelog.html">Changelog</a>
       <a class="signin" href="/console/">Sign in</a>
-      <a class="cta" href="https://github.com/yantrika-ai/yantrika">View on GitHub</a>
+      <a class="cta" href="https://github.com/punith-naga/yantrafleet">View on GitHub</a>
     </nav>
   </div>
 </header>
@@ -168,7 +168,7 @@
       <div class="actions">
         <a class="btn primary" href="#run">How to run it &rarr;</a>
         <a class="btn secondary" href="#checks">See all 52 checks</a>
-        <a class="btn secondary" href="https://github.com/yantrika-ai/yantrika/tree/main/tools/conformance">Source on GitHub</a>
+        <a class="btn secondary" href="https://github.com/punith-naga/yantrafleet/tree/main/tools/conformance">Source on GitHub</a>
       </div>
 
       <p class="proofline"><strong>It is a command-line tool, not a web service.</strong> That is a deliberate choice, explained <a href="#no-web-version">further down</a> &mdash; a browser physically cannot open a raw MQTT connection, and any site that claims otherwise is asking you for broker credentials.</p>
@@ -689,8 +689,8 @@ HTML report: report.html</code></pre>
 
       <h3 style="margin-top:22px">Install</h3>
       <p>Python 3.10 or newer, and nothing else. The <code>[mqtt]</code> extra pulls in <code>paho-mqtt</code>, which is needed <em>only</em> to talk to a broker &mdash; the rule set, replaying a capture and rendering a report are pure standard library.</p>
-      <pre><code><span class="dollar">$</span> git clone https://github.com/yantrika-ai/yantrika.git
-<span class="dollar">$</span> cd yantrika
+      <pre><code><span class="dollar">$</span> git clone https://github.com/punith-naga/yantrafleet.git
+<span class="dollar">$</span> cd yantrafleet
 <span class="dollar">$</span> pip install -e "tools/conformance[mqtt]"
 
 <span class="dollar">$</span> yantra-conform --version
@@ -836,7 +836,7 @@ HTML report: report.html</code></pre>
       <h2 id="faq">Questions people actually ask</h2>
 
       <h3 style="margin-top:24px">Is it really free?</h3>
-      <p>Yes. MIT-licensed open-source software that ships inside the <a href="https://github.com/yantrika-ai/yantrika">Yantrika repository</a>. No account, no trial, no quota, no watermark on the report, no sales call. You can read every rule it applies in <code>tools/conformance/yantraconform/checks.py</code>.</p>
+      <p>Yes. MIT-licensed open-source software that ships inside the <a href="https://github.com/punith-naga/yantrafleet">Yantrika repository</a>. No account, no trial, no quota, no watermark on the report, no sales call. You can read every rule it applies in <code>tools/conformance/yantraconform/checks.py</code>.</p>
 
       <h3 style="margin-top:20px">Can I test my robots from a browser?</h3>
       <p>No, and no honest tool can &mdash; see <a href="#no-web-version">above</a>. A browser cannot open a raw MQTT connection.</p>
@@ -869,7 +869,7 @@ HTML report: report.html</code></pre>
       <h2>Grade your fleet in about a minute.</h2>
       <p class="muted" style="max-width:58ch;margin:0 auto">Clone the repo, install the tester, point it at your broker. If you would rather see the fleet-management side first, the live demo needs no signup either.</p>
       <div class="actions" style="justify-content:center;margin-top:22px">
-        <a class="btn primary" href="https://github.com/yantrika-ai/yantrika/tree/main/tools/conformance">Get the tester</a>
+        <a class="btn primary" href="https://github.com/punith-naga/yantrafleet/tree/main/tools/conformance">Get the tester</a>
         <a class="btn secondary" href="index.html#demo">Try the live fleet demo</a>
         <a class="btn secondary" href="features.html">See what Yantrika does</a>
       </div>
@@ -909,9 +909,9 @@ HTML report: report.html</code></pre>
         <h4>Resources</h4>
         <ul>
           <li><a href="docs.html">Documentation</a></li>
-          <li><a href="https://github.com/yantrika-ai/yantrika">GitHub repository</a></li>
+          <li><a href="https://github.com/punith-naga/yantrafleet">GitHub repository</a></li>
           <li><a href="get-involved.html">Get involved / Issues</a></li>
-          <li><a href="https://github.com/yantrika-ai/yantrika/blob/main/LICENSE">License (MIT)</a></li>
+          <li><a href="https://github.com/punith-naga/yantrafleet/blob/main/LICENSE">License (MIT)</a></li>
         </ul>
       </div>
     </div>

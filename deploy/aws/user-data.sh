@@ -20,7 +20,7 @@
 #    repo scope "Contents: read-only") and embed it in the URL:
 #      REPO_URL="https://<YOUR_TOKEN>@github.com/<you>/yantrafleet.git"
 #    For a public repo the plain https URL is enough.
-REPO_URL="https://github.com/yantrika-ai/yantrika.git"
+REPO_URL="https://github.com/punith-naga/yantrafleet.git"
 
 # 2) Your Supabase project (dashboard -> Settings -> API). Use the
 #    *publishable/anon* key here - it is embedded in the console URL and

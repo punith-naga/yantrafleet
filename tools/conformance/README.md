@@ -34,8 +34,8 @@ Every check names the clause it comes from and tells you what to change.
 Python 3.10 or newer. Nothing else.
 
 ```bash
-git clone https://github.com/yantrika-ai/yantrika.git
-cd yantrika
+git clone https://github.com/punith-naga/yantrafleet.git
+cd yantrafleet
 pip install -e "tools/conformance[mqtt]"
 ```
 

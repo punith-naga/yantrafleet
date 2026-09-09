@@ -36,7 +36,7 @@
 #    fetches it back at boot. See supabase/README.md's "Going to production"
 #    note -- REPO_URL is credential-shaped exactly like the others once a
 #    private repo is in play, it just wasn't originally treated as one.
-REPO_URL="https://github.com/yantrika-ai/yantrika.git"
+REPO_URL="https://github.com/punith-naga/yantrafleet.git"
 
 # 2) Your Supabase project (dashboard -> Settings -> API). Use the
 #    *publishable/anon* key here - it is embedded in the console URL and

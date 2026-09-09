@@ -128,7 +128,7 @@
       note.innerHTML = "";
       note.appendChild(document.createTextNode(message + " "));
       var link = document.createElement("a");
-      link.href = "https://github.com/yantrika-ai/yantrika";
+      link.href = "https://github.com/punith-naga/yantrafleet";
       link.textContent = "Run the whole thing locally in three commands";
       note.appendChild(link);
       note.appendChild(document.createTextNode(" — it needs no account either."));

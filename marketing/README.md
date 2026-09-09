@@ -130,7 +130,7 @@ site URL into every report it generates:
 there as well or every report you hand a vendor links to somebody else's
 site.
 
-### 2. The GitHub repository URL — `https://github.com/yantrika-ai/yantrika`
+### 2. The GitHub repository URL — `https://github.com/punith-naga/yantrafleet`
 
 Same placeholder convention also used in `deploy/aws/user-data.sh` and
 `deploy/azure/custom-data.sh` (their `REPO_URL=` default), both of which have
@@ -148,7 +148,7 @@ If either value ever needs to change again, from `marketing/`:
 
 ```bash
 grep -rl 'https://yantrika.ai' . | xargs sed -i 's#https://yantrika\.ai#https://YOUR-NEW-DOMAIN#g'
-grep -rl 'github.com/yantrika-ai/yantrika' . | xargs sed -i 's#github\.com/yantrika-ai/yantrika#github.com/YOUR-ORG/YOUR-REPO#g'
+grep -rl 'github.com/punith-naga/yantrafleet' . | xargs sed -i 's#github\.com/punith-naga/yantrafleet#github.com/YOUR-ORG/YOUR-REPO#g'
 
 # and, if the domain changes, the links inside every generated conformance report:
 sed -i 's#https://yantrika\.ai#https://YOUR-NEW-DOMAIN#g' \
